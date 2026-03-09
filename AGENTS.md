@@ -82,6 +82,7 @@ This file captures the important operating rules for agents working in this repo
 - Run `npm test` after changing shared contracts, daemon behavior, or UI logic.
 - If changing installer or runtime packaging behavior, also run `npm run build:mac-installer`.
 - If changing local startup behavior, verify `npm start` still waits for the daemon and UI before reporting readiness.
+- If changing local startup behavior, preserve clear step-by-step console output so `npm start` shows exactly what it is doing and what it is waiting for.
 - If changing local startup or teardown behavior, verify `npm stop` removes the managed dev processes and clears `.data/dev-processes.json`.
 - Prefer validating real OpenClaw status/health behavior through the adapter when possible.
 

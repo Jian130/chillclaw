@@ -125,6 +125,27 @@ export interface SetupStepResult {
   detail: string;
 }
 
+export type SupportedChannelId = "telegram" | "whatsapp" | "wechat";
+
+export interface ChannelSetupState {
+  id: SupportedChannelId;
+  title: string;
+  officialSupport: boolean;
+  status: "not-started" | "ready" | "in-progress" | "awaiting-pairing" | "completed" | "failed";
+  summary: string;
+  detail: string;
+  lastUpdatedAt?: string;
+  logs?: string[];
+}
+
+export interface ChannelSetupOverview {
+  baseOnboardingCompleted: boolean;
+  channels: ChannelSetupState[];
+  nextChannelId?: SupportedChannelId;
+  gatewayStarted: boolean;
+  gatewaySummary: string;
+}
+
 export interface ProductOverview {
   appName: string;
   appVersion: string;
@@ -135,6 +156,7 @@ export interface ProductOverview {
   installSpec: EngineInstallSpec;
   capabilities: EngineCapabilities;
   installChecks: InstallCheck[];
+  channelSetup: ChannelSetupOverview;
   profiles: UserProfile[];
   templates: TaskTemplate[];
   healthChecks: HealthCheckResult[];
@@ -188,6 +210,31 @@ export interface AppControlResponse {
   action: "stop-app" | "uninstall-app";
   status: "completed" | "failed";
   message: string;
+}
+
+export interface TelegramSetupRequest {
+  token: string;
+  accountName?: string;
+}
+
+export interface PairingApprovalRequest {
+  code: string;
+}
+
+export interface WechatSetupRequest {
+  pluginSpec?: string;
+  corpId: string;
+  agentId: string;
+  secret: string;
+  token: string;
+  encodingAesKey: string;
+}
+
+export interface ChannelActionResponse {
+  status: "completed" | "failed";
+  message: string;
+  channel?: ChannelSetupState;
+  overview: ProductOverview;
 }
 
 export const defaultProfiles: UserProfile[] = [
@@ -327,6 +374,38 @@ export function createDefaultProductOverview(): ProductOverview {
         detail: "Needed only when you explicitly select files or folders."
       }
     ],
+    channelSetup: {
+      baseOnboardingCompleted: false,
+      channels: [
+        {
+          id: "telegram",
+          title: "Telegram",
+          officialSupport: true,
+          status: "not-started",
+          summary: "Telegram setup has not started yet.",
+          detail: "SlackClaw will add the bot token, then help approve the first pairing code."
+        },
+        {
+          id: "whatsapp",
+          title: "WhatsApp",
+          officialSupport: true,
+          status: "not-started",
+          summary: "WhatsApp setup has not started yet.",
+          detail: "SlackClaw will start the login flow, then wait for pairing approval."
+        },
+        {
+          id: "wechat",
+          title: "WeChat workaround",
+          officialSupport: false,
+          status: "not-started",
+          summary: "WeChat requires a workaround plugin path.",
+          detail: "SlackClaw can install and enable a community plugin path, but this is not official OpenClaw support."
+        }
+      ],
+      nextChannelId: "telegram",
+      gatewayStarted: false,
+      gatewaySummary: "Complete channel setup, then restart the gateway."
+    },
     profiles: defaultProfiles,
     templates: defaultTemplates,
     healthChecks: [

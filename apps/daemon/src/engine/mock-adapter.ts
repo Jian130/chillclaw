@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  ChannelSetupState,
   EngineCapabilities,
   EngineInstallSpec,
   EngineStatus,
@@ -8,8 +9,11 @@ import type {
   EngineTaskResult,
   HealthCheckResult,
   InstallResponse,
+  PairingApprovalRequest,
   RecoveryAction,
-  RecoveryRunResponse
+  RecoveryRunResponse,
+  TelegramSetupRequest,
+  WechatSetupRequest
 } from "@slackclaw/contracts";
 
 import type { EngineAdapter } from "./adapter.js";
@@ -36,14 +40,44 @@ export class MockAdapter implements EngineAdapter {
 
   private installed = true;
   private profileId = "email-admin";
+  private readonly channels: Record<string, ChannelSetupState> = {
+    telegram: {
+      id: "telegram",
+      title: "Telegram",
+      officialSupport: true,
+      status: "ready",
+      summary: "Mock Telegram setup is ready.",
+      detail: "Mock mode simulates Telegram token setup and pairing approval."
+    },
+    whatsapp: {
+      id: "whatsapp",
+      title: "WhatsApp",
+      officialSupport: true,
+      status: "ready",
+      summary: "Mock WhatsApp setup is ready.",
+      detail: "Mock mode simulates WhatsApp login and pairing approval."
+    },
+    wechat: {
+      id: "wechat",
+      title: "WeChat workaround",
+      officialSupport: false,
+      status: "ready",
+      summary: "Mock WeChat workaround is ready.",
+      detail: "Mock mode simulates a community plugin workaround."
+    }
+  };
 
   async install(_autoConfigure = true, _options?: { forceLocal?: boolean }): Promise<InstallResponse> {
     this.installed = true;
     return {
       status: "already-installed",
-      message: "Mock adapter is ready for SlackClaw UI development.",
+      message: "Mock OpenClaw runtime is deployed and ready for onboarding.",
       engineStatus: await this.status()
     };
+  }
+
+  async onboard(profileId: string): Promise<void> {
+    this.profileId = profileId;
   }
 
   async configure(profileId: string): Promise<void> {
@@ -126,6 +160,62 @@ export class MockAdapter implements EngineAdapter {
         null,
         2
       )
+    };
+  }
+
+  async getChannelState(channelId: "telegram" | "whatsapp" | "wechat"): Promise<ChannelSetupState> {
+    return this.channels[channelId];
+  }
+
+  async configureTelegram(_request: TelegramSetupRequest): Promise<{ message: string; channel: ChannelSetupState }> {
+    this.channels.telegram = {
+      ...this.channels.telegram,
+      status: "awaiting-pairing",
+      summary: "Mock Telegram token saved.",
+      detail: "Send a message to the bot, then approve the pairing code."
+    };
+    return { message: "Mock Telegram token saved.", channel: this.channels.telegram };
+  }
+
+  async startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
+    this.channels.whatsapp = {
+      ...this.channels.whatsapp,
+      status: "awaiting-pairing",
+      summary: "Mock WhatsApp login started.",
+      detail: "Pretend a QR code was shown, then approve the pairing code."
+    };
+    return { message: "Mock WhatsApp login started.", channel: this.channels.whatsapp };
+  }
+
+  async approvePairing(
+    channelId: "telegram" | "whatsapp",
+    _request: PairingApprovalRequest
+  ): Promise<{ message: string; channel: ChannelSetupState }> {
+    this.channels[channelId] = {
+      ...this.channels[channelId],
+      status: "completed",
+      summary: `Mock ${this.channels[channelId].title} pairing approved.`,
+      detail: "Mock mode marked this channel as completed."
+    };
+    return { message: "Mock pairing approved.", channel: this.channels[channelId] };
+  }
+
+  async configureWechatWorkaround(
+    _request: WechatSetupRequest
+  ): Promise<{ message: string; channel: ChannelSetupState }> {
+    this.channels.wechat = {
+      ...this.channels.wechat,
+      status: "completed",
+      summary: "Mock WeChat workaround configured.",
+      detail: "Mock mode marked the community plugin workaround as configured."
+    };
+    return { message: "Mock WeChat workaround configured.", channel: this.channels.wechat };
+  }
+
+  async startGatewayAfterChannels(): Promise<{ message: string; engineStatus: EngineStatus }> {
+    return {
+      message: "Mock gateway started.",
+      engineStatus: await this.status()
     };
   }
 }

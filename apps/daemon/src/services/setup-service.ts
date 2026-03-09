@@ -1,6 +1,5 @@
 import type {
   InstallResponse,
-  RecoveryAction,
   SetupRunResponse,
   SetupStepResult
 } from "@slackclaw/contracts";
@@ -8,17 +7,6 @@ import type {
 import type { EngineAdapter } from "../engine/adapter.js";
 import { OverviewService } from "./overview-service.js";
 import { StateStore } from "./state-store.js";
-
-function restartEngineAction(): RecoveryAction {
-  return {
-    id: "restart-engine",
-    type: "restart-engine",
-    title: "Restart assistant engine",
-    description: "Restart the local engine service so SlackClaw can reconnect.",
-    safetyLevel: "safe",
-    expectedImpact: "Running tasks may be interrupted for a moment while the service restarts."
-  };
-}
 
 export class SetupService {
   constructor(
@@ -55,7 +43,7 @@ export class SetupService {
         : "No compatible OpenClaw installation was found yet. SlackClaw will deploy a managed local copy for this user."
     });
 
-    installResult = await this.adapter.install(true, { forceLocal: options?.forceLocal ?? false });
+    installResult = await this.adapter.install(false, { forceLocal: options?.forceLocal ?? false });
     steps.push({
       id: "prepare-openclaw",
       title: "Prepare OpenClaw and its required dependencies",
@@ -63,29 +51,15 @@ export class SetupService {
       detail: installResult.message
     });
 
-    let finalStatus = installResult.engineStatus;
+    steps.push({
+      id: "onboarding-required",
+      title: "Run OpenClaw onboarding next",
+      status: "pending",
+      detail: "OpenClaw is deployed. The next step is onboarding, then channel setup, then gateway start."
+    });
 
-    if (!finalStatus.running) {
-      const restart = await this.adapter.repair(restartEngineAction());
-      finalStatus = await this.adapter.status();
-      steps.push({
-        id: "ensure-engine-running",
-        title: "Make sure the OpenClaw service is running",
-        status: restart.status === "completed" && finalStatus.running ? "completed" : "failed",
-        detail: restart.status === "completed" && finalStatus.running
-          ? "SlackClaw confirmed that the local engine service is now reachable."
-          : restart.message
-      });
-    } else {
-      steps.push({
-        id: "ensure-engine-running",
-        title: "Make sure the OpenClaw service is running",
-        status: "completed",
-        detail: "OpenClaw was already running and reachable."
-      });
-    }
-
-    const setupCompleted = finalStatus.installed && finalStatus.running;
+    const finalStatus = await this.adapter.status();
+    const setupCompleted = finalStatus.installed;
 
     if (setupCompleted) {
       await this.store.update((current) => ({
@@ -100,8 +74,8 @@ export class SetupService {
     return {
       status: failedStep ? "failed" : "completed",
       message: failedStep
-        ? "SlackClaw finished part of setup, but the engine still needs attention."
-        : "SlackClaw setup completed and the local engine is ready.",
+        ? "SlackClaw finished part of setup, but OpenClaw still needs attention."
+        : "OpenClaw is deployed. Continue with onboarding before starting the gateway.",
       steps,
       overview,
       install: installResult

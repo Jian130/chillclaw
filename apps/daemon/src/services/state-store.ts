@@ -1,14 +1,21 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-import type { EngineTaskResult } from "@slackclaw/contracts";
+import type { ChannelSetupState, EngineTaskResult } from "@slackclaw/contracts";
 import { getDataDir } from "../runtime-paths.js";
 
-interface AppState {
+export interface ChannelOnboardingState {
+  baseOnboardingCompletedAt?: string;
+  gatewayStartedAt?: string;
+  channels: Record<string, ChannelSetupState>;
+}
+
+export interface AppState {
   selectedProfileId?: string;
   tasks: EngineTaskResult[];
   introCompletedAt?: string;
   setupCompletedAt?: string;
+  channelOnboarding?: ChannelOnboardingState;
 }
 
 const DEFAULT_STATE: AppState = {

@@ -1,0 +1,874 @@
+{
+  "version": "2.8",
+  "children": [
+    {
+      "type": "frame",
+      "id": "bi8Au",
+      "x": 0,
+      "y": 0,
+      "name": "01 Environment Check",
+      "clip": true,
+      "width": 800,
+      "height": 640,
+      "fill": "#F8FAFC",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "frame",
+          "id": "WLIO4",
+          "name": "topBar",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Q6lWY",
+              "name": "brand",
+              "fill": "#0F172A",
+              "content": "SlackClaw",
+              "fontFamily": "Inter",
+              "fontSize": 22,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "i3eQ2",
+              "name": "chip",
+              "fill": "#DBEAFE",
+              "cornerRadius": 999,
+              "padding": [
+                8,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "PnMyO",
+                  "name": "chipText",
+                  "fill": "#1D4ED8",
+                  "content": "OpenClaw not detected",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "YMR4G",
+          "name": "hero",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "yZIat",
+              "name": "heroTitle",
+              "fill": "#0F172A",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Run OpenClaw without terminal setup",
+              "fontFamily": "Inter",
+              "fontSize": 34,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "sOCls",
+              "name": "heroSub",
+              "fill": "#475569",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "SlackClaw checks your environment and deploys OpenClaw or compatible variants in one click.",
+              "lineHeight": 1.45,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "VE0Er",
+          "name": "card",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": {
+            "thickness": 1,
+            "fill": "#CBD5E1"
+          },
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "gsCON",
+              "name": "cardTitle",
+              "fill": "#0F172A",
+              "content": "Environment check",
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "GBSxn",
+              "name": "row1",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "4wSiN",
+                  "name": "r1l",
+                  "fill": "#64748B",
+                  "content": "Device OS",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "JrEpl",
+                  "name": "r1r",
+                  "fill": "#0F172A",
+                  "content": "macOS 14.7",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "jD2Sd",
+              "name": "row2",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "uewrF",
+                  "name": "r2l",
+                  "fill": "#64748B",
+                  "content": "Docker",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "w26OI",
+                  "name": "r2r",
+                  "fill": "#B91C1C",
+                  "content": "Missing",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "B4kvY",
+              "name": "row3",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "iDIAL",
+                  "name": "r3l",
+                  "fill": "#64748B",
+                  "content": "OpenClaw runtime",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "YUw12",
+                  "name": "r3r",
+                  "fill": "#B91C1C",
+                  "content": "Not installed",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "ABm08",
+          "name": "actions",
+          "width": "fill_container",
+          "gap": 12,
+          "children": [
+            {
+              "type": "frame",
+              "id": "7oEGa",
+              "name": "deploy",
+              "fill": "#2563EB",
+              "cornerRadius": 12,
+              "padding": [
+                12,
+                18
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "QIyt0",
+                  "name": "deployText",
+                  "fill": "#FFFFFF",
+                  "content": "One-click deploy OpenClaw",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "2GwVV",
+              "name": "alt",
+              "fill": "#FFFFFF",
+              "cornerRadius": 12,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#CBD5E1"
+              },
+              "padding": [
+                12,
+                18
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "iXi3e",
+                  "name": "altText",
+                  "fill": "#0F172A",
+                  "content": "Choose variation",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Pwxso",
+      "x": 920,
+      "y": 0,
+      "name": "02 Setup Wizard",
+      "clip": true,
+      "width": 800,
+      "height": 640,
+      "fill": "#F8FAFC",
+      "layout": "vertical",
+      "gap": 18,
+      "padding": 32,
+      "children": [
+        {
+          "type": "frame",
+          "id": "gzJKQ",
+          "name": "s2Top",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "fYeYm",
+              "name": "s2Kicker",
+              "fill": "#2563EB",
+              "content": "Setup Wizard",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "700",
+              "letterSpacing": 1
+            },
+            {
+              "type": "text",
+              "id": "Rb0KY",
+              "name": "s2Title",
+              "fill": "#0F172A",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Configure OpenClaw in 2 steps",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "3hQgT",
+              "name": "s2Sub",
+              "fill": "#475569",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Based on OpenClaw docs: first add model providers and models, then pair channels from the web pairing flow.",
+              "lineHeight": 1.45,
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "33rcF",
+          "name": "steps",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 14,
+          "children": [
+            {
+              "type": "frame",
+              "id": "38wop",
+              "name": "step1",
+              "width": "fill_container",
+              "fill": "#FFFFFF",
+              "cornerRadius": 14,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#93C5FD"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "w1m9e",
+                  "name": "step1Head",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "4lHgv",
+                      "name": "step1Title",
+                      "fill": "#0F172A",
+                      "content": "1. Add models",
+                      "fontFamily": "Inter",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "H2cjK",
+                      "name": "step1Status",
+                      "fill": "#B45309",
+                      "content": "Required",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "AWTR7",
+                  "name": "step1a",
+                  "fill": "#334155",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "• Add provider API keys in config (OpenAI/Anthropic/Gemini/OpenRouter).",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "gwax8",
+                  "name": "step1b",
+                  "fill": "#334155",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "• Add chat model IDs and choose a default model.",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "iEIo2",
+                  "name": "step1Btn",
+                  "fill": "#2563EB",
+                  "cornerRadius": 10,
+                  "padding": [
+                    10,
+                    14
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ntgJn",
+                      "name": "step1BtnText",
+                      "fill": "#FFFFFF",
+                      "content": "Open model setup",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "7kpZb",
+              "name": "step2",
+              "width": "fill_container",
+              "fill": "#FFFFFF",
+              "cornerRadius": 14,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#CBD5E1"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "1Z1DT",
+                  "name": "step2Head",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xh58T",
+                      "name": "step2Title",
+                      "fill": "#0F172A",
+                      "content": "2. Add channels",
+                      "fontFamily": "Inter",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "E8p3f",
+                      "name": "step2Status",
+                      "fill": "#475569",
+                      "content": "Next",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "IHAZM",
+                  "name": "step2a",
+                  "fill": "#334155",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "• Start OpenClaw, run pairing, and open the local pairing URL.",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "cpRNf",
+                  "name": "step2b",
+                  "fill": "#334155",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "• Connect Slack/Discord/WhatsApp/etc with the pairing code.",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "z3Vg2",
+          "name": "footer",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Dljko",
+              "name": "progress",
+              "fill": "#0F172A",
+              "content": "Step 1 of 2 complete",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "IHsMI",
+              "name": "continueBtn",
+              "fill": "#0F172A",
+              "cornerRadius": 12,
+              "padding": [
+                12,
+                18
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "F0S3B",
+                  "name": "continueText",
+                  "fill": "#FFFFFF",
+                  "content": "Continue to channels",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "IjvWf",
+      "x": 1840,
+      "y": 0,
+      "name": "03 Chat Console",
+      "clip": true,
+      "width": 800,
+      "height": 640,
+      "fill": "#F8FAFC",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "frame",
+          "id": "mbbbX",
+          "name": "s3Head",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "TAv0b",
+              "name": "s3Title",
+              "fill": "#0F172A",
+              "content": "Live Chat Console",
+              "fontFamily": "Inter",
+              "fontSize": 30,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "8oU69",
+              "name": "s3Badge",
+              "fill": "#DCFCE7",
+              "cornerRadius": 999,
+              "padding": [
+                8,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "w4nLx",
+                  "name": "s3BadgeText",
+                  "fill": "#166534",
+                  "content": "Connected to OpenClaw",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "700"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "LvbYP",
+          "name": "s3Wrap",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "D4z9t",
+              "name": "channels",
+              "width": 220,
+              "height": "fill_container",
+              "fill": "#FFFFFF",
+              "cornerRadius": 14,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#CBD5E1"
+              },
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "jqc84",
+                  "name": "chanTitle",
+                  "fill": "#64748B",
+                  "content": "Channels",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "eP337",
+                  "name": "chan1",
+                  "width": "fill_container",
+                  "fill": "#DBEAFE",
+                  "cornerRadius": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "dIfX5",
+                      "name": "chan1t",
+                      "fill": "#1D4ED8",
+                      "content": "# general",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "aQRpR",
+                  "name": "chan2",
+                  "width": "fill_container",
+                  "fill": "#F8FAFC",
+                  "cornerRadius": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "7A3tM",
+                      "name": "chan2t",
+                      "fill": "#334155",
+                      "content": "# onboarding",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "YsHVC",
+                  "name": "chan3",
+                  "width": "fill_container",
+                  "fill": "#F8FAFC",
+                  "cornerRadius": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "DPLeV",
+                      "name": "chan3t",
+                      "fill": "#334155",
+                      "content": "@ openclaw-bot",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "K3Wdw",
+              "name": "chatArea",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "#FFFFFF",
+              "cornerRadius": 14,
+              "stroke": {
+                "thickness": 1,
+                "fill": "#CBD5E1"
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "UMyTx",
+                  "name": "chatMeta",
+                  "fill": "#64748B",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Session: openclaw-local | Model: gpt-4o-mini | Channel: Slack",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "frame",
+                  "id": "uhQYp",
+                  "name": "msgList",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "s7NZa",
+                      "name": "msg1",
+                      "fill": "#F1F5F9",
+                      "cornerRadius": 10,
+                      "layout": "vertical",
+                      "padding": [
+                        10,
+                        12
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "3fEyU",
+                          "name": "msg1t",
+                          "fill": "#0F172A",
+                          "content": "User: summarize docs.openclaw.ai onboarding flow",
+                          "fontFamily": "IBM Plex Mono",
+                          "fontSize": 12,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "7isCh",
+                      "name": "msg2",
+                      "width": "fill_container",
+                      "fill": "#EEF2FF",
+                      "cornerRadius": 10,
+                      "layout": "vertical",
+                      "padding": [
+                        10,
+                        12
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "qrzex",
+                          "name": "msg2t",
+                          "fill": "#1E1B4B",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "OpenClaw: 1) Configure providers and model IDs. 2) Pair channel with local web flow. 3) Start chatting.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "IBM Plex Mono",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "YPxBf",
+                  "name": "composer",
+                  "width": "fill_container",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "l9dBh",
+                      "name": "input",
+                      "width": "fill_container",
+                      "fill": "#F8FAFC",
+                      "cornerRadius": 10,
+                      "stroke": {
+                        "thickness": 1,
+                        "fill": "#CBD5E1"
+                      },
+                      "padding": [
+                        12,
+                        14
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ysDsR",
+                          "name": "inputText",
+                          "fill": "#94A3B8",
+                          "content": "Type command or prompt...",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ZYHAW",
+                      "name": "send",
+                      "fill": "#2563EB",
+                      "cornerRadius": 10,
+                      "padding": [
+                        12,
+                        16
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "IBVXb",
+                          "name": "sendText",
+                          "fill": "#FFFFFF",
+                          "content": "Send",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

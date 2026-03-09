@@ -19,9 +19,11 @@ const uiPort = Number(process.env.SLACKCLAW_UI_PORT ?? "4173");
 let daemonProcess = null;
 let uiProcess = null;
 let shuttingDown = false;
+let stepCounter = 0;
 
-function logStep(message) {
-  console.log(`[SlackClaw start] ${message}`);
+function logStep(message, options = {}) {
+  const prefix = options.step ? `${String(++stepCounter).padStart(2, "0")}. ` : "";
+  console.log(`[SlackClaw start] ${prefix}${message}`);
 }
 
 function fail(message) {
@@ -30,14 +32,18 @@ function fail(message) {
 }
 
 function ensureLocalDependencies() {
+  logStep("Checking local JavaScript dependencies", { step: true });
   if (!existsSync(resolve(rootDir, "node_modules"))) {
     fail("Dependencies are missing. Run `npm install` first.");
   }
+
+  logStep("Local dependencies are present.");
 }
 
 function runBlockingStep(label, command, args, extraEnv = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
-    logStep(`${label}...`);
+    logStep(label, { step: true });
+    logStep(`Running: ${command} ${args.join(" ")}`);
 
     const child = spawn(command, args, {
       cwd: rootDir,
@@ -68,7 +74,8 @@ function runBlockingStep(label, command, args, extraEnv = {}) {
 }
 
 function runBackgroundStep(label, command, args, extraEnv = {}) {
-  logStep(`${label}...`);
+  logStep(label, { step: true });
+  logStep(`Launching: ${command} ${args.join(" ")}`);
 
   const child = spawn(command, args, {
     cwd: rootDir,
@@ -135,12 +142,17 @@ function pingPort(host, port, timeoutMs = 2000) {
 }
 
 async function waitForPort(label, host, port, attempts = 60, delayMs = 1000) {
+  logStep(`Waiting for ${label} on http://${host}:${port}`);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       await pingPort(host, port);
       logStep(`${label} is ready at http://${host}:${port}`);
       return;
     } catch (error) {
+      if (attempt === 1 || attempt % 5 === 0) {
+        logStep(`Still waiting for ${label} (${attempt}/${attempts})`);
+      }
+
       if (attempt === attempts) {
         throw new Error(
           `${label} did not become ready after ${attempts} attempts: ${
@@ -155,6 +167,7 @@ async function waitForPort(label, host, port, attempts = 60, delayMs = 1000) {
 }
 
 async function ensurePortIsFree(label, host, port) {
+  logStep(`Checking ${label} port ${port}`, { step: true });
   try {
     await pingPort(host, port, 500);
     throw new Error(`${label} port ${port} is already in use on ${host}. Stop the existing process and retry.`);
@@ -163,6 +176,8 @@ async function ensurePortIsFree(label, host, port) {
       throw error;
     }
   }
+
+  logStep(`${label} port ${port} is free.`);
 }
 
 async function shutdown(exitCode = 0) {
@@ -214,8 +229,11 @@ process.on("unhandledRejection", (error) => {
 });
 
 async function main() {
+  logStep("Starting SlackClaw local development environment");
   ensureLocalDependencies();
+  logStep("Checking for an existing managed SlackClaw dev session", { step: true });
   await assertNoManagedProcessesRunning();
+  logStep("No managed SlackClaw dev processes are already running.");
 
   await runBlockingStep("Checking OpenClaw installation", "npm", ["run", "bootstrap:openclaw"]);
   await runBlockingStep("Building shared contracts", "npm", ["run", "build", "--workspace", "@slackclaw/contracts"]);

@@ -17,6 +17,9 @@
 - SlackClaw now exposes app-level `Stop SlackClaw` and `Uninstall SlackClaw` actions from the UI.
 - Uninstall now removes the LaunchAgent, SlackClaw-managed local data, and the packaged app bundle after the daemon exits.
 - When `npm` is missing, SlackClaw now tries to install the required `node`/`npm` toolchain and `git` through Homebrew before giving up on local OpenClaw deployment.
+- SlackClaw now includes a guided channel setup UI for Telegram, WhatsApp, and an experimental WeChat workaround path, followed by a final gateway restart step.
+- WhatsApp login output now streams back into SlackClaw so the user can monitor the OpenClaw login session from the UI.
+- The setup order is now explicit: deploy OpenClaw first, run onboarding second, configure channels third, and start the gateway last.
 
 ## 0.1.0 - 2026-03-08
 

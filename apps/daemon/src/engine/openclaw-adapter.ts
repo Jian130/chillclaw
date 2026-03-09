@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, dirname, resolve } from "node:path";
 
 import type {
+  ChannelSetupState,
   EngineCapabilities,
   EngineInstallSpec,
   EngineStatus,
@@ -13,8 +14,11 @@ import type {
   EngineTaskResult,
   HealthCheckResult,
   InstallResponse,
+  PairingApprovalRequest,
   RecoveryAction,
-  RecoveryRunResponse
+  RecoveryRunResponse,
+  TelegramSetupRequest,
+  WechatSetupRequest
 } from "@slackclaw/contracts";
 
 import type { EngineAdapter } from "./adapter.js";
@@ -141,6 +145,21 @@ interface BootstrapResult {
   message: string;
 }
 
+interface CommandInvocation {
+  command: string;
+  argsPrefix: string[];
+  display: string;
+}
+
+interface LoginSessionState {
+  startedAt: string;
+  status: "in-progress" | "awaiting-pairing" | "completed" | "failed";
+  logs: string[];
+  exitCode?: number;
+}
+
+let whatsappLoginSession: LoginSessionState | undefined;
+
 function buildCommandEnv(command?: string): NodeJS.ProcessEnv {
   const pathEntries = [
     command && command.startsWith("/") ? dirname(command) : undefined,
@@ -173,6 +192,44 @@ function toInstallDisposition(
   }
 
   return "installed";
+}
+
+function createChannelState(
+  id: "telegram" | "whatsapp" | "wechat",
+  overrides: Partial<ChannelSetupState>
+): ChannelSetupState {
+  const defaults: Record<string, ChannelSetupState> = {
+    telegram: {
+      id: "telegram",
+      title: "Telegram",
+      officialSupport: true,
+      status: "not-started",
+      summary: "Telegram setup has not started yet.",
+      detail: "Add a bot token, then approve the first pairing request."
+    },
+    whatsapp: {
+      id: "whatsapp",
+      title: "WhatsApp",
+      officialSupport: true,
+      status: "not-started",
+      summary: "WhatsApp setup has not started yet.",
+      detail: "Start the login flow, scan the QR, then approve the pairing request."
+    },
+    wechat: {
+      id: "wechat",
+      title: "WeChat workaround",
+      officialSupport: false,
+      status: "not-started",
+      summary: "WeChat requires an experimental workaround plugin.",
+      detail: "Install the plugin workaround, configure the app credentials, then restart the gateway."
+    }
+  };
+
+  return {
+    ...defaults[id],
+    ...overrides,
+    lastUpdatedAt: overrides.lastUpdatedAt ?? new Date().toISOString()
+  };
 }
 
 async function runOpenClaw(args: string[], options?: { allowFailure?: boolean }): Promise<CommandResult> {
@@ -347,21 +404,6 @@ async function resolveOpenClawCommand(): Promise<string | undefined> {
   return undefined;
 }
 
-async function resolveNpmCommand(): Promise<string | undefined> {
-  const npmCommand = await resolveCommand("npm", [
-    "/opt/homebrew/bin/npm",
-    "/usr/local/bin/npm",
-    "/usr/bin/npm",
-    resolve(process.env.HOME ?? "", ".nvm/current/bin/npm")
-  ]);
-
-  if (npmCommand && (await probeCommand(npmCommand))) {
-    return npmCommand;
-  }
-
-  return undefined;
-}
-
 async function resolveNodeCommand(): Promise<string | undefined> {
   const nodeCommand = await resolveCommand("node", [
     "/opt/homebrew/bin/node",
@@ -372,6 +414,66 @@ async function resolveNodeCommand(): Promise<string | undefined> {
 
   if (nodeCommand && (await probeCommand(nodeCommand))) {
     return nodeCommand;
+  }
+
+  return undefined;
+}
+
+async function probeInvocation(invocation: CommandInvocation, args: string[] = ["--version"]): Promise<boolean> {
+  try {
+    const result = await runCommand(invocation.command, [...invocation.argsPrefix, ...args], { allowFailure: true });
+    return result.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveNpmInvocation(): Promise<CommandInvocation | undefined> {
+  const npmCommand = await resolveCommand("npm", [
+    "/opt/homebrew/bin/npm",
+    "/usr/local/bin/npm",
+    "/usr/bin/npm",
+    resolve(process.env.HOME ?? "", ".nvm/current/bin/npm")
+  ]);
+
+  if (npmCommand) {
+    const npmInvocation: CommandInvocation = {
+      command: npmCommand,
+      argsPrefix: [],
+      display: npmCommand
+    };
+
+    if (await probeInvocation(npmInvocation)) {
+      return npmInvocation;
+    }
+  }
+
+  const nodeCommand = await resolveNodeCommand();
+
+  if (!nodeCommand) {
+    return undefined;
+  }
+
+  const npmCliCandidates = [
+    process.env.npm_execpath,
+    "/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js",
+    "/usr/local/lib/node_modules/npm/bin/npm-cli.js"
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of npmCliCandidates) {
+    if (!(await fileExists(candidate))) {
+      continue;
+    }
+
+    const cliInvocation: CommandInvocation = {
+      command: nodeCommand,
+      argsPrefix: [candidate],
+      display: `${nodeCommand} ${candidate}`
+    };
+
+    if (await probeInvocation(cliInvocation)) {
+      return cliInvocation;
+    }
   }
 
   return undefined;
@@ -530,13 +632,40 @@ export class OpenClawAdapter implements EngineAdapter {
 
   async install(autoConfigure: boolean, options?: { forceLocal?: boolean }): Promise<InstallResponse> {
     const bootstrap = await this.ensurePinnedOpenClaw(options?.forceLocal ?? false);
-    const statusBefore = await this.collectStatusData();
     const state = await readAdapterState();
-    let mode: "detected" | "onboarded" = "detected";
-    let message = bootstrap.message;
+    const mode: "detected" | "onboarded" = "detected";
+    let message = `${bootstrap.message} SlackClaw is ready to run OpenClaw onboarding next.`;
+
+    if (autoConfigure && !state.configuredProfileId) {
+      await this.configure("email-admin");
+    }
+
+    await writeAdapterState({
+      ...state,
+      installedAt: new Date().toISOString(),
+      lastInstallMode: mode
+    });
+
+    const engineStatus = await this.status();
+
+    return {
+      status: "installed",
+      message,
+      engineStatus,
+      disposition: toInstallDisposition(bootstrap.status, mode),
+      changed: bootstrap.changed,
+      hadExisting: bootstrap.hadExisting,
+      pinnedVersion: OPENCLAW_VERSION_PIN,
+      existingVersion: bootstrap.existingVersion,
+      actualVersion: bootstrap.version ?? undefined
+    };
+  }
+
+  async onboard(profileId: string): Promise<void> {
+    const statusBefore = await this.collectStatusData();
 
     if (statusBefore.setupRequired || !statusBefore.cliVersion) {
-      await runOpenClaw(
+      const result = await runOpenClaw(
         [
           "onboard",
           "--non-interactive",
@@ -554,44 +683,13 @@ export class OpenClawAdapter implements EngineAdapter {
         ],
         { allowFailure: true }
       );
-      mode = "onboarded";
-      message = `${bootstrap.message} SlackClaw also ran OpenClaw onboarding in non-interactive local mode.`;
-    }
 
-    if (autoConfigure && !state.configuredProfileId) {
-      await this.configure("email-admin");
-    }
-
-    await writeAdapterState({
-      ...state,
-      installedAt: new Date().toISOString(),
-      lastInstallMode: mode
-    });
-
-    let engineStatus = await this.status();
-
-    if (!engineStatus.running) {
-      const restart = await runOpenClaw(["gateway", "restart"], { allowFailure: true });
-      engineStatus = await this.status();
-
-      if (restart.code === 0 && engineStatus.running) {
-        message = `${message} SlackClaw detected that the OpenClaw gateway was down and restarted it with \`openclaw gateway restart\`.`;
-      } else if (restart.code !== 0) {
-        message = `${message} SlackClaw tried to restart the OpenClaw gateway with \`openclaw gateway restart\`, but it is still not reachable.`;
+      if (result.code !== 0) {
+        throw new Error(result.stderr || result.stdout || "OpenClaw onboarding failed.");
       }
     }
 
-    return {
-      status: "installed",
-      message,
-      engineStatus,
-      disposition: toInstallDisposition(bootstrap.status, mode),
-      changed: bootstrap.changed || mode === "onboarded",
-      hadExisting: bootstrap.hadExisting,
-      pinnedVersion: OPENCLAW_VERSION_PIN,
-      existingVersion: bootstrap.existingVersion,
-      actualVersion: bootstrap.version ?? undefined
-    };
+    await this.configure(profileId);
   }
 
   async configure(profileId: string): Promise<void> {
@@ -900,6 +998,208 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
+  async getChannelState(channelId: "telegram" | "whatsapp" | "wechat"): Promise<ChannelSetupState> {
+    if (channelId === "whatsapp" && whatsappLoginSession) {
+      return createChannelState("whatsapp", {
+        status: whatsappLoginSession.status,
+        summary:
+          whatsappLoginSession.status === "failed"
+            ? "WhatsApp login session failed."
+            : whatsappLoginSession.status === "completed"
+              ? "WhatsApp login session completed."
+              : whatsappLoginSession.status === "awaiting-pairing"
+                ? "WhatsApp login is waiting for pairing approval."
+                : "WhatsApp login is running.",
+        detail:
+          whatsappLoginSession.logs.at(-1) ??
+          "Scan the QR code or follow the WhatsApp login instructions shown by OpenClaw.",
+        logs: whatsappLoginSession.logs.slice(-20)
+      });
+    }
+
+    return createChannelState(channelId, {});
+  }
+
+  async configureTelegram(request: TelegramSetupRequest): Promise<{ message: string; channel: ChannelSetupState }> {
+    const args = ["channels", "add", "--channel", "telegram", "--token", request.token];
+
+    if (request.accountName?.trim()) {
+      args.push("--name", request.accountName.trim());
+    }
+
+    const result = await runOpenClaw(args, { allowFailure: true });
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || "SlackClaw could not save the Telegram channel configuration.");
+    }
+
+    return {
+      message: "Telegram bot token saved. Send a message to the bot, then approve the pairing code in SlackClaw.",
+      channel: createChannelState("telegram", {
+        status: "awaiting-pairing",
+        summary: "Telegram token saved.",
+        detail: "The Telegram bot is configured. Send the first message to your bot, then approve the pairing code."
+      })
+    };
+  }
+
+  async startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
+    if (whatsappLoginSession?.status === "in-progress") {
+      return {
+        message: "WhatsApp login is already running.",
+        channel: await this.getChannelState("whatsapp")
+      };
+    }
+
+    await runOpenClaw(["channels", "add", "--channel", "whatsapp", "--name", "SlackClaw WhatsApp"], {
+      allowFailure: true
+    });
+
+    whatsappLoginSession = {
+      startedAt: new Date().toISOString(),
+      status: "in-progress",
+      logs: ["Starting WhatsApp login. OpenClaw may print a QR code or pairing instructions here."]
+    };
+
+    const command = await resolveOpenClawCommand();
+
+    if (!command) {
+      throw new Error("OpenClaw CLI is not installed.");
+    }
+
+    const child = spawn(command, ["channels", "login", "--channel", "whatsapp", "--verbose"], {
+      env: buildCommandEnv(command)
+    });
+
+    const pushLog = (text: string) => {
+      if (!whatsappLoginSession) {
+        return;
+      }
+
+      const lines = text
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter(Boolean);
+      whatsappLoginSession.logs.push(...lines);
+      whatsappLoginSession.logs = whatsappLoginSession.logs.slice(-40);
+      whatsappLoginSession.status = "awaiting-pairing";
+    };
+
+    child.stdout.on("data", (chunk) => {
+      pushLog(chunk.toString());
+    });
+
+    child.stderr.on("data", (chunk) => {
+      pushLog(chunk.toString());
+    });
+
+    child.on("error", (error) => {
+      if (!whatsappLoginSession) {
+        return;
+      }
+
+      whatsappLoginSession.status = "failed";
+      whatsappLoginSession.logs.push(`Failed to start WhatsApp login: ${error instanceof Error ? error.message : String(error)}`);
+      void writeErrorLog("WhatsApp login session failed to start.", errorToLogDetails(error));
+    });
+
+    child.on("exit", (code) => {
+      if (!whatsappLoginSession) {
+        return;
+      }
+
+      whatsappLoginSession.exitCode = code ?? 1;
+      whatsappLoginSession.status = code === 0 ? "awaiting-pairing" : "failed";
+      whatsappLoginSession.logs.push(
+        code === 0
+          ? "WhatsApp login command finished. If pairing is pending, approve the code below."
+          : `WhatsApp login command exited with code ${code ?? 1}.`
+      );
+    });
+
+    return {
+      message: "SlackClaw started the WhatsApp login flow. Follow the QR or pairing instructions shown in the session log.",
+      channel: await this.getChannelState("whatsapp")
+    };
+  }
+
+  async approvePairing(
+    channelId: "telegram" | "whatsapp",
+    request: PairingApprovalRequest
+  ): Promise<{ message: string; channel: ChannelSetupState }> {
+    const result = await runOpenClaw(["pairing", "approve", channelId, request.code, "--notify"], { allowFailure: true });
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not approve the ${channelId} pairing code.`);
+    }
+
+    if (channelId === "whatsapp" && whatsappLoginSession) {
+      whatsappLoginSession.status = "completed";
+      whatsappLoginSession.logs.push("WhatsApp pairing approved.");
+    }
+
+    return {
+      message: `${channelId === "telegram" ? "Telegram" : "WhatsApp"} pairing approved.`,
+      channel: createChannelState(channelId, {
+        status: "completed",
+        summary: `${channelId === "telegram" ? "Telegram" : "WhatsApp"} pairing approved.`,
+        detail: "This channel is ready for use."
+      })
+    };
+  }
+
+  async configureWechatWorkaround(
+    request: WechatSetupRequest
+  ): Promise<{ message: string; channel: ChannelSetupState }> {
+    const pluginSpec = request.pluginSpec?.trim() || "@openclaw-china/wecom-app";
+    const pluginId = pluginSpec.split("/").pop() ?? pluginSpec;
+    const install = await runOpenClaw(["plugins", "install", pluginSpec], { allowFailure: true });
+
+    if (install.code !== 0) {
+      throw new Error(install.stderr || install.stdout || `SlackClaw could not install the WeChat workaround plugin ${pluginSpec}.`);
+    }
+
+    const enableById = await runOpenClaw(["plugins", "enable", pluginId], { allowFailure: true });
+
+    if (enableById.code !== 0) {
+      await runOpenClaw(["plugins", "enable", pluginSpec], { allowFailure: true });
+    }
+    await runOpenClaw(["config", "set", "--strict-json", `channels.${pluginId}`, JSON.stringify({
+      enabled: true,
+      webhookPath: `/${pluginId}`,
+      token: request.token,
+      encodingAESKey: request.encodingAesKey,
+      corpId: request.corpId,
+      corpSecret: request.secret,
+      agentId: Number(request.agentId),
+      dmPolicy: "pairing",
+      groupPolicy: "open"
+    })], { allowFailure: true });
+
+    return {
+      message: `SlackClaw installed the experimental ${pluginSpec} workaround and saved the WeChat enterprise app configuration.`,
+      channel: createChannelState("wechat", {
+        status: "completed",
+        summary: "WeChat workaround configured.",
+        detail: "Restart the gateway to load the WeChat workaround plugin."
+      })
+    };
+  }
+
+  async startGatewayAfterChannels(): Promise<{ message: string; engineStatus: EngineStatus }> {
+    const restart = await runOpenClaw(["gateway", "restart"], { allowFailure: true });
+    const engineStatus = await this.status();
+
+    if (restart.code !== 0 || !engineStatus.running) {
+      throw new Error(restart.stderr || restart.stdout || "SlackClaw could not restart the OpenClaw gateway after channel setup.");
+    }
+
+    return {
+      message: "OpenClaw gateway restarted and is reachable.",
+      engineStatus
+    };
+  }
+
   private async collectStatusData(): Promise<{
     installed: boolean;
     cliVersion?: string;
@@ -1004,10 +1304,10 @@ export class OpenClawAdapter implements EngineAdapter {
       };
     }
 
-    const npmCommand = await resolveNpmCommand();
-    const ensuredNpmCommand = npmCommand ?? (await this.ensureSystemDependencies());
+    const npmInvocation = await resolveNpmInvocation();
+    const ensuredNpmInvocation = npmInvocation ?? (await this.ensureSystemDependencies());
 
-    if (!ensuredNpmCommand) {
+    if (!ensuredNpmInvocation) {
       throw new Error(
         brewCommand
           ? "SlackClaw asked Homebrew to prepare the required toolchain, but still could not find a working npm executable afterward."
@@ -1025,11 +1325,15 @@ export class OpenClawAdapter implements EngineAdapter {
       ? ["install", "--prefix", installPath, `openclaw@${OPENCLAW_VERSION_PIN}`]
       : ["install", "--global", `openclaw@${OPENCLAW_VERSION_PIN}`];
 
-    const installResult = await runCommand(ensuredNpmCommand, installArgs, { allowFailure: true });
+    const installResult = await runCommand(
+      ensuredNpmInvocation.command,
+      [...ensuredNpmInvocation.argsPrefix, ...installArgs],
+      { allowFailure: true }
+    );
 
     if (installResult.code !== 0) {
       await writeErrorLog("OpenClaw install command failed.", {
-        command: ensuredNpmCommand,
+        command: ensuredNpmInvocation.display,
         args: installArgs,
         result: installResult
       });
@@ -1072,17 +1376,17 @@ export class OpenClawAdapter implements EngineAdapter {
     return defaultAgentId ? ["--agent", defaultAgentId] : [];
   }
 
-  private async ensureSystemDependencies(): Promise<string | undefined> {
-    const [nodeCommand, npmCommand, gitCommand, brewCommand] = await Promise.all([
+  private async ensureSystemDependencies(): Promise<CommandInvocation | undefined> {
+    const [nodeCommand, npmInvocation, gitCommand, brewCommand] = await Promise.all([
       resolveNodeCommand(),
-      resolveNpmCommand(),
+      resolveNpmInvocation(),
       resolveGitCommand(),
       resolveBrewCommand()
     ]);
 
     const packages: string[] = [];
 
-    if (!nodeCommand || !npmCommand) {
+    if (!nodeCommand || !npmInvocation) {
       packages.push("node");
     }
 
@@ -1091,7 +1395,7 @@ export class OpenClawAdapter implements EngineAdapter {
     }
 
     if (packages.length === 0) {
-      return npmCommand;
+      return npmInvocation;
     }
 
     if (!brewCommand) {
@@ -1121,6 +1425,6 @@ export class OpenClawAdapter implements EngineAdapter {
       packages
     });
 
-    return resolveNpmCommand();
+    return resolveNpmInvocation();
   }
 }

@@ -97,6 +97,7 @@ The daemon defaults to `http://127.0.0.1:4545`.
 - starts the UI and waits for port `4173` to open
 - fails early if either expected port is already occupied
 - records the managed daemon and UI process IDs in `.data/dev-processes.json`
+- prints numbered, step-by-step console output so local development startup progress is visible
 - keeps both processes attached to the same terminal session so `Ctrl+C` shuts them down together
 
 ### What `npm stop` does
@@ -118,12 +119,22 @@ When a user installs and opens SlackClaw for the first time:
 1. SlackClaw shows an intro page once.
 2. After `Get started`, SlackClaw opens a first-run setup page.
 3. The setup flow checks whether OpenClaw already exists on the Mac.
-4. If OpenClaw already exists, SlackClaw reuses it and tries to make sure the service is running.
+4. If OpenClaw already exists, SlackClaw reuses it.
 5. If OpenClaw is missing or incompatible, SlackClaw deploys the pinned OpenClaw runtime into `~/Library/Application Support/SlackClaw/data/openclaw-runtime`.
-6. If the OpenClaw gateway is down, SlackClaw runs `openclaw gateway restart` before continuing.
-7. Once the engine is reachable, SlackClaw moves the user into the normal product UI for onboarding, first task, health, and recovery.
+6. Once deployment is complete, SlackClaw moves the user into the normal product UI to run OpenClaw onboarding.
+7. After onboarding, SlackClaw guides channel setup.
+8. Only after onboarding and channel setup does SlackClaw restart the OpenClaw gateway.
 
 The intro page is skipped on later launches. If setup was not completed, SlackClaw resumes the setup page instead of dropping the user straight into the main workspace.
+
+## Channel onboarding
+
+After OpenClaw is deployed and onboarding is complete, SlackClaw exposes a guided channel setup panel in the UI:
+
+- `Telegram`: saves a bot token with `openclaw channels add --channel telegram --token ...`, then approves the first pairing code.
+- `WhatsApp`: starts `openclaw channels login --channel whatsapp --verbose`, streams the session output into SlackClaw, then approves the pairing code.
+- `WeChat workaround`: installs and enables a community WeCom-style plugin path, saves the workaround config, and clearly marks this path as experimental rather than official OpenClaw support.
+- `Gateway restart`: after channel setup is complete, SlackClaw restarts the OpenClaw gateway so all configured channels load together.
 
 SlackClaw now also exposes an explicit `Deploy OpenClaw locally` action in the first-run setup page and the install panel. That path forces deployment into SlackClaw's managed local runtime instead of merely reusing a compatible system OpenClaw.
 The service panel also now exposes app-level controls to stop the local SlackClaw daemon and uninstall the packaged app's managed service/data.

@@ -1,14 +1,16 @@
 import type {
+  ChannelActionResponse,
   AppControlResponse,
   AppServiceActionResponse,
   EngineTaskRequest,
   EngineTaskResult,
   InstallResponse,
   OnboardingSelection,
+  PairingApprovalRequest,
   ProductOverview,
   RecoveryRunResponse
 } from "@slackclaw/contracts";
-import type { SetupRunResponse } from "@slackclaw/contracts";
+import type { SetupRunResponse, TelegramSetupRequest, WechatSetupRequest } from "@slackclaw/contracts";
 
 const API_BASE =
   typeof window !== "undefined" && window.location.origin.includes("127.0.0.1:4545")
@@ -59,7 +61,7 @@ export function runFirstRunSetup(forceLocal = false): Promise<SetupRunResponse> 
 }
 
 export function installSlackClaw(
-  autoConfigure = true,
+  autoConfigure = false,
   forceLocal = false
 ): Promise<{ install: InstallResponse; overview: ProductOverview }> {
   return readJson<{ install: InstallResponse; overview: ProductOverview }>("/install", {
@@ -124,6 +126,46 @@ export function stopSlackClawApp(): Promise<AppControlResponse> {
 
 export function uninstallSlackClawApp(): Promise<AppControlResponse> {
   return readJson<AppControlResponse>("/app/uninstall", {
+    method: "POST"
+  });
+}
+
+export function setupTelegramChannel(request: TelegramSetupRequest): Promise<ChannelActionResponse> {
+  return readJson<ChannelActionResponse>("/channels/telegram", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function approveTelegramPairing(request: PairingApprovalRequest): Promise<ChannelActionResponse> {
+  return readJson<ChannelActionResponse>("/channels/telegram/approve", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function startWhatsappLogin(): Promise<ChannelActionResponse> {
+  return readJson<ChannelActionResponse>("/channels/whatsapp/login", {
+    method: "POST"
+  });
+}
+
+export function approveWhatsappPairing(request: PairingApprovalRequest): Promise<ChannelActionResponse> {
+  return readJson<ChannelActionResponse>("/channels/whatsapp/approve", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function setupWechatWorkaround(request: WechatSetupRequest): Promise<ChannelActionResponse> {
+  return readJson<ChannelActionResponse>("/channels/wechat", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function startGatewayAfterChannels(): Promise<ChannelActionResponse> {
+  return readJson<ChannelActionResponse>("/channels/gateway/start", {
     method: "POST"
   });
 }

@@ -3,14 +3,18 @@ import { readFile, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 
 import type {
+  PairingApprovalRequest,
   EngineTaskRequest,
   InstallRequest,
-  OnboardingSelection
+  OnboardingSelection,
+  TelegramSetupRequest,
+  WechatSetupRequest
 } from "@slackclaw/contracts";
 
 import { createEngineAdapter } from "./engine/registry.js";
 import { AppControlService } from "./services/app-control-service.js";
 import { AppServiceManager } from "./services/app-service-manager.js";
+import { ChannelSetupService } from "./services/channel-setup-service.js";
 import { errorToLogDetails, writeErrorLog } from "./services/logger.js";
 import { OverviewService } from "./services/overview-service.js";
 import { SetupService } from "./services/setup-service.js";
@@ -90,6 +94,7 @@ export function startServer(port = 4545) {
   const store = new StateStore();
   const appServiceManager = new AppServiceManager();
   const overviewService = new OverviewService(adapter, store, appServiceManager);
+  const channelSetupService = new ChannelSetupService(adapter, store, overviewService);
   const setupService = new SetupService(adapter, store, overviewService);
   const taskService = new TaskService(adapter, store);
   let server: ReturnType<typeof createServer>;
@@ -143,6 +148,40 @@ export function startServer(port = 4545) {
       if (request.method === "POST" && request.url === "/api/onboarding") {
         const body = await readJson<OnboardingSelection>(request);
         sendJson(response, 200, await overviewService.completeOnboarding(body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/channels/telegram") {
+        const body = await readJson<TelegramSetupRequest>(request);
+        sendJson(response, 200, await channelSetupService.configureTelegram(body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/channels/telegram/approve") {
+        const body = await readJson<PairingApprovalRequest>(request);
+        sendJson(response, 200, await channelSetupService.approvePairing("telegram", body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/channels/whatsapp/login") {
+        sendJson(response, 200, await channelSetupService.startWhatsappLogin());
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/channels/whatsapp/approve") {
+        const body = await readJson<PairingApprovalRequest>(request);
+        sendJson(response, 200, await channelSetupService.approvePairing("whatsapp", body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/channels/wechat") {
+        const body = await readJson<WechatSetupRequest>(request);
+        sendJson(response, 200, await channelSetupService.configureWechatWorkaround(body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/channels/gateway/start") {
+        sendJson(response, 200, await channelSetupService.startGateway());
         return;
       }
 

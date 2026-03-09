@@ -22,6 +22,24 @@ export class OverviewService {
     const engine = await this.adapter.status();
     const healthChecks = await this.adapter.healthCheck(state.selectedProfileId);
     const appService = await this.appServiceManager.getStatus();
+    const liveWhatsapp = await this.adapter.getChannelState("whatsapp");
+    const storedChannels = state.channelOnboarding?.channels ?? {};
+    const baseChannels = Object.fromEntries(base.channelSetup.channels.map((channel) => [channel.id, channel])) as Record<
+      "telegram" | "whatsapp" | "wechat",
+      (typeof base.channelSetup.channels)[number]
+    >;
+    const mergedChannels = {
+      telegram: storedChannels.telegram ?? baseChannels.telegram,
+      whatsapp:
+        liveWhatsapp.status !== "not-started" || liveWhatsapp.logs?.length
+          ? liveWhatsapp
+          : storedChannels.whatsapp ?? baseChannels.whatsapp,
+      wechat: storedChannels.wechat ?? baseChannels.wechat
+    };
+    const onboardingCompleted = Boolean(state.channelOnboarding?.baseOnboardingCompletedAt);
+    const nextChannelId = onboardingCompleted
+      ? (["telegram", "whatsapp", "wechat"] as const).find((channelId) => mergedChannels[channelId].status !== "completed")
+      : undefined;
 
     return {
       ...base,
@@ -34,6 +52,19 @@ export class OverviewService {
       engine,
       capabilities: this.adapter.capabilities,
       installSpec: this.adapter.installSpec,
+      channelSetup: {
+        baseOnboardingCompleted: onboardingCompleted,
+        channels: [mergedChannels.telegram, mergedChannels.whatsapp, mergedChannels.wechat],
+        nextChannelId,
+        gatewayStarted: Boolean(state.channelOnboarding?.gatewayStartedAt),
+        gatewaySummary: state.channelOnboarding?.gatewayStartedAt
+          ? "Gateway restarted after channel setup."
+          : !onboardingCompleted
+            ? "Complete OpenClaw onboarding before setting up channels and starting the gateway."
+          : nextChannelId
+            ? `Next recommended channel: ${mergedChannels[nextChannelId].title}.`
+            : "All channel setup steps are complete. Restart the gateway to load every channel."
+      },
       healthChecks,
       recentTasks: state.tasks.slice(-5).reverse(),
       profiles: base.profiles,
@@ -42,10 +73,15 @@ export class OverviewService {
   }
 
   async completeOnboarding(selection: OnboardingSelection): Promise<ProductOverview> {
-    await this.adapter.configure(selection.profileId);
+    await this.adapter.onboard(selection.profileId);
     await this.store.update((current) => ({
       ...current,
-      selectedProfileId: selection.profileId
+      selectedProfileId: selection.profileId,
+      channelOnboarding: {
+        baseOnboardingCompletedAt: current.channelOnboarding?.baseOnboardingCompletedAt ?? new Date().toISOString(),
+        gatewayStartedAt: current.channelOnboarding?.gatewayStartedAt,
+        channels: current.channelOnboarding?.channels ?? {}
+      }
     }));
 
     return this.getOverview();

@@ -1,5 +1,9 @@
+import { statfs } from "node:fs/promises";
+import { homedir } from "node:os";
+
 import {
   createDefaultProductOverview,
+  type InstallCheck,
   type OnboardingSelection,
   type ProductOverview,
   type RecoveryAction
@@ -7,6 +11,7 @@ import {
 
 import type { EngineAdapter } from "../engine/adapter.js";
 import { AppServiceManager } from "./app-service-manager.js";
+import { getDefaultAppSupportDir } from "../runtime-paths.js";
 import { StateStore } from "./state-store.js";
 
 export class OverviewService {
@@ -22,6 +27,7 @@ export class OverviewService {
     const engine = await this.adapter.status();
     const healthChecks = await this.adapter.healthCheck(state.selectedProfileId);
     const appService = await this.appServiceManager.getStatus();
+    const installChecks = await this.getInstallChecks(base.installSpec.prerequisites);
     const liveWhatsapp = await this.adapter.getChannelState("whatsapp");
     const storedChannels = state.channelOnboarding?.channels ?? {};
     const baseChannels = Object.fromEntries(base.channelSetup.channels.map((channel) => [channel.id, channel])) as Record<
@@ -52,6 +58,7 @@ export class OverviewService {
       engine,
       capabilities: this.adapter.capabilities,
       installSpec: this.adapter.installSpec,
+      installChecks,
       channelSetup: {
         baseOnboardingCompleted: onboardingCompleted,
         channels: [mergedChannels.telegram, mergedChannels.whatsapp, mergedChannels.wechat],
@@ -90,5 +97,69 @@ export class OverviewService {
   async findRecoveryAction(actionId: string): Promise<RecoveryAction | undefined> {
     const overview = await this.getOverview();
     return overview.recoveryActions.find((action) => action.id === actionId);
+  }
+
+  private async getInstallChecks(prerequisites: string[]): Promise<InstallCheck[]> {
+    const minimumDiskGb = this.extractDiskRequirement(prerequisites) ?? 2;
+    const checks: InstallCheck[] = [
+      {
+        id: "platform",
+        label: "Supported macOS version",
+        status: process.platform === "darwin" ? "passed" : "action-required",
+        detail:
+          process.platform === "darwin"
+            ? `Running on macOS. SlackClaw is supported on this platform.`
+            : `SlackClaw currently targets macOS first, but this machine reports ${process.platform}.`
+      },
+      {
+        id: "disk",
+        label: "Free disk space",
+        status: "pending",
+        detail: "SlackClaw is checking available disk space."
+      },
+      {
+        id: "permissions",
+        label: "Document access permission",
+        status: "passed",
+        detail: "SlackClaw will request file access only when you explicitly choose local documents or folders."
+      }
+    ];
+
+    try {
+      const targetPath = process.env.SLACKCLAW_DATA_DIR ?? getDefaultAppSupportDir() ?? homedir();
+      const stats = await statfs(targetPath);
+      const availableBytes = stats.bavail * stats.bsize;
+      const availableGb = availableBytes / 1024 / 1024 / 1024;
+      const roundedGb = availableGb >= 10 ? Math.round(availableGb) : Number(availableGb.toFixed(1));
+      checks[1] = {
+        id: "disk",
+        label: "Free disk space",
+        status: availableGb >= minimumDiskGb ? "passed" : "action-required",
+        detail:
+          availableGb >= minimumDiskGb
+            ? `${roundedGb} GB is available. SlackClaw has enough free space for OpenClaw and starter assets.`
+            : `${roundedGb} GB is available. SlackClaw recommends at least ${minimumDiskGb} GB free before deployment.`
+      };
+    } catch {
+      checks[1] = {
+        id: "disk",
+        label: "Free disk space",
+        status: "action-required",
+        detail: "SlackClaw could not verify free disk space automatically. Deployment can still continue."
+      };
+    }
+
+    return checks;
+  }
+
+  private extractDiskRequirement(prerequisites: string[]): number | undefined {
+    for (const prerequisite of prerequisites) {
+      const match = prerequisite.match(/(\d+(?:\.\d+)?)\s*GB/i);
+      if (match) {
+        return Number(match[1]);
+      }
+    }
+
+    return undefined;
   }
 }

@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  EngineActionResponse,
   ChannelSetupState,
   EngineCapabilities,
   EngineInstallSpec,
+  ModelAuthSessionInputRequest,
+  ModelAuthSessionResponse,
+  ModelAuthRequest,
+  ModelConfigActionResponse,
+  ModelConfigOverview,
+  ModelProviderConfig,
   EngineStatus,
   EngineTaskRequest,
   EngineTaskResult,
@@ -40,6 +47,19 @@ export class MockAdapter implements EngineAdapter {
 
   private installed = true;
   private profileId = "email-admin";
+  private readonly providerCatalog: ModelProviderConfig[] = [
+    {
+      id: "openai",
+      label: "OpenAI",
+      description: "Mock OpenAI provider.",
+      docsUrl: "https://docs.openclaw.ai/providers/docs/openai",
+      providerRefs: ["openai/"],
+      authMethods: [{ id: "api-key", label: "API Key", kind: "api-key", description: "Paste an API key.", interactive: false, fields: [{ id: "apiKey", label: "API Key", required: true, secret: true }] }],
+      configured: true,
+      modelCount: 2,
+      sampleModels: ["openai/gpt-4o-mini", "openai/gpt-5"]
+    }
+  ];
   private readonly channels: Record<string, ChannelSetupState> = {
     telegram: {
       id: "telegram",
@@ -73,6 +93,80 @@ export class MockAdapter implements EngineAdapter {
       status: "already-installed",
       message: "Mock OpenClaw runtime is deployed and ready for onboarding.",
       engineStatus: await this.status()
+    };
+  }
+
+  async uninstall(): Promise<EngineActionResponse> {
+    this.installed = false;
+    return {
+      action: "uninstall-engine",
+      status: "completed",
+      message: "Mock OpenClaw runtime was removed.",
+      engineStatus: await this.status()
+    };
+  }
+
+  async getModelConfig(): Promise<ModelConfigOverview> {
+    return {
+      providers: this.providerCatalog,
+      models: [
+        {
+          key: "openai/gpt-4o-mini",
+          name: "GPT-4o Mini",
+          input: "text+image",
+          contextWindow: 128000,
+          local: false,
+          available: true,
+          tags: ["default", "configured"],
+          missing: false
+        },
+        {
+          key: "openai/gpt-5",
+          name: "GPT-5",
+          input: "text+image",
+          contextWindow: 400000,
+          local: false,
+          available: true,
+          tags: ["configured"],
+          missing: false
+        }
+      ],
+      defaultModel: "openai/gpt-4o-mini",
+      configuredModelKeys: ["openai/gpt-4o-mini", "openai/gpt-5"]
+    };
+  }
+
+  async authenticateModelProvider(_request: ModelAuthRequest): Promise<ModelConfigActionResponse> {
+    return {
+      status: "completed",
+      message: "Mock provider authentication completed.",
+      modelConfig: await this.getModelConfig()
+    };
+  }
+
+  async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
+    return {
+      session: {
+        id: sessionId,
+        providerId: "openai",
+        methodId: "openai-codex",
+        status: "completed",
+        message: "Mock interactive auth flow already completed.",
+        logs: ["Mock auth session completed."]
+      },
+      modelConfig: await this.getModelConfig()
+    };
+  }
+
+  async submitModelAuthSessionInput(sessionId: string, _request: ModelAuthSessionInputRequest): Promise<ModelAuthSessionResponse> {
+    return this.getModelAuthSession(sessionId);
+  }
+
+  async setDefaultModel(modelKey: string): Promise<ModelConfigActionResponse> {
+    return {
+      status: "completed",
+      message: `Mock default model set to ${modelKey}.`,
+      modelConfig: await this.getModelConfig()
     };
   }
 

@@ -78,6 +78,55 @@ export interface EngineTaskStep {
   status: "pending" | "running" | "done";
 }
 
+export type ModelAuthMethodKind = "api-key" | "oauth" | "setup-token" | "local" | "custom";
+
+export interface ModelAuthField {
+  id: string;
+  label: string;
+  required: boolean;
+  secret?: boolean;
+  placeholder?: string;
+}
+
+export interface ModelAuthMethod {
+  id: string;
+  label: string;
+  kind: ModelAuthMethodKind;
+  description: string;
+  interactive: boolean;
+  fields: ModelAuthField[];
+}
+
+export interface ModelCatalogEntry {
+  key: string;
+  name: string;
+  input: string;
+  contextWindow: number;
+  local: boolean;
+  available: boolean;
+  tags: string[];
+  missing: boolean;
+}
+
+export interface ModelProviderConfig {
+  id: string;
+  label: string;
+  description: string;
+  docsUrl: string;
+  providerRefs: string[];
+  authMethods: ModelAuthMethod[];
+  configured: boolean;
+  modelCount: number;
+  sampleModels: string[];
+}
+
+export interface ModelConfigOverview {
+  providers: ModelProviderConfig[];
+  models: ModelCatalogEntry[];
+  defaultModel?: string;
+  configuredModelKeys: string[];
+}
+
 export interface EngineTaskResult {
   taskId: string;
   title: string;
@@ -185,6 +234,44 @@ export interface OnboardingSelection {
   profileId: string;
 }
 
+export interface ModelAuthRequest {
+  providerId: string;
+  methodId: string;
+  values: Record<string, string>;
+  setDefaultModel?: string;
+}
+
+export interface ModelAuthSession {
+  id: string;
+  providerId: string;
+  methodId: string;
+  status: "running" | "awaiting-input" | "completed" | "failed";
+  message: string;
+  logs: string[];
+  launchUrl?: string;
+  inputPrompt?: string;
+}
+
+export interface ModelAuthSessionInputRequest {
+  value: string;
+}
+
+export interface ModelAuthSessionResponse {
+  session: ModelAuthSession;
+  modelConfig: ModelConfigOverview;
+}
+
+export interface SetDefaultModelRequest {
+  modelKey: string;
+}
+
+export interface ModelConfigActionResponse {
+  status: "completed" | "failed" | "interactive";
+  message: string;
+  modelConfig: ModelConfigOverview;
+  authSession?: ModelAuthSession;
+}
+
 export interface RecoveryRunResponse {
   actionId: string;
   status: "completed" | "failed";
@@ -210,6 +297,13 @@ export interface AppControlResponse {
   action: "stop-app" | "uninstall-app";
   status: "completed" | "failed";
   message: string;
+}
+
+export interface EngineActionResponse {
+  action: "uninstall-engine";
+  status: "completed" | "failed";
+  message: string;
+  engineStatus: EngineStatus;
 }
 
 export interface TelegramSetupRequest {
@@ -308,7 +402,7 @@ export function createDefaultProductOverview(): ProductOverview {
 
   return {
     appName: "SlackClaw",
-    appVersion: "0.1.1",
+    appVersion: "0.1.2",
     platformTarget: "macOS first",
     firstRun: {
       introCompleted: false,

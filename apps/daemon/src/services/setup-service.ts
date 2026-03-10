@@ -51,13 +51,6 @@ export class SetupService {
       detail: installResult.message
     });
 
-    steps.push({
-      id: "onboarding-required",
-      title: "Run OpenClaw onboarding next",
-      status: "pending",
-      detail: "OpenClaw is deployed. The next step is onboarding, then channel setup, then gateway start."
-    });
-
     const finalStatus = await this.adapter.status();
     const setupCompleted = finalStatus.installed;
 
@@ -75,7 +68,7 @@ export class SetupService {
       status: failedStep ? "failed" : "completed",
       message: failedStep
         ? "SlackClaw finished part of setup, but OpenClaw still needs attention."
-        : "OpenClaw is deployed. Continue with onboarding before starting the gateway.",
+        : "OpenClaw deployment is complete. Continue to Configuration for onboarding and channel setup.",
       steps,
       overview,
       install: installResult

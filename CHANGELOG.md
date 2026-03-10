@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.2 - 2026-03-10
+
+### Fixed
+
+- SlackClaw now detects provider authentication readiness from `openclaw models status --json`, so OAuth and auth-profile flows can flip from `Configure` to `Add Model` before a default model is applied.
+- The `Add New Model` dialog now keeps polling backend OpenClaw model/provider state after `Configure` until the selected provider is actually marked configured.
+- Locale switching now updates the Figma-based configuration UI instead of leaving large parts of the screen hardcoded in English.
+
+### Changed
+
+- The app-shell language selector now follows the Figma shell position and pattern, with a compact globe-and-flag control in the main-content header instead of the sidebar footer.
+- The `Configuration -> Add New Model` flow now follows the Figma Make design more closely:
+  - provider grid first
+  - selected-provider banner second
+  - provider-logo tiles instead of generic initials
+  - system-font treatment and wider dialog layout
+- Model setup is now a two-step action in the dialog:
+  - `Configure` authenticates the provider in OpenClaw
+  - `Add Model` applies the selected model and closes the dialog after the refreshed backend state is reflected in SlackClaw
+- Switching providers in the add-model dialog now defaults to that provider's own sample model instead of incorrectly prefilling the current global default from another provider.
+
 ## 0.1.1 - 2026-03-09
 
 ### Fixed

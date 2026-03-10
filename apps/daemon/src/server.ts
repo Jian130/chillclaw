@@ -6,7 +6,10 @@ import type {
   PairingApprovalRequest,
   EngineTaskRequest,
   InstallRequest,
+  ModelAuthSessionInputRequest,
+  ModelAuthRequest,
   OnboardingSelection,
+  SetDefaultModelRequest,
   TelegramSetupRequest,
   WechatSetupRequest
 } from "@slackclaw/contracts";
@@ -15,7 +18,7 @@ import { createEngineAdapter } from "./engine/registry.js";
 import { AppControlService } from "./services/app-control-service.js";
 import { AppServiceManager } from "./services/app-service-manager.js";
 import { ChannelSetupService } from "./services/channel-setup-service.js";
-import { errorToLogDetails, writeErrorLog } from "./services/logger.js";
+import { errorToLogDetails, writeErrorLog, writeInfoLog } from "./services/logger.js";
 import { OverviewService } from "./services/overview-service.js";
 import { SetupService } from "./services/setup-service.js";
 import { StateStore } from "./services/state-store.js";
@@ -124,11 +127,56 @@ export function startServer(port = 4545) {
         return;
       }
 
+      if (request.method === "GET" && request.url === "/api/models/config") {
+        sendJson(response, 200, await adapter.getModelConfig());
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/models/auth") {
+        const body = await readJson<ModelAuthRequest>(request);
+        sendJson(response, 200, await adapter.authenticateModelProvider(body));
+        return;
+      }
+
+      if (request.method === "GET" && request.url.startsWith("/api/models/auth/session/")) {
+        const sessionId = request.url.slice("/api/models/auth/session/".length);
+        sendJson(response, 200, await adapter.getModelAuthSession(sessionId));
+        return;
+      }
+
+      if (request.method === "POST" && request.url.startsWith("/api/models/auth/session/") && request.url.endsWith("/input")) {
+        const sessionId = request.url.slice("/api/models/auth/session/".length, -"/input".length);
+        const body = await readJson<ModelAuthSessionInputRequest>(request);
+        sendJson(response, 200, await adapter.submitModelAuthSessionInput(sessionId, body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/models/default") {
+        const body = await readJson<SetDefaultModelRequest>(request);
+        sendJson(response, 200, await adapter.setDefaultModel(body.modelKey));
+        return;
+      }
+
       if (request.method === "POST" && request.url === "/api/install") {
         const body = await readJson<InstallRequest>(request);
         const result = await adapter.install(body.autoConfigure ?? true, { forceLocal: body.forceLocal ?? false });
         sendJson(response, 200, {
           install: result,
+          overview: await overviewService.getOverview()
+        });
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/engine/uninstall") {
+        const result = await adapter.uninstall();
+        await store.update((current) => ({
+          ...current,
+          setupCompletedAt: undefined,
+          selectedProfileId: undefined,
+          channelOnboarding: undefined
+        }));
+        sendJson(response, 200, {
+          result,
           overview: await overviewService.getOverview()
         });
         return;
@@ -268,6 +316,10 @@ export function startServer(port = 4545) {
         }
       }
 
+      void writeErrorLog("Daemon API route not found.", {
+        method: request.method,
+        url: request.url
+      });
       sendJson(response, 404, { error: "Route not found." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -281,6 +333,10 @@ export function startServer(port = 4545) {
   });
 
   server.listen(port, "127.0.0.1");
+  void writeInfoLog("SlackClaw daemon server started.", {
+    port,
+    appVersion: "0.1.2"
+  });
 
   return server;
 }

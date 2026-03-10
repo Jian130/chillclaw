@@ -679,17 +679,22 @@ const translations = {
 
 type TranslationKey = keyof typeof translations.en;
 
-export const localeOptions: Array<{ value: Locale; label: string }> = [
-  { value: "en", label: "English" },
-  { value: "zh", label: "中文" },
-  { value: "ja", label: "日本語" },
-  { value: "ko", label: "한국어" },
-  { value: "es", label: "Español" }
+export const localeOptions: Array<{ value: Locale; label: string; flag: string }> = [
+  { value: "en", label: "English", flag: "🇺🇸" },
+  { value: "zh", label: "中文", flag: "🇨🇳" },
+  { value: "ja", label: "日本語", flag: "🇯🇵" },
+  { value: "ko", label: "한국어", flag: "🇰🇷" },
+  { value: "es", label: "Español", flag: "🇪🇸" }
 ];
 
 export function detectLocale(): Locale {
   if (typeof window === "undefined") {
     return "en";
+  }
+
+  const storedLocale = window.localStorage.getItem("slackclaw.locale");
+  if (storedLocale === "en" || storedLocale === "zh" || storedLocale === "ja" || storedLocale === "ko" || storedLocale === "es") {
+    return storedLocale;
   }
 
   const language = window.navigator.language.toLowerCase();

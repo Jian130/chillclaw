@@ -1,7 +1,13 @@
 import type {
+  EngineActionResponse,
   ChannelSetupState,
   EngineCapabilities,
   EngineInstallSpec,
+  ModelAuthSessionResponse,
+  ModelAuthRequest,
+  ModelAuthSessionInputRequest,
+  ModelConfigActionResponse,
+  ModelConfigOverview,
   EngineStatus,
   EngineTaskRequest,
   EngineTaskResult,
@@ -19,6 +25,12 @@ export interface EngineAdapter {
   readonly capabilities: EngineCapabilities;
 
   install(autoConfigure: boolean, options?: { forceLocal?: boolean }): Promise<InstallResponse>;
+  uninstall(): Promise<EngineActionResponse>;
+  getModelConfig(): Promise<ModelConfigOverview>;
+  authenticateModelProvider(request: ModelAuthRequest): Promise<ModelConfigActionResponse>;
+  getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse>;
+  submitModelAuthSessionInput(sessionId: string, request: ModelAuthSessionInputRequest): Promise<ModelAuthSessionResponse>;
+  setDefaultModel(modelKey: string): Promise<ModelConfigActionResponse>;
   onboard(profileId: string): Promise<void>;
   configure(profileId: string): Promise<void>;
   status(): Promise<EngineStatus>;

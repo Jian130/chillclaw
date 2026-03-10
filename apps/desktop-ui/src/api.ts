@@ -1,16 +1,22 @@
 import type {
   ChannelActionResponse,
   AppControlResponse,
+  EngineActionResponse,
   AppServiceActionResponse,
+  ModelAuthSessionInputRequest,
+  ModelAuthSessionResponse,
   EngineTaskRequest,
   EngineTaskResult,
   InstallResponse,
+  ModelAuthRequest,
+  ModelConfigActionResponse,
+  ModelConfigOverview,
   OnboardingSelection,
   PairingApprovalRequest,
   ProductOverview,
   RecoveryRunResponse
 } from "@slackclaw/contracts";
-import type { SetupRunResponse, TelegramSetupRequest, WechatSetupRequest } from "@slackclaw/contracts";
+import type { SetDefaultModelRequest, SetupRunResponse, TelegramSetupRequest, WechatSetupRequest } from "@slackclaw/contracts";
 
 const API_BASE =
   typeof window !== "undefined" && window.location.origin.includes("127.0.0.1:4545")
@@ -53,6 +59,35 @@ export function markFirstRunIntroComplete(): Promise<ProductOverview> {
   });
 }
 
+export function fetchModelConfig(): Promise<ModelConfigOverview> {
+  return readJson<ModelConfigOverview>("/models/config");
+}
+
+export function authenticateModelProvider(request: ModelAuthRequest): Promise<ModelConfigActionResponse> {
+  return readJson<ModelConfigActionResponse>("/models/auth", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function fetchModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
+  return readJson<ModelAuthSessionResponse>(`/models/auth/session/${sessionId}`);
+}
+
+export function submitModelAuthSessionInput(sessionId: string, request: ModelAuthSessionInputRequest): Promise<ModelAuthSessionResponse> {
+  return readJson<ModelAuthSessionResponse>(`/models/auth/session/${sessionId}/input`, {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function setDefaultModel(request: SetDefaultModelRequest): Promise<ModelConfigActionResponse> {
+  return readJson<ModelConfigActionResponse>("/models/default", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
 export function runFirstRunSetup(forceLocal = false): Promise<SetupRunResponse> {
   return readJson<SetupRunResponse>("/first-run/setup", {
     method: "POST",
@@ -67,6 +102,12 @@ export function installSlackClaw(
   return readJson<{ install: InstallResponse; overview: ProductOverview }>("/install", {
     method: "POST",
     body: JSON.stringify({ autoConfigure, forceLocal })
+  });
+}
+
+export function uninstallEngine(): Promise<{ result: EngineActionResponse; overview: ProductOverview }> {
+  return readJson<{ result: EngineActionResponse; overview: ProductOverview }>("/engine/uninstall", {
+    method: "POST"
   });
 }
 

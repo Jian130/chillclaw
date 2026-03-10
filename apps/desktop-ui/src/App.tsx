@@ -4,9 +4,9 @@ import type {
   ChannelSetupState,
   EngineTaskResult,
   HealthCheckResult,
-  InstallResponse,
+  ModelAuthSession,
+  ModelConfigOverview,
   ProductOverview,
-  RecoveryAction,
   SetupStepResult,
   TaskTemplate
 } from "@slackclaw/contracts";
@@ -14,366 +14,2467 @@ import type {
 import {
   approveTelegramPairing,
   approveWhatsappPairing,
+  authenticateModelProvider,
   completeOnboarding,
   exportDiagnostics,
+  fetchModelAuthSession,
   fetchOverview,
+  fetchModelConfig,
   installAppService,
-  installSlackClaw,
   markFirstRunIntroComplete,
   restartAppService,
   runFirstRunSetup,
-  runRecovery,
   runTask,
   runUpdate,
+  setDefaultModel,
   setupTelegramChannel,
   setupWechatWorkaround,
   startGatewayAfterChannels,
   startWhatsappLogin,
+  submitModelAuthSessionInput,
   stopSlackClawApp,
-  uninstallSlackClawApp,
-  uninstallAppService
+  uninstallEngine,
+  uninstallAppService,
+  uninstallSlackClawApp
 } from "./api.js";
 import { detectLocale, localeOptions, t, type Locale } from "./i18n.js";
 
-function SectionHeader(props: { eyebrow: string; title: string; detail: string }) {
-  return (
-    <header className="section-header">
-      <p className="eyebrow">{props.eyebrow}</p>
-      <h2>{props.title}</h2>
-      <p className="detail">{props.detail}</p>
-    </header>
-  );
+type View = "dashboard" | "deploy" | "config" | "skills" | "chat" | "settings" | "onboarding";
+type ConfigTab = "models" | "channels";
+type SettingsTab = "general" | "deployment" | "logging" | "advanced";
+type SkillsTab = "all" | "enabled" | "disabled";
+
+interface LocalSettingsState {
+  general: {
+    instanceName: string;
+    autoStart: boolean;
+    checkUpdates: boolean;
+    telemetry: boolean;
+  };
+  deployment: {
+    autoRestart: boolean;
+    maxRetries: number;
+    healthCheck: boolean;
+  };
+  logging: {
+    level: string;
+    retention: number;
+    enableDebug: boolean;
+  };
 }
 
-function summarizeInstallDisposition(locale: Locale, install: InstallResponse): string {
-  switch (install.disposition) {
-    case "reused-existing":
-      return t(locale, "installOutcomeReused");
-    case "installed":
-      return t(locale, "installOutcomeInstalled");
-    case "reinstalled":
-      return t(locale, "installOutcomeReinstalled");
-    case "onboarded":
-      return t(locale, "installOutcomeOnboarded");
-    default:
-      return install.message;
+interface SkillItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+  preloaded: boolean;
+  icon: string;
+}
+
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  meta?: string;
+}
+
+const defaultSettingsState: LocalSettingsState = {
+  general: {
+    instanceName: "My SlackClaw Instance",
+    autoStart: true,
+    checkUpdates: true,
+    telemetry: false
+  },
+  deployment: {
+    autoRestart: true,
+    maxRetries: 3,
+    healthCheck: true
+  },
+  logging: {
+    level: "info",
+    retention: 30,
+    enableDebug: false
   }
-}
+};
 
-function formatInstallSource(locale: Locale, source: ProductOverview["installSpec"]["installSource"]): string {
-  switch (source) {
-    case "npm-local":
-      return t(locale, "installSourceManagedLocal");
-    case "npm-global":
-      return t(locale, "installSourceGlobal");
-    default:
-      return source;
-  }
-}
-
-function severityRank(check: HealthCheckResult): number {
+function statusTone(check: HealthCheckResult): "good" | "warn" | "bad" {
   switch (check.severity) {
     case "error":
-      return 3;
+      return "bad";
     case "warning":
-      return 2;
-    case "info":
-      return 1;
+      return "warn";
     default:
-      return 0;
+      return "good";
   }
 }
 
-function setupStepTitle(locale: Locale, step: SetupStepResult): string {
-  switch (step.id) {
-    case "check-existing-openclaw":
-      return t(locale, "setupStepCheckOpenClaw");
-    case "prepare-openclaw":
-      return t(locale, "setupStepPrepareOpenClaw");
-    case "onboarding-required":
-      return t(locale, "onboardingTitle");
-    case "ensure-engine-running":
-      return t(locale, "setupStepEnsureRunning");
-    default:
-      return step.title;
+function channelTone(status: ChannelSetupState["status"]): "good" | "warn" | "bad" {
+  if (status === "completed" || status === "ready") {
+    return "good";
+  }
+
+  if (status === "failed") {
+    return "bad";
+  }
+
+  return "warn";
+}
+
+function toSkillItems(templates: TaskTemplate[]): SkillItem[] {
+  const icons = ["🔍", "📊", "✍️", "⚙️", "✉️", "📝", "🌐", "🧾"];
+
+  return templates.map((template, index) => ({
+    id: template.id,
+    name: template.title,
+    description: template.description,
+    category: template.category,
+    enabled: index < 5,
+    preloaded: true,
+    icon: icons[index % icons.length]
+  }));
+}
+
+function loadStoredJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
   }
 }
 
-function SetupStepStatus(props: { status: SetupStepResult["status"] }) {
-  return <span className={`status-pill ${props.status === "completed" ? "ok" : "warning"}`}>{props.status}</span>;
-}
-
-function AppControlButtons(props: {
-  locale: Locale;
-  busy: string | null;
-  onAction: (action: "stop" | "uninstall") => Promise<void>;
-}) {
-  return (
-    <div className="action-row">
-      <button className="ghost" onClick={() => void props.onAction("stop")} disabled={props.busy !== null}>
-        {props.busy === "app-stop" ? t(props.locale, "stoppingApp") : t(props.locale, "stopApp")}
-      </button>
-      <button className="ghost" onClick={() => void props.onAction("uninstall")} disabled={props.busy !== null}>
-        {props.busy === "app-uninstall" ? t(props.locale, "uninstallingApp") : t(props.locale, "uninstallApp")}
-      </button>
-    </div>
-  );
-}
-
-function LoadingIndicator(props: { label: string }) {
-  return (
-    <div className="loading-indicator" aria-live="polite">
-      <span className="spinner" aria-hidden="true" />
-      <strong>{props.label}</strong>
-    </div>
-  );
-}
-
-function channelStatusClass(status: ChannelSetupState["status"]): string {
-  return status === "completed" || status === "ready" ? "ok" : "warning";
-}
-
-function gatewayDisplayStatus(overview: ProductOverview): { label: string; tone: "ok" | "warning" } {
-  if (overview.engine.running) {
-    return { label: "Reachable", tone: "ok" };
-  }
-
-  return { label: "Pending setup", tone: "warning" };
-}
-
-function installHealthChip(overview: ProductOverview): { label: string; tone: "ok" | "warning" } {
-  if (overview.engine.installed) {
-    return {
-      label: overview.engine.running ? "OpenClaw ready" : "OpenClaw deployed",
-      tone: overview.engine.running ? "ok" : "warning"
-    };
-  }
-
-  return { label: "OpenClaw not detected", tone: "warning" };
-}
-
-function EnvironmentCheckCard(props: { overview: ProductOverview; locale: Locale }) {
-  const gatewayStatus = gatewayDisplayStatus(props.overview);
-  const chip = installHealthChip(props.overview);
-
-  return (
-    <section className="design-card environment-card">
-      <div className="design-card-header">
-        <strong>Environment check</strong>
-        <span className={`status-pill ${chip.tone}`}>{chip.label}</span>
-      </div>
-      <div className="env-rows">
-        <div className="env-row">
-          <span>Device OS</span>
-          <strong>{props.overview.platformTarget}</strong>
-        </div>
-        <div className="env-row">
-          <span>{t(props.locale, "installSource")}</span>
-          <strong>{formatInstallSource(props.locale, props.overview.installSpec.installSource)}</strong>
-        </div>
-        <div className="env-row">
-          <span>OpenClaw runtime</span>
-          <strong>{props.overview.engine.version ?? "Not installed"}</strong>
-        </div>
-        <div className="env-row">
-          <span>Gateway</span>
-          <strong className={gatewayStatus.tone === "ok" ? "tone-ok" : "tone-warning"}>{gatewayStatus.label}</strong>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SetupWizardCard(props: {
-  locale: Locale;
-  onboardingCompleted: boolean;
-  nextChannelId?: ProductOverview["channelSetup"]["nextChannelId"];
-  busy: string | null;
-  selectedProfileId: string;
-  profiles: ProductOverview["profiles"];
-  onSelectProfile: (profileId: string) => void;
-  onCompleteOnboarding: () => Promise<void>;
-  gatewayStarted: boolean;
-}) {
-  const stepOneDone = props.onboardingCompleted;
-  const stepTwoDone = props.gatewayStarted;
-  const currentProfile = props.profiles.find((profile) => profile.id === props.selectedProfileId);
-
-  return (
-    <section className="panel workspace-panel wizard-panel">
-      <SectionHeader
-        eyebrow={t(props.locale, "onboardingEyebrow")}
-        title="Configure OpenClaw in guided steps"
-        detail="Based on the current SlackClaw flow: deploy first, then onboarding defaults, then channel pairing, then gateway start."
-      />
-      <div className="wizard-steps">
-        <article className={`wizard-step ${stepOneDone ? "done" : "active"}`}>
-          <div className="wizard-step-head">
-            <strong>1. Run onboarding defaults</strong>
-            <span className={`wizard-badge ${stepOneDone ? "done" : "required"}`}>{stepOneDone ? "Complete" : "Required"}</span>
-          </div>
-          <p>Pick a default workflow profile and let SlackClaw write the OpenClaw onboarding defaults for this machine.</p>
-          <div className="profile-grid compact">
-            {props.profiles.map((profile) => (
-              <button
-                key={profile.id}
-                className={`profile-card ${props.selectedProfileId === profile.id ? "selected" : ""}`}
-                onClick={() => props.onSelectProfile(profile.id)}
-              >
-                <strong>{profile.name}</strong>
-                <span>{profile.description}</span>
-              </button>
-            ))}
-          </div>
-          <div className="wizard-step-footer">
-            <span className="micro">Current default: {currentProfile?.name ?? props.selectedProfileId}</span>
-            <button className="primary" onClick={() => void props.onCompleteOnboarding()} disabled={props.busy !== null}>
-              {props.busy === "onboarding" ? t(props.locale, "savingDefaults") : t(props.locale, "completeOnboarding")}
-            </button>
-          </div>
-        </article>
-
-        <article className={`wizard-step ${stepOneDone ? (stepTwoDone ? "done" : "next") : "locked"}`}>
-          <div className="wizard-step-head">
-            <strong>2. Pair channels and start gateway</strong>
-            <span className={`wizard-badge ${stepOneDone ? (stepTwoDone ? "done" : "next") : "locked"}`}>
-              {!stepOneDone ? "Locked" : stepTwoDone ? "Complete" : props.nextChannelId ? "Next" : "Ready"}
-            </span>
-          </div>
-          <p>
-            SlackClaw will guide Telegram first, then WhatsApp, then the experimental WeChat workaround, and only then restart the gateway.
-          </p>
-          <ul className="wizard-bullets">
-            <li>Start OpenClaw pairing flows inside SlackClaw.</li>
-            <li>Approve pairing codes for each supported channel.</li>
-            <li>Restart the gateway after every required channel step is complete.</li>
-          </ul>
-          <div className="wizard-step-footer">
-            <span className="micro">
-              {!stepOneDone ? t(props.locale, "baseOnboardingPending") : props.nextChannelId ? `Next channel: ${props.nextChannelId}` : "All channels configured"}
-            </span>
-          </div>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-function ChatConsolePreview(props: {
-  locale: Locale;
-  selectedTemplateId: string;
-  setSelectedTemplateId: (value: string) => void;
-  setPrompt: (value: string) => void;
-  templates: TaskTemplate[];
-  selectedTemplate?: TaskTemplate;
-  prompt: string;
-  onPromptChange: (value: string) => void;
-  workflowReady: boolean;
-  gatewaySummary: string;
-  busy: string | null;
-  onRun: () => Promise<void>;
-  taskResult: EngineTaskResult | null;
-}) {
-  return (
-    <section className="panel workspace-panel console-panel">
-      <SectionHeader
-        eyebrow={t(props.locale, "firstTaskEyebrow")}
-        title="Live Chat Console"
-        detail="Use a starter task on the left, then run it through SlackClaw’s local OpenClaw session on the right."
-      />
-      <div className="console-wrap">
-        <aside className="console-sidebar">
-          <span className="console-label">Channels</span>
-          {props.templates.map((template) => (
-            <button
-              key={template.id}
-              className={`console-channel ${props.selectedTemplateId === template.id ? "selected" : ""}`}
-              onClick={() => {
-                props.setSelectedTemplateId(template.id);
-                props.setPrompt(template.promptHint);
-              }}
-            >
-              {template.title}
-            </button>
-          ))}
-        </aside>
-        <div className="console-chat">
-          <p className="console-meta">
-            Session: slackclaw-local | Model: default | Channel: {props.selectedTemplate?.title ?? "Starter task"}
-          </p>
-          <div className="console-messages">
-            <article className="console-message user">
-              <strong>User</strong>
-              <p>{props.prompt || props.selectedTemplate?.promptHint || "Type command or prompt..."}</p>
-            </article>
-            <article className="console-message bot">
-              <strong>SlackClaw</strong>
-              <p>
-                {props.taskResult?.summary ??
-                  "OpenClaw will reply here after onboarding is complete, your channels are configured, and the gateway is running."}
-              </p>
-            </article>
-          </div>
-          <div className="console-composer">
-            <label>
-              <span>{t(props.locale, "prompt")}</span>
-              <textarea
-                value={props.prompt}
-                onChange={(event) => props.onPromptChange(event.target.value)}
-                placeholder={props.selectedTemplate?.promptHint ?? "Type command or prompt..."}
-              />
-            </label>
-            {!props.workflowReady ? <p className="detail">{props.gatewaySummary}</p> : null}
-            <div className="action-row">
-              <button className="primary" onClick={() => void props.onRun()} disabled={props.busy !== null || !props.workflowReady}>
-                {props.busy === "task" ? t(props.locale, "runningTask") : "Send"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      {props.taskResult ? (
-        <div className="result-card console-result">
-          <h3>{t(props.locale, "latestResult")}</h3>
-          <p className="result-summary">{props.taskResult.summary}</p>
-          <pre>{props.taskResult.output}</pre>
-          <div className="chip-row">
-            {props.taskResult.nextActions.map((action) => (
-              <span key={action} className="chip">
-                {action}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function attemptCloseUi() {
+function saveStoredJson(key: string, value: unknown) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.setTimeout(() => {
-    window.close();
-    window.location.replace("about:blank");
-  }, 500);
+  window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function formatTime(value: string): string {
+  return new Date(value).toLocaleString();
+}
+
+function providerGlyph(label: string): string {
+  const normalized = label.toLowerCase();
+  const logoMap: Array<[string, string]> = [
+    ["openai", "🤖"],
+    ["codex", "🤖"],
+    ["anthropic", "🧠"],
+    ["google", "🔵"],
+    ["gemini", "🔵"],
+    ["azure", "☁️"],
+    ["cohere", "🌊"],
+    ["mistral", "🌬️"],
+    ["hugging face", "🤗"],
+    ["huggingface", "🤗"],
+    ["replicate", "🔄"],
+    ["together", "🤝"],
+    ["groq", "⚡"],
+    ["perplexity", "🔍"],
+    ["deepseek", "🎯"],
+    ["openrouter", "🛣️"],
+    ["ollama", "🏠"],
+    ["github", "🐙"],
+    ["copilot", "🐙"],
+    ["qwen", "🌐"],
+    ["minimax", "🎵"],
+    ["moonshot", "🌙"],
+    ["kimi", "🌙"],
+    ["xai", "❌"],
+    ["z.ai", "🟢"],
+    ["zai", "🟢"],
+    ["custom", "⚙️"]
+  ];
+
+  const matched = logoMap.find(([key]) => normalized.includes(key));
+  if (matched) {
+    return matched[1];
+  }
+
+  const words = label.split(/[\s/.-]+/).filter(Boolean);
+  const letters = words.slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "");
+  return letters.join("") || "AI";
+}
+
+function authMethodTone(label: string): string {
+  if (/oauth|portal|device|login|cli/i.test(label)) {
+    return "oauth";
+  }
+
+  if (/local|runtime|aws/i.test(label)) {
+    return "local";
+  }
+
+  return "api";
+}
+
+function prettyAuthMethod(label: string): string {
+  return label.replace(/\s+/g, " ").trim();
+}
+
+function createDeploySteps(forceLocal: boolean): SetupStepResult[] {
+  return [
+    {
+      id: "check-existing-openclaw",
+      title: "Check for an existing OpenClaw installation",
+      status: "running",
+      detail: forceLocal
+        ? "SlackClaw is checking whether a managed local runtime already exists."
+        : "SlackClaw is checking for a compatible OpenClaw installation on this Mac."
+    },
+    {
+      id: "prepare-openclaw",
+      title: "Prepare OpenClaw and its required dependencies",
+      status: "pending",
+      detail: forceLocal
+        ? "SlackClaw will deploy the pinned OpenClaw runtime into its managed local folder."
+        : "SlackClaw will reuse the compatible OpenClaw installation or deploy the pinned runtime if needed."
+    }
+  ];
+}
+
+function localizeInstallCheck(
+  locale: Locale,
+  check: ProductOverview["installChecks"][number]
+): { label: string; detail: string } {
+  const localized: Record<
+    string,
+    Record<Locale, { label: string; detail: string }>
+  > = {
+    platform: {
+      en: { label: "Supported macOS version", detail: check.detail },
+      zh: { label: "受支持的 macOS 版本", detail: check.detail },
+      ja: { label: "対応する macOS バージョン", detail: check.detail },
+      ko: { label: "지원되는 macOS 버전", detail: check.detail },
+      es: { label: "Versión compatible de macOS", detail: check.detail }
+    },
+    disk: {
+      en: { label: "Free disk space", detail: check.detail },
+      zh: { label: "可用磁盘空间", detail: check.detail },
+      ja: { label: "空きディスク容量", detail: check.detail },
+      ko: { label: "사용 가능한 디스크 공간", detail: check.detail },
+      es: { label: "Espacio libre en disco", detail: check.detail }
+    },
+    permissions: {
+      en: { label: "Document access permission", detail: check.detail },
+      zh: { label: "文档访问权限", detail: check.detail },
+      ja: { label: "ドキュメントアクセス権限", detail: check.detail },
+      ko: { label: "문서 접근 권한", detail: check.detail },
+      es: { label: "Permiso de acceso a documentos", detail: check.detail }
+    }
+  };
+
+  return localized[check.id]?.[locale] ?? { label: check.label, detail: check.detail };
+}
+
+function localizedStatus(locale: Locale, status: "pending" | "passed" | "action-required"): string {
+  const map = {
+    en: { pending: "pending", passed: "passed", "action-required": "action required" },
+    zh: { pending: "等待中", passed: "通过", "action-required": "需要处理" },
+    ja: { pending: "保留中", passed: "合格", "action-required": "対応が必要" },
+    ko: { pending: "대기 중", passed: "통과", "action-required": "조치 필요" },
+    es: { pending: "pendiente", passed: "correcto", "action-required": "requiere acción" }
+  } as const;
+
+  return map[locale][status];
+}
+
+function onboardingCopy(locale: Locale) {
+  const copy = {
+    en: {
+      title: "Welcome to SlackClaw",
+      intro: "Let’s verify your system is ready for OpenClaw and then continue to deployment.",
+      systemTitle: "System Environment Check",
+      systemDetail: "SlackClaw is checking your local prerequisites before deployment.",
+      continueToDeploy: "Continue to Deploy",
+      continueToDashboard: "Continue to Dashboard",
+      readyTitle: "System check complete",
+      readyDetail: "Your environment is ready. Continue to deploy OpenClaw.",
+      reviewTitle: "Review required items",
+      reviewDetail: "SlackClaw can still continue, but some items may need attention during deployment.",
+      featureOne: "One-click deployment",
+      featureOneDetail: "Deploy OpenClaw and managed variants without terminal commands.",
+      featureTwo: "Guided configuration",
+      featureTwoDetail: "Walk through onboarding, channels, health checks, and gateway start in order.",
+      featureThree: "Live chat console",
+      featureThreeDetail: "Use OpenClaw through SlackClaw’s local-first interface once setup is complete.",
+      checkSystem: "Check System Requirements",
+      back: "Back",
+      uninstallEngine: "Uninstall OpenClaw",
+      uninstallingEngine: "Uninstalling..."
+    },
+    zh: {
+      title: "欢迎使用 SlackClaw",
+      intro: "先检查系统环境是否适合 OpenClaw，然后继续部署。",
+      systemTitle: "系统环境检查",
+      systemDetail: "SlackClaw 正在检查部署前需要的本地条件。",
+      continueToDeploy: "继续部署",
+      continueToDashboard: "继续进入控制台",
+      readyTitle: "系统检查完成",
+      readyDetail: "环境已经就绪，可以继续部署 OpenClaw。",
+      reviewTitle: "请注意以下项目",
+      reviewDetail: "SlackClaw 仍可继续，但部署过程中可能需要处理这些项目。",
+      featureOne: "一键部署",
+      featureOneDetail: "无需终端命令即可部署 OpenClaw 和托管变体。",
+      featureTwo: "引导式配置",
+      featureTwoDetail: "按顺序完成引导、频道、健康检查和网关启动。",
+      featureThree: "实时聊天控制台",
+      featureThreeDetail: "完成设置后，可通过 SlackClaw 的本地界面使用 OpenClaw。",
+      checkSystem: "检查系统要求",
+      back: "返回",
+      uninstallEngine: "卸载 OpenClaw",
+      uninstallingEngine: "卸载中..."
+    },
+    ja: {
+      title: "SlackClaw へようこそ",
+      intro: "まずは OpenClaw を動かせる環境か確認し、その後でデプロイに進みます。",
+      systemTitle: "システム環境チェック",
+      systemDetail: "SlackClaw がデプロイ前の前提条件を確認しています。",
+      continueToDeploy: "デプロイへ進む",
+      continueToDashboard: "ダッシュボードへ進む",
+      readyTitle: "システムチェック完了",
+      readyDetail: "環境の準備ができました。OpenClaw のデプロイを続けてください。",
+      reviewTitle: "確認が必要な項目があります",
+      reviewDetail: "SlackClaw は続行できますが、デプロイ中に対応が必要な場合があります。",
+      featureOne: "ワンクリックデプロイ",
+      featureOneDetail: "ターミナルなしで OpenClaw と管理バリアントをデプロイします。",
+      featureTwo: "ガイド付き設定",
+      featureTwoDetail: "オンボーディング、チャネル、ヘルスチェック、ゲートウェイ起動を順番に進めます。",
+      featureThree: "ライブチャットコンソール",
+      featureThreeDetail: "設定完了後は SlackClaw のローカル UI から OpenClaw を使えます。",
+      checkSystem: "システム要件を確認",
+      back: "戻る",
+      uninstallEngine: "OpenClaw を削除",
+      uninstallingEngine: "削除中..."
+    },
+    ko: {
+      title: "SlackClaw에 오신 것을 환영합니다",
+      intro: "먼저 OpenClaw 실행 환경을 확인한 뒤 배포로 진행합니다.",
+      systemTitle: "시스템 환경 점검",
+      systemDetail: "SlackClaw가 배포 전에 필요한 로컬 조건을 확인하고 있습니다.",
+      continueToDeploy: "배포로 계속",
+      continueToDashboard: "대시보드로 계속",
+      readyTitle: "시스템 점검 완료",
+      readyDetail: "환경 준비가 끝났습니다. OpenClaw 배포를 계속하세요.",
+      reviewTitle: "확인이 필요한 항목",
+      reviewDetail: "SlackClaw는 계속 진행할 수 있지만 배포 중 일부 항목을 확인해야 할 수 있습니다.",
+      featureOne: "원클릭 배포",
+      featureOneDetail: "터미널 없이 OpenClaw와 관리형 변형을 배포합니다.",
+      featureTwo: "가이드 설정",
+      featureTwoDetail: "온보딩, 채널, 상태 점검, 게이트웨이 시작을 순서대로 진행합니다.",
+      featureThree: "실시간 채팅 콘솔",
+      featureThreeDetail: "설정 후 SlackClaw의 로컬 UI에서 OpenClaw를 사용할 수 있습니다.",
+      checkSystem: "시스템 요구 사항 확인",
+      back: "뒤로",
+      uninstallEngine: "OpenClaw 제거",
+      uninstallingEngine: "제거 중..."
+    },
+    es: {
+      title: "Bienvenido a SlackClaw",
+      intro: "Primero comprobamos que tu sistema está listo para OpenClaw y luego seguimos con el despliegue.",
+      systemTitle: "Comprobación del entorno",
+      systemDetail: "SlackClaw está revisando los requisitos locales antes del despliegue.",
+      continueToDeploy: "Continuar al despliegue",
+      continueToDashboard: "Continuar al panel",
+      readyTitle: "Comprobación completada",
+      readyDetail: "Tu entorno está listo. Continúa con el despliegue de OpenClaw.",
+      reviewTitle: "Elementos a revisar",
+      reviewDetail: "SlackClaw puede continuar, pero algunos elementos pueden requerir atención durante el despliegue.",
+      featureOne: "Despliegue con un clic",
+      featureOneDetail: "Despliega OpenClaw y variantes gestionadas sin terminal.",
+      featureTwo: "Configuración guiada",
+      featureTwoDetail: "Sigue onboarding, canales, comprobaciones de salud y arranque del gateway en orden.",
+      featureThree: "Consola de chat en vivo",
+      featureThreeDetail: "Usa OpenClaw desde la interfaz local de SlackClaw cuando termine la configuración.",
+      checkSystem: "Comprobar requisitos",
+      back: "Atrás",
+      uninstallEngine: "Desinstalar OpenClaw",
+      uninstallingEngine: "Desinstalando..."
+    }
+  } as const;
+
+  return copy[locale];
+}
+
+function shellCopy(locale: Locale) {
+  const copy = {
+    en: {
+      dashboard: "Dashboard",
+      deploy: "Deploy",
+      configuration: "Configuration",
+      skills: "Skills",
+      chat: "Chat",
+      settings: "Settings",
+      status: "Status",
+      active: "Active",
+      needsSetup: "Needs setup"
+    },
+    zh: {
+      dashboard: "总览",
+      deploy: "部署",
+      configuration: "配置",
+      skills: "技能",
+      chat: "聊天",
+      settings: "设置",
+      status: "状态",
+      active: "运行中",
+      needsSetup: "需要设置"
+    },
+    ja: {
+      dashboard: "ダッシュボード",
+      deploy: "デプロイ",
+      configuration: "設定",
+      skills: "スキル",
+      chat: "チャット",
+      settings: "設定",
+      status: "状態",
+      active: "稼働中",
+      needsSetup: "セットアップが必要"
+    },
+    ko: {
+      dashboard: "대시보드",
+      deploy: "배포",
+      configuration: "구성",
+      skills: "스킬",
+      chat: "채팅",
+      settings: "설정",
+      status: "상태",
+      active: "실행 중",
+      needsSetup: "설정 필요"
+    },
+    es: {
+      dashboard: "Panel",
+      deploy: "Despliegue",
+      configuration: "Configuración",
+      skills: "Habilidades",
+      chat: "Chat",
+      settings: "Ajustes",
+      status: "Estado",
+      active: "Activo",
+      needsSetup: "Necesita configuración"
+    }
+  } as const;
+
+  return copy[locale];
+}
+
+function configCopy(locale: Locale) {
+  const copy = {
+    en: {
+      title: "Configuration",
+      subtitle: "Configure AI models and communication channels.",
+      modelsTab: (count: number) => `AI Models (${count})`,
+      channelsTab: (count: number) => `Channels (${count})`,
+      modelInfoTitle: "AI Model Configuration",
+      modelInfoDetail:
+        "Configure multiple AI models from different providers. SlackClaw reads the live OpenClaw catalog, supports API key and OAuth authentication, and lets you choose the default model before onboarding channels.",
+      modelPointOne: "15+ providers supported",
+      modelPointTwo: "OAuth & API key auth",
+      modelPointThree: "Multiple models per provider",
+      refreshProviders: "Refresh providers",
+      default: "Default",
+      active: "Active",
+      configured: "Configured",
+      needsAuth: "Needs auth",
+      configuredModel: "Configured model",
+      source: "Source",
+      sourceInstalled: "Detected from installed OpenClaw",
+      authentication: "Authentication",
+      authInteractive: "OAuth / interactive",
+      authApi: "API key",
+      editProvider: "Edit Provider",
+      documentation: "Documentation",
+      noProviders: "No providers are configured yet",
+      noProvidersDetail: "Select a provider below and add your first model configuration.",
+      addNewModel: "Add New Model",
+      addModelTitle: "Add AI Model",
+      addModelDetail: "Choose a provider and configure authentication.",
+      selectedProviderDetail: "Configure your model settings",
+      close: "Close",
+      model: "Model",
+      selectModel: "Select a model",
+      authMethod: "Authentication Method",
+      interactiveFlow: "Interactive flow",
+      directSetup: "Direct setup",
+      authProgress: "Authentication Progress",
+      openAuthWindow: "Open authentication window",
+      pasteRedirect: "Paste the redirect URL or code",
+      pastePlaceholder: "Paste the callback URL or one-time code",
+      finishAuth: "Finish Authentication",
+      sending: "Sending...",
+      helpTitle: "Need help getting started?",
+      helpLink: (provider: string) => `View ${provider} documentation`,
+      cancel: "Cancel",
+      savingModel: "Saving model...",
+      setDefaultModel: "Set Default Model",
+      configuringProvider: "Configuring provider...",
+      configureProvider: "Configure",
+      addModelAction: "Add Model",
+      changeProvider: "Change Provider",
+      saveTitle: "Save Configuration",
+      saveReady: "Model configuration is already complete. You can continue configuring channels.",
+      savePending: "Apply your provider and model settings, then complete onboarding to unlock channels.",
+      onboardingComplete: "Onboarding Complete",
+      saveModels: "Save Models",
+      completeOnboardingFirst: "Complete onboarding first",
+      completeOnboardingFirstDetail: "Finish the AI Models step first. SlackClaw only unlocks channels after OpenClaw onboarding succeeds.",
+      channelsInfoTitle: "Communication Channels",
+      channelsInfoDetail: "Configure Telegram, WhatsApp, and the experimental WeChat workaround, then restart the gateway.",
+      channelsPointOne: "Guided setup order",
+      channelsPointTwo: "Pairing approval support",
+      channelsPointThree: "Gateway restart after channels",
+      telegram: "Telegram",
+      whatsapp: "WhatsApp",
+      wechat: "WeChat Workaround",
+      experimental: "Experimental",
+      telegramToken: "Telegram bot token",
+      accountName: "Account name",
+      pairingCode: "Pairing code",
+      saveTelegram: "Save Telegram",
+      approveTelegram: "Approve Telegram Pairing",
+      startWhatsapp: "Start WhatsApp Login",
+      approveWhatsapp: "Approve WhatsApp Pairing",
+      pluginPackage: "Plugin package",
+      corpId: "Corp ID",
+      agentId: "Agent ID",
+      secret: "Secret",
+      webhookToken: "Webhook token",
+      encodingAesKey: "Encoding AES key",
+      configureWechat: "Configure WeChat Workaround",
+      restartGateway: "Restart Gateway",
+      channelSaveDetail: "Apply changes to your channel configuration and restart the OpenClaw gateway.",
+      restarting: "Restarting..."
+    },
+    zh: {
+      title: "配置",
+      subtitle: "配置 AI 模型和通信频道。",
+      modelsTab: (count: number) => `AI 模型（${count}）`,
+      channelsTab: (count: number) => `频道（${count}）`,
+      modelInfoTitle: "AI 模型配置",
+      modelInfoDetail: "可配置多个不同提供商的 AI 模型。SlackClaw 会读取 OpenClaw 的实时目录，支持 API Key 与 OAuth 认证，并可在频道引导前选择默认模型。",
+      modelPointOne: "支持 15+ 提供商",
+      modelPointTwo: "支持 OAuth 与 API Key",
+      modelPointThree: "每个提供商支持多个模型",
+      refreshProviders: "刷新提供商",
+      default: "默认",
+      active: "已启用",
+      configured: "已配置",
+      needsAuth: "需要认证",
+      configuredModel: "已配置模型",
+      source: "来源",
+      sourceInstalled: "从已安装的 OpenClaw 检测到",
+      authentication: "认证方式",
+      authInteractive: "OAuth / 交互式",
+      authApi: "API Key",
+      editProvider: "编辑提供商",
+      documentation: "文档",
+      noProviders: "尚未配置任何提供商",
+      noProvidersDetail: "请先在下方选择一个提供商并添加首个模型配置。",
+      addNewModel: "添加新模型",
+      addModelTitle: "添加 AI 模型",
+      addModelDetail: "选择提供商并配置认证。",
+      selectedProviderDetail: "配置你的模型设置",
+      close: "关闭",
+      model: "模型",
+      selectModel: "选择模型",
+      authMethod: "认证方式",
+      interactiveFlow: "交互式流程",
+      directSetup: "直接配置",
+      authProgress: "认证进度",
+      openAuthWindow: "打开认证窗口",
+      pasteRedirect: "粘贴回调链接或验证码",
+      pastePlaceholder: "粘贴回调 URL 或一次性验证码",
+      finishAuth: "完成认证",
+      sending: "发送中...",
+      helpTitle: "需要快速上手帮助？",
+      helpLink: (provider: string) => `查看 ${provider} 文档`,
+      cancel: "取消",
+      savingModel: "保存模型中...",
+      setDefaultModel: "设为默认模型",
+      configuringProvider: "配置提供商中...",
+      configureProvider: "配置",
+      addModelAction: "添加模型",
+      changeProvider: "更换提供商",
+      saveTitle: "保存配置",
+      saveReady: "模型配置已完成。你可以继续配置频道。",
+      savePending: "先应用提供商和模型设置，再完成引导以解锁频道。",
+      onboardingComplete: "引导已完成",
+      saveModels: "保存模型",
+      completeOnboardingFirst: "请先完成引导",
+      completeOnboardingFirstDetail: "请先完成 AI 模型步骤。只有 OpenClaw 引导成功后 SlackClaw 才会解锁频道。",
+      channelsInfoTitle: "通信频道",
+      channelsInfoDetail: "配置 Telegram、WhatsApp 和实验性的微信变通方案，然后重启网关。",
+      channelsPointOne: "按顺序引导设置",
+      channelsPointTwo: "支持配对审批",
+      channelsPointThree: "频道完成后重启网关",
+      telegram: "Telegram",
+      whatsapp: "WhatsApp",
+      wechat: "微信变通方案",
+      experimental: "实验性",
+      telegramToken: "Telegram 机器人令牌",
+      accountName: "账户名称",
+      pairingCode: "配对码",
+      saveTelegram: "保存 Telegram",
+      approveTelegram: "批准 Telegram 配对",
+      startWhatsapp: "开始 WhatsApp 登录",
+      approveWhatsapp: "批准 WhatsApp 配对",
+      pluginPackage: "插件包",
+      corpId: "企业 ID",
+      agentId: "Agent ID",
+      secret: "Secret",
+      webhookToken: "Webhook Token",
+      encodingAesKey: "Encoding AES Key",
+      configureWechat: "配置微信变通方案",
+      restartGateway: "重启网关",
+      channelSaveDetail: "应用频道配置更改并重启 OpenClaw 网关。",
+      restarting: "重启中..."
+    },
+    ja: {
+      title: "設定",
+      subtitle: "AI モデルと通信チャネルを設定します。",
+      modelsTab: (count: number) => `AI モデル (${count})`,
+      channelsTab: (count: number) => `チャネル (${count})`,
+      modelInfoTitle: "AI モデル設定",
+      modelInfoDetail: "複数プロバイダーの AI モデルを設定できます。SlackClaw は OpenClaw のライブカタログを読み取り、API キーと OAuth 認証をサポートし、チャネルのオンボーディング前に既定モデルを選べます。",
+      modelPointOne: "15 以上のプロバイダーに対応",
+      modelPointTwo: "OAuth と API キー認証",
+      modelPointThree: "各プロバイダーで複数モデル",
+      refreshProviders: "プロバイダーを更新",
+      default: "既定",
+      active: "有効",
+      configured: "設定済み",
+      needsAuth: "認証が必要",
+      configuredModel: "設定済みモデル",
+      source: "ソース",
+      sourceInstalled: "インストール済み OpenClaw から検出",
+      authentication: "認証",
+      authInteractive: "OAuth / 対話式",
+      authApi: "API キー",
+      editProvider: "プロバイダーを編集",
+      documentation: "ドキュメント",
+      noProviders: "まだプロバイダーが設定されていません",
+      noProvidersDetail: "下からプロバイダーを選び、最初のモデル設定を追加してください。",
+      addNewModel: "新しいモデルを追加",
+      addModelTitle: "AI モデルを追加",
+      addModelDetail: "プロバイダーを選択して認証を設定します。",
+      selectedProviderDetail: "モデル設定を構成します",
+      close: "閉じる",
+      model: "モデル",
+      selectModel: "モデルを選択",
+      authMethod: "認証方法",
+      interactiveFlow: "対話型フロー",
+      directSetup: "直接設定",
+      authProgress: "認証の進行状況",
+      openAuthWindow: "認証ウィンドウを開く",
+      pasteRedirect: "リダイレクト URL またはコードを貼り付け",
+      pastePlaceholder: "コールバック URL またはワンタイムコードを貼り付け",
+      finishAuth: "認証を完了",
+      sending: "送信中...",
+      helpTitle: "開始方法で困っていますか？",
+      helpLink: (provider: string) => `${provider} のドキュメントを見る`,
+      cancel: "キャンセル",
+      savingModel: "モデルを保存中...",
+      setDefaultModel: "既定モデルに設定",
+      configuringProvider: "プロバイダーを設定中...",
+      configureProvider: "設定",
+      addModelAction: "モデルを追加",
+      changeProvider: "プロバイダーを変更",
+      saveTitle: "設定を保存",
+      saveReady: "モデル設定は完了しています。続けてチャネルを設定できます。",
+      savePending: "まずプロバイダーとモデル設定を適用し、その後オンボーディングを完了してチャネルを解放してください。",
+      onboardingComplete: "オンボーディング完了",
+      saveModels: "モデルを保存",
+      completeOnboardingFirst: "先にオンボーディングを完了してください",
+      completeOnboardingFirstDetail: "まず AI モデル手順を完了してください。OpenClaw のオンボーディング成功後にのみ SlackClaw はチャネルを解放します。",
+      channelsInfoTitle: "通信チャネル",
+      channelsInfoDetail: "Telegram、WhatsApp、実験的な WeChat 回避策を設定し、その後ゲートウェイを再起動します。",
+      channelsPointOne: "ガイド付きの設定順序",
+      channelsPointTwo: "ペアリング承認をサポート",
+      channelsPointThree: "チャネル後にゲートウェイ再起動",
+      telegram: "Telegram",
+      whatsapp: "WhatsApp",
+      wechat: "WeChat ワークアラウンド",
+      experimental: "実験的",
+      telegramToken: "Telegram ボットトークン",
+      accountName: "アカウント名",
+      pairingCode: "ペアリングコード",
+      saveTelegram: "Telegram を保存",
+      approveTelegram: "Telegram ペアリングを承認",
+      startWhatsapp: "WhatsApp ログインを開始",
+      approveWhatsapp: "WhatsApp ペアリングを承認",
+      pluginPackage: "プラグインパッケージ",
+      corpId: "Corp ID",
+      agentId: "Agent ID",
+      secret: "Secret",
+      webhookToken: "Webhook token",
+      encodingAesKey: "Encoding AES key",
+      configureWechat: "WeChat 回避策を設定",
+      restartGateway: "ゲートウェイを再起動",
+      channelSaveDetail: "チャネル設定の変更を適用し、OpenClaw ゲートウェイを再起動します。",
+      restarting: "再起動中..."
+    },
+    ko: {
+      title: "구성",
+      subtitle: "AI 모델과 통신 채널을 구성합니다.",
+      modelsTab: (count: number) => `AI 모델 (${count})`,
+      channelsTab: (count: number) => `채널 (${count})`,
+      modelInfoTitle: "AI 모델 구성",
+      modelInfoDetail: "여러 공급자의 AI 모델을 구성할 수 있습니다. SlackClaw는 OpenClaw의 실시간 카탈로그를 읽고 API 키 및 OAuth 인증을 지원하며 채널 온보딩 전에 기본 모델을 선택할 수 있습니다.",
+      modelPointOne: "15개 이상 공급자 지원",
+      modelPointTwo: "OAuth 및 API 키 인증",
+      modelPointThree: "공급자별 여러 모델",
+      refreshProviders: "공급자 새로고침",
+      default: "기본값",
+      active: "활성",
+      configured: "구성됨",
+      needsAuth: "인증 필요",
+      configuredModel: "구성된 모델",
+      source: "출처",
+      sourceInstalled: "설치된 OpenClaw에서 감지됨",
+      authentication: "인증",
+      authInteractive: "OAuth / 대화형",
+      authApi: "API 키",
+      editProvider: "공급자 편집",
+      documentation: "문서",
+      noProviders: "아직 구성된 공급자가 없습니다",
+      noProvidersDetail: "아래에서 공급자를 선택하고 첫 모델 구성을 추가하세요.",
+      addNewModel: "새 모델 추가",
+      addModelTitle: "AI 모델 추가",
+      addModelDetail: "공급자를 선택하고 인증을 구성하세요.",
+      selectedProviderDetail: "모델 설정을 구성하세요",
+      close: "닫기",
+      model: "모델",
+      selectModel: "모델 선택",
+      authMethod: "인증 방식",
+      interactiveFlow: "대화형 흐름",
+      directSetup: "직접 설정",
+      authProgress: "인증 진행 상황",
+      openAuthWindow: "인증 창 열기",
+      pasteRedirect: "리디렉션 URL 또는 코드를 붙여넣기",
+      pastePlaceholder: "콜백 URL 또는 일회용 코드를 붙여넣으세요",
+      finishAuth: "인증 완료",
+      sending: "전송 중...",
+      helpTitle: "시작이 어렵나요?",
+      helpLink: (provider: string) => `${provider} 문서 보기`,
+      cancel: "취소",
+      savingModel: "모델 저장 중...",
+      setDefaultModel: "기본 모델로 설정",
+      configuringProvider: "공급자 구성 중...",
+      configureProvider: "구성",
+      addModelAction: "모델 추가",
+      changeProvider: "공급자 변경",
+      saveTitle: "구성 저장",
+      saveReady: "모델 구성이 이미 완료되었습니다. 계속해서 채널을 구성할 수 있습니다.",
+      savePending: "공급자와 모델 설정을 적용한 뒤 온보딩을 완료해 채널을 잠금 해제하세요.",
+      onboardingComplete: "온보딩 완료",
+      saveModels: "모델 저장",
+      completeOnboardingFirst: "먼저 온보딩을 완료하세요",
+      completeOnboardingFirstDetail: "먼저 AI 모델 단계를 완료하세요. OpenClaw 온보딩이 성공해야 SlackClaw가 채널을 잠금 해제합니다.",
+      channelsInfoTitle: "통신 채널",
+      channelsInfoDetail: "Telegram, WhatsApp, 실험적 WeChat 우회 구성을 마친 뒤 게이트웨이를 재시작합니다.",
+      channelsPointOne: "가이드 순서 설정",
+      channelsPointTwo: "페어링 승인 지원",
+      channelsPointThree: "채널 후 게이트웨이 재시작",
+      telegram: "Telegram",
+      whatsapp: "WhatsApp",
+      wechat: "WeChat 우회 구성",
+      experimental: "실험적",
+      telegramToken: "Telegram 봇 토큰",
+      accountName: "계정 이름",
+      pairingCode: "페어링 코드",
+      saveTelegram: "Telegram 저장",
+      approveTelegram: "Telegram 페어링 승인",
+      startWhatsapp: "WhatsApp 로그인 시작",
+      approveWhatsapp: "WhatsApp 페어링 승인",
+      pluginPackage: "플러그인 패키지",
+      corpId: "Corp ID",
+      agentId: "Agent ID",
+      secret: "Secret",
+      webhookToken: "Webhook token",
+      encodingAesKey: "Encoding AES key",
+      configureWechat: "WeChat 우회 구성",
+      restartGateway: "게이트웨이 재시작",
+      channelSaveDetail: "채널 구성 변경을 적용하고 OpenClaw 게이트웨이를 재시작합니다.",
+      restarting: "재시작 중..."
+    },
+    es: {
+      title: "Configuración",
+      subtitle: "Configura modelos de IA y canales de comunicación.",
+      modelsTab: (count: number) => `Modelos de IA (${count})`,
+      channelsTab: (count: number) => `Canales (${count})`,
+      modelInfoTitle: "Configuración de modelos de IA",
+      modelInfoDetail: "Configura varios modelos de IA de distintos proveedores. SlackClaw lee el catálogo en vivo de OpenClaw, admite autenticación por API key y OAuth, y te permite elegir el modelo por defecto antes del onboarding de canales.",
+      modelPointOne: "Más de 15 proveedores",
+      modelPointTwo: "OAuth y API key",
+      modelPointThree: "Varios modelos por proveedor",
+      refreshProviders: "Actualizar proveedores",
+      default: "Predeterminado",
+      active: "Activo",
+      configured: "Configurado",
+      needsAuth: "Necesita autenticación",
+      configuredModel: "Modelo configurado",
+      source: "Origen",
+      sourceInstalled: "Detectado desde OpenClaw instalado",
+      authentication: "Autenticación",
+      authInteractive: "OAuth / interactivo",
+      authApi: "API key",
+      editProvider: "Editar proveedor",
+      documentation: "Documentación",
+      noProviders: "Todavía no hay proveedores configurados",
+      noProvidersDetail: "Selecciona un proveedor abajo y añade tu primera configuración de modelo.",
+      addNewModel: "Añadir nuevo modelo",
+      addModelTitle: "Añadir modelo de IA",
+      addModelDetail: "Elige un proveedor y configura la autenticación.",
+      selectedProviderDetail: "Configura los ajustes de tu modelo",
+      close: "Cerrar",
+      model: "Modelo",
+      selectModel: "Selecciona un modelo",
+      authMethod: "Método de autenticación",
+      interactiveFlow: "Flujo interactivo",
+      directSetup: "Configuración directa",
+      authProgress: "Progreso de autenticación",
+      openAuthWindow: "Abrir ventana de autenticación",
+      pasteRedirect: "Pega la URL de redirección o el código",
+      pastePlaceholder: "Pega la URL de callback o el código de un solo uso",
+      finishAuth: "Finalizar autenticación",
+      sending: "Enviando...",
+      helpTitle: "¿Necesitas ayuda para empezar?",
+      helpLink: (provider: string) => `Ver documentación de ${provider}`,
+      cancel: "Cancelar",
+      savingModel: "Guardando modelo...",
+      setDefaultModel: "Definir modelo por defecto",
+      configuringProvider: "Configurando proveedor...",
+      configureProvider: "Configurar",
+      addModelAction: "Añadir modelo",
+      changeProvider: "Cambiar proveedor",
+      saveTitle: "Guardar configuración",
+      saveReady: "La configuración del modelo ya está completa. Puedes continuar con los canales.",
+      savePending: "Aplica la configuración del proveedor y del modelo y luego completa el onboarding para desbloquear los canales.",
+      onboardingComplete: "Onboarding completo",
+      saveModels: "Guardar modelos",
+      completeOnboardingFirst: "Completa primero el onboarding",
+      completeOnboardingFirstDetail: "Termina primero el paso de AI Models. SlackClaw solo desbloquea los canales cuando el onboarding de OpenClaw termina correctamente.",
+      channelsInfoTitle: "Canales de comunicación",
+      channelsInfoDetail: "Configura Telegram, WhatsApp y el workaround experimental de WeChat y luego reinicia el gateway.",
+      channelsPointOne: "Orden guiado de configuración",
+      channelsPointTwo: "Soporte para aprobación de emparejamiento",
+      channelsPointThree: "Reinicio del gateway tras los canales",
+      telegram: "Telegram",
+      whatsapp: "WhatsApp",
+      wechat: "Workaround de WeChat",
+      experimental: "Experimental",
+      telegramToken: "Token del bot de Telegram",
+      accountName: "Nombre de la cuenta",
+      pairingCode: "Código de emparejamiento",
+      saveTelegram: "Guardar Telegram",
+      approveTelegram: "Aprobar emparejamiento de Telegram",
+      startWhatsapp: "Iniciar sesión de WhatsApp",
+      approveWhatsapp: "Aprobar emparejamiento de WhatsApp",
+      pluginPackage: "Paquete del plugin",
+      corpId: "Corp ID",
+      agentId: "Agent ID",
+      secret: "Secret",
+      webhookToken: "Webhook token",
+      encodingAesKey: "Encoding AES key",
+      configureWechat: "Configurar workaround de WeChat",
+      restartGateway: "Reiniciar gateway",
+      channelSaveDetail: "Aplica los cambios de configuración de canales y reinicia el gateway de OpenClaw.",
+      restarting: "Reiniciando..."
+    }
+  } as const;
+
+  return copy[locale];
+}
+
+function LanguagePicker(props: {
+  locale: Locale;
+  onSelectLocale: (locale: Locale) => void;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const selected = localeOptions.find((option) => option.value === props.locale) ?? localeOptions[0];
+
+  return (
+    <label className={`language-picker ${props.className ?? ""}`}>
+      <span className="language-picker-icon" aria-hidden="true">
+        🌐
+      </span>
+      <span className="language-picker-current">
+        <span className="language-picker-flag" aria-hidden="true">
+          {selected.flag}
+        </span>
+        <span>{selected.label}</span>
+      </span>
+      <span className="language-picker-chevron" aria-hidden="true">
+        ▾
+      </span>
+      <select value={props.locale} onChange={(event) => props.onSelectLocale(event.target.value as Locale)} aria-label={props.ariaLabel}>
+        {localeOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.flag} {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function AppShell(props: {
+  activeView: View;
+  onSelectView: (view: View) => void;
+  locale: Locale;
+  onSelectLocale: (locale: Locale) => void;
+  overview: ProductOverview;
+  children: React.ReactNode;
+}) {
+  const copy = shellCopy(props.locale);
+  const navItems: Array<{ view: Exclude<View, "onboarding">; label: string; icon: string }> = [
+    { view: "dashboard", label: copy.dashboard, icon: "◫" },
+    { view: "deploy", label: copy.deploy, icon: "🚀" },
+    { view: "config", label: copy.configuration, icon: "⚙" },
+    { view: "skills", label: copy.skills, icon: "⚡" },
+    { view: "chat", label: copy.chat, icon: "💬" },
+    { view: "settings", label: copy.settings, icon: "☰" }
+  ];
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <div className="brand-icon">✦</div>
+          <div>
+            <h1>SlackClaw</h1>
+            <p>OpenClaw Made Easy</p>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          {navItems.map((item) => (
+            <button
+              key={item.view}
+              className={`sidebar-link ${props.activeView === item.view ? "active" : ""}`}
+              onClick={() => props.onSelectView(item.view)}
+            >
+              <span className="sidebar-link-icon">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className={`sidebar-status ${props.overview.engine.running ? "good" : "warn"}`}>
+            <strong>
+              {copy.status}: {props.overview.engine.running ? copy.active : copy.needsSetup}
+            </strong>
+            <p>{props.overview.engine.summary}</p>
+          </div>
+        </div>
+      </aside>
+
+      <main className="app-main">
+        <div className="app-main-head">
+          <LanguagePicker locale={props.locale} onSelectLocale={props.onSelectLocale} ariaLabel={t(props.locale, "language")} className="app-shell-language-picker" />
+        </div>
+        {props.children}
+      </main>
+    </div>
+  );
+}
+
+function OnboardingScreen(props: {
+  locale: Locale;
+  overview: ProductOverview;
+  onboardingStep: number;
+  setOnboardingStep: (step: number) => void;
+  busy: string | null;
+  onStartIntro: () => Promise<void>;
+  onContinueAfterCheck: () => void;
+  onSelectLocale: (locale: Locale) => void;
+  onUninstallEngine: () => Promise<void>;
+}) {
+  const copy = onboardingCopy(props.locale);
+  const checks = props.overview.installChecks;
+  const passedChecks = checks.filter((check) => check.status === "passed").length;
+  const progress = props.onboardingStep === 1 ? 50 : 100;
+  const allChecksPassed = passedChecks === checks.length || checks.length === 0;
+
+  return (
+    <div className="onboarding-shell">
+      <div className="onboarding-wrap">
+        <div className="onboarding-header">
+          <div className="logo-lockup">
+            <div className="brand-icon large">✦</div>
+            <h1>SlackClaw</h1>
+          </div>
+          <p>{t(props.locale, "introDetail")}</p>
+          <LanguagePicker locale={props.locale} onSelectLocale={props.onSelectLocale} ariaLabel={t(props.locale, "language")} className="onboarding-language-picker" />
+        </div>
+
+        <div className="progress-head">
+          <span>
+            {props.locale === "zh"
+              ? `第 ${props.onboardingStep} / 2 步`
+              : props.locale === "ja"
+                ? `ステップ ${props.onboardingStep} / 2`
+                : props.locale === "ko"
+                  ? `${props.onboardingStep} / 2 단계`
+                  : props.locale === "es"
+                    ? `Paso ${props.onboardingStep} de 2`
+                    : `Step ${props.onboardingStep} of 2`}
+          </span>
+          <span>
+            {props.locale === "zh"
+              ? `已完成 ${progress}%`
+              : props.locale === "ja"
+                ? `${progress}% 完了`
+                : props.locale === "ko"
+                  ? `${progress}% 완료`
+                  : props.locale === "es"
+                    ? `${progress}% completado`
+                    : `${progress}% Complete`}
+          </span>
+        </div>
+        <div className="progress-track">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+
+        <section className="surface onboarding-card">
+          {props.onboardingStep === 1 ? (
+            <>
+              <header className="section-copy">
+                <h2>{copy.title}</h2>
+                <p>{copy.intro}</p>
+              </header>
+              <div className="feature-stack">
+                <article className="feature-card">
+                  <span className="feature-icon">🚀</span>
+                  <div>
+                    <strong>{copy.featureOne}</strong>
+                    <p>{copy.featureOneDetail}</p>
+                  </div>
+                </article>
+                <article className="feature-card">
+                  <span className="feature-icon">⚙️</span>
+                  <div>
+                    <strong>{copy.featureTwo}</strong>
+                    <p>{copy.featureTwoDetail}</p>
+                  </div>
+                </article>
+                <article className="feature-card">
+                  <span className="feature-icon">💬</span>
+                  <div>
+                    <strong>{copy.featureThree}</strong>
+                    <p>{copy.featureThreeDetail}</p>
+                  </div>
+                </article>
+              </div>
+              <div className="button-row">
+                <button className="button primary" onClick={() => void props.onStartIntro()} disabled={props.busy !== null}>
+                  {props.busy === "first-run-intro" ? t(props.locale, "connecting") : copy.checkSystem}
+                </button>
+                {props.overview.engine.installed ? (
+                  <button className="button ghost" onClick={() => void props.onUninstallEngine()} disabled={props.busy !== null}>
+                    {props.busy === "engine-uninstall" ? copy.uninstallingEngine : copy.uninstallEngine}
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <>
+              <header className="section-copy">
+                <h2>{copy.systemTitle}</h2>
+                <p>{copy.systemDetail}</p>
+              </header>
+              <div className="check-grid">
+                {checks.map((check) => (
+                  <article key={check.id} className={`check-card ${check.status}`}>
+                    {(() => {
+                      const localized = localizeInstallCheck(props.locale, check);
+                      return (
+                        <>
+                    <div className="check-title-row">
+                      <strong>{localized.label}</strong>
+                      <span className={`tiny-badge ${check.status}`}>{localizedStatus(props.locale, check.status)}</span>
+                    </div>
+                    <p>{localized.detail}</p>
+                        </>
+                      );
+                    })()}
+                  </article>
+                ))}
+              </div>
+              <div className={`notice-card ${allChecksPassed ? "good" : "warn"}`}>
+                <strong>{allChecksPassed ? copy.readyTitle : copy.reviewTitle}</strong>
+                <p>
+                  {allChecksPassed
+                    ? copy.readyDetail
+                    : copy.reviewDetail}
+                </p>
+              </div>
+              <div className="button-row">
+                <button className="button ghost" onClick={() => props.setOnboardingStep(1)} disabled={props.busy !== null}>
+                  {copy.back}
+                </button>
+                {props.overview.engine.installed ? (
+                  <button className="button ghost" onClick={() => void props.onUninstallEngine()} disabled={props.busy !== null}>
+                    {props.busy === "engine-uninstall" ? copy.uninstallingEngine : copy.uninstallEngine}
+                  </button>
+                ) : null}
+                <button className="button primary" onClick={props.onContinueAfterCheck} disabled={props.busy !== null}>
+                  {props.overview.firstRun.setupCompleted ? copy.continueToDashboard : copy.continueToDeploy}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function DashboardView(props: { overview: ProductOverview; onSelectView: (view: View) => void }) {
+  const stats = [
+    { label: "Deployment Status", value: props.overview.engine.running ? "Active" : "Pending", icon: "🖥" },
+    { label: "Models Configured", value: String(props.overview.profiles.length), icon: "🧠" },
+    { label: "Active Skills", value: String(props.overview.templates.length), icon: "⚡" },
+    { label: "Chat Sessions", value: String(props.overview.recentTasks.length), icon: "💬" }
+  ];
+
+  const quickActions: Array<{ title: string; description: string; view: View; tone: string }> = [
+    { title: "Deploy Instance", description: "Deploy or refresh OpenClaw", view: "deploy", tone: "blue" },
+    { title: "Configure Models", description: "Set up onboarding defaults and channels", view: "config", tone: "purple" },
+    { title: "Manage Skills", description: "Review preloaded office-work skills", view: "skills", tone: "green" },
+    { title: "Start Chatting", description: "Open the chat console", view: "chat", tone: "indigo" }
+  ];
+
+  return (
+    <div className="page-wrap">
+      <header className="page-header">
+        <h2>Dashboard</h2>
+        <p>Monitor your OpenClaw deployment and SlackClaw setup status.</p>
+      </header>
+
+      <section className={`surface deployment-banner ${props.overview.engine.running ? "good" : "warn"}`}>
+        <div>
+          <strong>{props.overview.engine.running ? "OpenClaw is running" : "No active deployment"}</strong>
+          <p>{props.overview.engine.summary}</p>
+          <p className="subtle">
+            Version: {props.overview.engine.version ?? "not detected"} | Source: {props.overview.installSpec.installSource}
+          </p>
+        </div>
+        <div className="button-row">
+          <button className="button ghost" onClick={() => props.onSelectView("config")}>
+            Configure
+          </button>
+          <button className="button primary" onClick={() => props.onSelectView(props.overview.engine.running ? "chat" : "deploy")}>
+            {props.overview.engine.running ? "Open Chat" : "Deploy Now"}
+          </button>
+        </div>
+      </section>
+
+      <section className="stats-grid">
+        {stats.map((stat) => (
+          <article key={stat.label} className="surface stat-card">
+            <div>
+              <p className="label">{stat.label}</p>
+              <strong>{stat.value}</strong>
+            </div>
+            <span className="stat-icon">{stat.icon}</span>
+          </article>
+        ))}
+      </section>
+
+      <section className="dashboard-grid">
+        <article className="surface">
+          <div className="section-copy">
+            <h3>Quick Actions</h3>
+            <p>Common tasks and shortcuts</p>
+          </div>
+          <div className="quick-grid">
+            {quickActions.map((action) => (
+              <button key={action.title} className={`quick-card ${action.tone}`} onClick={() => props.onSelectView(action.view)}>
+                <strong>{action.title}</strong>
+                <p>{action.description}</p>
+              </button>
+            ))}
+          </div>
+        </article>
+
+        <article className="surface">
+          <div className="section-copy">
+            <h3>Recent Activity</h3>
+            <p>Latest SlackClaw events</p>
+          </div>
+          <div className="activity-list">
+            {props.overview.recentTasks.length > 0 ? (
+              props.overview.recentTasks.map((task) => (
+                <div key={task.taskId} className="activity-item">
+                  <span className="activity-dot good" />
+                  <div>
+                    <strong>{task.title}</strong>
+                    <p>{task.summary}</p>
+                    <span>{formatTime(task.startedAt)}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              props.overview.healthChecks.slice(0, 4).map((check) => (
+                <div key={check.id} className="activity-item">
+                  <span className={`activity-dot ${statusTone(check)}`} />
+                  <div>
+                    <strong>{check.title}</strong>
+                    <p>{check.summary}</p>
+                    <span>{check.detail}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+function DeployView(props: {
+  locale: Locale;
+  overview: ProductOverview;
+  busy: string | null;
+  onDeploy: (variant: "standard" | "managed-local" | "planned") => Promise<void>;
+  onUninstallEngine: () => Promise<void>;
+  selectedVariant: string | null;
+  setSelectedVariant: (value: string) => void;
+  deploySteps: SetupStepResult[];
+}) {
+  const labels = {
+    en: {
+      title: "Deploy OpenClaw",
+      detail: "Choose a variant and deploy with one click.",
+      deployTitle: "Deploying OpenClaw...",
+      deployIdle: "One-click deployment",
+      deployIdleDetail: "Select your preferred OpenClaw variant and deploy instantly without terminal commands.",
+      ready: "Ready to deploy?",
+      selected: (value: string) => `You selected ${value}.`,
+      empty: "Select a variant to get started.",
+      uninstallEngine: "Uninstall OpenClaw",
+      uninstallingEngine: "Uninstalling...",
+      deployNow: "Deploy Now",
+      deploying: "Deploying..."
+    },
+    zh: {
+      title: "部署 OpenClaw",
+      detail: "选择一个版本并一键部署。",
+      deployTitle: "正在部署 OpenClaw...",
+      deployIdle: "一键部署",
+      deployIdleDetail: "选择你偏好的 OpenClaw 版本，无需终端即可立即部署。",
+      ready: "准备好部署了吗？",
+      selected: (value: string) => `你已选择 ${value}。`,
+      empty: "请选择一个版本开始。",
+      uninstallEngine: "卸载 OpenClaw",
+      uninstallingEngine: "卸载中...",
+      deployNow: "立即部署",
+      deploying: "部署中..."
+    },
+    ja: {
+      title: "OpenClaw をデプロイ",
+      detail: "バリアントを選んでワンクリックでデプロイします。",
+      deployTitle: "OpenClaw をデプロイ中...",
+      deployIdle: "ワンクリックデプロイ",
+      deployIdleDetail: "好みの OpenClaw バリアントを選び、ターミナルなしで即座にデプロイします。",
+      ready: "デプロイの準備はできましたか？",
+      selected: (value: string) => `${value} を選択しました。`,
+      empty: "開始するにはバリアントを選択してください。",
+      uninstallEngine: "OpenClaw を削除",
+      uninstallingEngine: "削除中...",
+      deployNow: "今すぐデプロイ",
+      deploying: "デプロイ中..."
+    },
+    ko: {
+      title: "OpenClaw 배포",
+      detail: "변형을 선택하고 한 번에 배포하세요.",
+      deployTitle: "OpenClaw 배포 중...",
+      deployIdle: "원클릭 배포",
+      deployIdleDetail: "원하는 OpenClaw 변형을 선택하고 터미널 없이 바로 배포하세요.",
+      ready: "배포할 준비가 되었나요?",
+      selected: (value: string) => `${value}을(를) 선택했습니다.`,
+      empty: "시작하려면 변형을 선택하세요.",
+      uninstallEngine: "OpenClaw 제거",
+      uninstallingEngine: "제거 중...",
+      deployNow: "지금 배포",
+      deploying: "배포 중..."
+    },
+    es: {
+      title: "Desplegar OpenClaw",
+      detail: "Elige una variante y despliega con un clic.",
+      deployTitle: "Desplegando OpenClaw...",
+      deployIdle: "Despliegue con un clic",
+      deployIdleDetail: "Selecciona tu variante preferida de OpenClaw y despliega sin usar terminal.",
+      ready: "¿Listo para desplegar?",
+      selected: (value: string) => `Has seleccionado ${value}.`,
+      empty: "Selecciona una variante para empezar.",
+      uninstallEngine: "Desinstalar OpenClaw",
+      uninstallingEngine: "Desinstalando...",
+      deployNow: "Desplegar ahora",
+      deploying: "Desplegando..."
+    }
+  } as const;
+  const copy = labels[props.locale];
+  const variants = [
+    {
+      id: "standard",
+      name: "OpenClaw Standard",
+      description: "The original OpenClaw path with SlackClaw-managed onboarding and daily controls.",
+      icon: "🦅",
+      recommended: true,
+      features: ["Full SlackClaw workflow", "Channel setup support", "Health and recovery", "Local-first operation"],
+      requirements: { memory: "4GB RAM", disk: "10GB", runtime: "System or managed local" }
+    },
+    {
+      id: "managed-local",
+      name: "OpenClaw Managed Local",
+      description: "Deploy into SlackClaw’s own local runtime under Application Support.",
+      icon: "🪶",
+      recommended: false,
+      features: ["Pinned local runtime", "No global install dependency", "Better packaged-app fit", "Safer for non-technical users"],
+      requirements: { memory: "4GB RAM", disk: "10GB", runtime: "Managed local" }
+    },
+    {
+      id: "zeroclaw",
+      name: "ZeroClaw",
+      description: "Planned future engine target through the adapter seam.",
+      icon: "⚡",
+      recommended: false,
+      features: ["Future adapter support", "Same SlackClaw UI", "Engine swap ready", "Not available yet"],
+      requirements: { memory: "TBD", disk: "TBD", runtime: "Planned" }
+    },
+    {
+      id: "ironclaw",
+      name: "IronClaw",
+      description: "Planned future engine target without product-layer rewrites.",
+      icon: "☁️",
+      recommended: false,
+      features: ["Future adapter support", "Same control plane", "Not available yet", "Roadmap item"],
+      requirements: { memory: "TBD", disk: "TBD", runtime: "Planned" }
+    }
+  ];
+
+  const selectedName = variants.find((variant) => variant.id === props.selectedVariant)?.name;
+  const activeDeployStep =
+    props.deploySteps.find((step) => step.status === "running") ??
+    [...props.deploySteps].reverse().find((step) => step.status === "completed") ??
+    props.deploySteps[0];
+  const hasInstalledEngine = props.overview.engine.installed;
+
+  return (
+    <div className="page-wrap">
+      <header className="page-header">
+        <h2>{copy.title}</h2>
+        <p>{copy.detail}</p>
+      </header>
+
+      <section className={`surface deploy-progress ${props.busy?.startsWith("deploy") ? "active" : ""}`}>
+        <strong>{props.busy?.startsWith("deploy") ? copy.deployTitle : copy.deployIdle}</strong>
+        <p>
+          {props.busy?.startsWith("deploy")
+            ? activeDeployStep?.detail ?? "SlackClaw is deploying OpenClaw and preparing the next setup step."
+            : copy.deployIdleDetail}
+        </p>
+        {props.deploySteps.length ? (
+          <div className="deploy-step-list">
+            {props.deploySteps.map((step) => (
+              <div key={step.id} className={`deploy-step-row ${step.status}`}>
+                <span className={`tiny-badge ${step.status === "completed" ? "pass" : step.status === "failed" ? "failed" : "pending"}`}>
+                  {step.status}
+                </span>
+                <div>
+                  <strong>{step.title}</strong>
+                  <p>{step.detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="variant-grid large">
+        {variants.map((variant) => {
+          const planned = variant.id === "zeroclaw" || variant.id === "ironclaw";
+          return (
+            <article
+              key={variant.id}
+              className={`surface deploy-card ${props.selectedVariant === variant.id ? "selected" : ""} ${planned ? "planned" : ""}`}
+              onClick={() => props.setSelectedVariant(variant.id)}
+            >
+              <div className="deploy-card-head">
+                <div className="deploy-icon">{variant.icon}</div>
+                <div>
+                  <h3>{variant.name}</h3>
+                  <p>{variant.description}</p>
+                </div>
+                {variant.recommended ? <span className="tiny-badge pass">Recommended</span> : null}
+                {planned ? <span className="tiny-badge pending">Planned</span> : null}
+              </div>
+              <ul className="simple-list">
+                {variant.features.map((feature) => (
+                  <li key={feature}>{feature}</li>
+                ))}
+              </ul>
+              <div className="mini-kv-grid">
+                <div>
+                  <span>Memory</span>
+                  <strong>{variant.requirements.memory}</strong>
+                </div>
+                <div>
+                  <span>Disk</span>
+                  <strong>{variant.requirements.disk}</strong>
+                </div>
+                <div>
+                  <span>Runtime</span>
+                  <strong>{variant.requirements.runtime}</strong>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="surface deploy-footer">
+        <div>
+          <strong>{copy.ready}</strong>
+          <p>{selectedName ? copy.selected(selectedName) : copy.empty}</p>
+          <p className="subtle">Detected version: {props.overview.engine.version ?? "none"} | Install path: {props.overview.installSpec.installPath ?? "system-managed"}</p>
+        </div>
+        <div className="button-row">
+          {hasInstalledEngine ? (
+            <button className="button ghost" onClick={() => void props.onUninstallEngine()} disabled={props.busy !== null}>
+              {props.busy === "engine-uninstall" ? copy.uninstallingEngine : copy.uninstallEngine}
+            </button>
+          ) : null}
+          <button
+            className="button primary"
+            disabled={!props.selectedVariant || props.busy !== null}
+            onClick={() =>
+              void props.onDeploy(
+                props.selectedVariant === "standard"
+                  ? "standard"
+                  : props.selectedVariant === "managed-local"
+                    ? "managed-local"
+                    : "planned"
+              )
+            }
+          >
+            {props.busy?.startsWith("deploy") ? copy.deploying : copy.deployNow}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ConfigView(props: {
+  locale: Locale;
+  configTab: ConfigTab;
+  setConfigTab: (tab: ConfigTab) => void;
+  showAddModelDialog: boolean;
+  setShowAddModelDialog: (value: boolean) => void;
+  modelAuthSession: ModelAuthSession | null;
+  modelAuthSessionInput: string;
+  setModelAuthSessionInput: (value: string) => void;
+  modelConfig: ModelConfigOverview | null;
+  selectedProviderId: string;
+  setSelectedProviderId: (providerId: string) => void;
+  selectedAuthMethodId: string;
+  setSelectedAuthMethodId: (methodId: string) => void;
+  authValues: Record<string, string>;
+  setAuthValues: (values: Record<string, string>) => void;
+  selectedModelKey: string;
+  setSelectedModelKey: (modelKey: string) => void;
+  overview: ProductOverview;
+  busy: string | null;
+  providerConfigPending: boolean;
+  telegramToken: string;
+  setTelegramToken: (value: string) => void;
+  telegramAccountName: string;
+  setTelegramAccountName: (value: string) => void;
+  telegramPairingCode: string;
+  setTelegramPairingCode: (value: string) => void;
+  whatsappPairingCode: string;
+  setWhatsappPairingCode: (value: string) => void;
+  wechatPluginSpec: string;
+  setWechatPluginSpec: (value: string) => void;
+  wechatCorpId: string;
+  setWechatCorpId: (value: string) => void;
+  wechatAgentId: string;
+  setWechatAgentId: (value: string) => void;
+  wechatSecret: string;
+  setWechatSecret: (value: string) => void;
+  wechatToken: string;
+  setWechatToken: (value: string) => void;
+  wechatEncodingAesKey: string;
+  setWechatEncodingAesKey: (value: string) => void;
+  onSaveModels: () => Promise<void>;
+  onTelegramSetup: () => Promise<void>;
+  onTelegramApprove: () => Promise<void>;
+  onWhatsappLogin: () => Promise<void>;
+  onWhatsappApprove: () => Promise<void>;
+  onWechatSetup: () => Promise<void>;
+  onGatewayStart: () => Promise<void>;
+  onAuthenticateProvider: () => Promise<void>;
+  onSubmitModelAuthInput: () => Promise<void>;
+  onAddConfiguredModel: () => Promise<void>;
+  onRefreshModelConfig: () => Promise<void>;
+}) {
+  const telegram = props.overview.channelSetup.channels.find((channel) => channel.id === "telegram");
+  const whatsapp = props.overview.channelSetup.channels.find((channel) => channel.id === "whatsapp");
+  const wechat = props.overview.channelSetup.channels.find((channel) => channel.id === "wechat");
+  const onboardingComplete = props.overview.channelSetup.baseOnboardingCompleted;
+  const copy = configCopy(props.locale);
+  const selectedProvider = props.selectedProviderId
+    ? props.modelConfig?.providers.find((provider) => provider.id === props.selectedProviderId)
+    : undefined;
+  const selectedAuthMethod = selectedProvider?.authMethods.find((method) => method.id === props.selectedAuthMethodId) ?? selectedProvider?.authMethods[0];
+  const visibleModels =
+    selectedProvider && props.modelConfig
+      ? props.modelConfig.models.filter((model) => selectedProvider.providerRefs.some((prefix) => model.key.startsWith(prefix)))
+      : [];
+  const configuredModels =
+    props.modelConfig?.configuredModelKeys
+      .map((key) => {
+        const model = props.modelConfig?.models.find((entry) => entry.key === key);
+        const provider = props.modelConfig?.providers.find((entry) => entry.providerRefs.some((prefix) => key.startsWith(prefix)));
+        return model && provider ? { model, provider } : null;
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          model: NonNullable<typeof props.modelConfig>["models"][number];
+          provider: NonNullable<typeof props.modelConfig>["providers"][number];
+        } => Boolean(entry)
+      ) ?? [];
+  const activeChannels = props.overview.channelSetup.channels.filter((channel) => channel.status === "completed" || channel.status === "ready").length;
+  const selectedProviderConfigured = Boolean(selectedProvider?.configured);
+  const selectedModelAlreadyConfigured = Boolean(
+    props.selectedModelKey && props.modelConfig?.configuredModelKeys.includes(props.selectedModelKey)
+  );
+
+  return (
+    <div className="page-wrap">
+      <header className="page-header">
+        <h1>{copy.title}</h1>
+        <p>{copy.subtitle}</p>
+      </header>
+
+      <div className="tabs-row">
+        <button className={`tab-button ${props.configTab === "models" ? "active" : ""}`} onClick={() => props.setConfigTab("models")}>
+          {copy.modelsTab(configuredModels.length)}
+        </button>
+        <button
+          className={`tab-button ${props.configTab === "channels" ? "active" : ""}`}
+          onClick={() => props.setConfigTab("channels")}
+          disabled={!onboardingComplete}
+        >
+          {copy.channelsTab(activeChannels)}
+        </button>
+      </div>
+
+      {props.configTab === "models" ? (
+        <div className="stack config-figma">
+          <section className="surface figma-info-card">
+            <div className="figma-info-icon">AI</div>
+            <div className="figma-info-copy">
+              <strong>{copy.modelInfoTitle}</strong>
+              <p>{copy.modelInfoDetail}</p>
+              <div className="figma-info-points">
+                <span>{copy.modelPointOne}</span>
+                <span>{copy.modelPointTwo}</span>
+                <span>{copy.modelPointThree}</span>
+              </div>
+            </div>
+            <button className="button ghost small" onClick={() => void props.onRefreshModelConfig()} disabled={props.busy !== null}>
+              {copy.refreshProviders}
+            </button>
+          </section>
+
+          <section className="stack">
+            {configuredModels.length ? (
+              configuredModels.map(({ model, provider }) => (
+                <article key={model.key} className="surface figma-model-card">
+                  <div className="figma-provider-mark" aria-hidden="true">{providerGlyph(provider.label)}</div>
+                  <div className="figma-model-main">
+                    <div className="figma-model-head">
+                      <div className="figma-model-title-row">
+                        <h3>{provider.label}</h3>
+                        <span className="tiny-badge neutral">{model.name}</span>
+                        {props.modelConfig?.defaultModel === model.key ? (
+                          <span className="tiny-badge primary">{copy.default}</span>
+                        ) : (
+                          <span className="tiny-badge outline">{copy.active}</span>
+                        )}
+                        <span className={`tiny-badge ${provider.configured ? "pass" : "pending"}`}>
+                          {provider.configured ? copy.configured : copy.needsAuth}
+                        </span>
+                      </div>
+                      <p>{provider.description}</p>
+                    </div>
+
+                    <div className="figma-model-grid">
+                      <div className="figma-field">
+                        <span>{copy.configuredModel}</span>
+                        <strong>{model.key}</strong>
+                      </div>
+                      <div className="figma-field">
+                        <span>{copy.source}</span>
+                        <strong>{copy.sourceInstalled}</strong>
+                      </div>
+                      <div className="figma-field">
+                        <span>{copy.authentication}</span>
+                        <strong>{provider.authMethods.some((method) => method.interactive) ? copy.authInteractive : copy.authApi}</strong>
+                      </div>
+                    </div>
+
+                    <div className="figma-model-actions">
+                      <button
+                        className="button ghost"
+                        onClick={() => {
+                          props.setSelectedProviderId(provider.id);
+                          props.setSelectedAuthMethodId(provider.authMethods[0]?.id ?? "");
+                          props.setSelectedModelKey(model.key);
+                          props.setShowAddModelDialog(true);
+                        }}
+                      >
+                        {copy.editProvider}
+                      </button>
+                      <a className="button ghost" href={provider.docsUrl} target="_blank" rel="noreferrer">
+                        {copy.documentation}
+                      </a>
+                    </div>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <article className="surface figma-empty-card">
+                <strong>{copy.noProviders}</strong>
+                <p>{copy.noProvidersDetail}</p>
+              </article>
+            )}
+          </section>
+
+          <section className="surface figma-add-card">
+            <button
+              className="figma-add-trigger"
+              onClick={() => {
+                props.setSelectedProviderId("");
+                props.setSelectedAuthMethodId("");
+                props.setSelectedModelKey("");
+                props.setShowAddModelDialog(true);
+              }}
+            >
+              <span className="figma-add-plus">+</span>
+              <span>{copy.addNewModel}</span>
+            </button>
+          </section>
+
+          {props.showAddModelDialog ? (
+            <section className="figma-dialog-backdrop" onClick={() => props.setShowAddModelDialog(false)}>
+              <article className="surface figma-dialog" onClick={(event) => event.stopPropagation()}>
+                <div className="config-card-head">
+                  <div>
+                    <h3>{copy.addModelTitle}</h3>
+                    <p>{selectedProvider ? copy.selectedProviderDetail : copy.addModelDetail}</p>
+                  </div>
+                  <button className="button ghost small" onClick={() => props.setShowAddModelDialog(false)}>
+                    {copy.close}
+                  </button>
+                </div>
+
+                {!selectedProvider ? (
+                  <div className="figma-provider-grid">
+                    {props.modelConfig?.providers.map((provider) => (
+                      <button
+                        key={provider.id}
+                        className="figma-provider-tile"
+                        onClick={() => {
+                          props.setSelectedProviderId(provider.id);
+                          props.setSelectedAuthMethodId(provider.authMethods[0]?.id ?? "");
+                          props.setSelectedModelKey("");
+                        }}
+                      >
+                        <div className="figma-provider-mark small" aria-hidden="true">{providerGlyph(provider.label)}</div>
+                        <div className="figma-provider-copy">
+                          <strong>{provider.label}</strong>
+                          <span>{provider.modelCount} models</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="figma-config-panel">
+                    <div className="figma-selected-provider">
+                      <div className="figma-selected-provider-copy">
+                        <div className="figma-provider-mark" aria-hidden="true">{providerGlyph(selectedProvider.label)}</div>
+                        <div>
+                          <h3>{selectedProvider.label}</h3>
+                          <p>{selectedProvider.description}</p>
+                        </div>
+                      </div>
+                      <button
+                        className="button ghost small"
+                        onClick={() => {
+                          props.setSelectedProviderId("");
+                          props.setSelectedAuthMethodId("");
+                          props.setSelectedModelKey("");
+                        }}
+                      >
+                        {copy.changeProvider}
+                      </button>
+                    </div>
+
+                    {selectedAuthMethod ? (
+                      <>
+                        <div className="form-grid">
+                          <label>
+                            <span>{copy.model}</span>
+                            <select value={props.selectedModelKey} onChange={(event) => props.setSelectedModelKey(event.target.value)}>
+                              <option value="">{copy.selectModel}</option>
+                              {visibleModels.map((model) => (
+                                <option key={model.key} value={model.key}>
+                                  {model.key}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>{copy.authMethod}</span>
+                            <select value={selectedAuthMethod.id} onChange={(event) => props.setSelectedAuthMethodId(event.target.value)}>
+                              {selectedProvider.authMethods.map((method) => (
+                                <option key={method.id} value={method.id}>
+                                  {prettyAuthMethod(method.label)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="figma-auth-note">
+                          <span className={`tiny-badge ${authMethodTone(selectedAuthMethod.label)}`}>
+                            {selectedAuthMethod.interactive ? copy.interactiveFlow : copy.directSetup}
+                          </span>
+                          <p>{selectedAuthMethod.description}</p>
+                        </div>
+
+                        {selectedAuthMethod.interactive ? (
+                          <p className="subtle">
+                            SlackClaw runs the OpenClaw terminal authentication flow for you, opens the browser sign-in page when OpenClaw emits it, and keeps the
+                            live log here.
+                          </p>
+                        ) : null}
+
+                        {props.modelAuthSession && props.modelAuthSession.providerId === selectedProvider.id && props.modelAuthSession.methodId === selectedAuthMethod.id ? (
+                          <div className="figma-auth-session">
+                            <div className="figma-auth-session-head">
+                              <strong>{copy.authProgress}</strong>
+                              <span className={`tiny-badge ${props.modelAuthSession.status === "completed" ? "pass" : props.modelAuthSession.status === "failed" ? "failed" : "pending"}`}>
+                                {props.modelAuthSession.status}
+                              </span>
+                            </div>
+                            <p>{props.modelAuthSession.message}</p>
+                            {props.modelAuthSession.launchUrl ? (
+                              <a href={props.modelAuthSession.launchUrl} target="_blank" rel="noreferrer">
+                                {copy.openAuthWindow}
+                              </a>
+                            ) : null}
+                            {props.modelAuthSession.logs.length ? <pre className="log-box">{props.modelAuthSession.logs.join("\n")}</pre> : null}
+                            {props.modelAuthSession.status === "awaiting-input" ? (
+                              <div className="figma-auth-input">
+                                <label>
+                                  <span>{props.modelAuthSession.inputPrompt ?? copy.pasteRedirect}</span>
+                                  <input
+                                    value={props.modelAuthSessionInput}
+                                    onChange={(event) => props.setModelAuthSessionInput(event.target.value)}
+                                    placeholder={copy.pastePlaceholder}
+                                  />
+                                </label>
+                                <button className="button primary" onClick={() => void props.onSubmitModelAuthInput()} disabled={props.busy !== null}>
+                                  {props.busy === "model-auth-input" ? copy.sending : copy.finishAuth}
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {selectedAuthMethod.fields.length ? (
+                          <div className="form-grid">
+                            {selectedAuthMethod.fields.map((field) => (
+                              <label key={field.id}>
+                                <span>{field.label}</span>
+                                <input
+                                  type={field.secret ? "password" : "text"}
+                                  placeholder={field.placeholder}
+                                  value={props.authValues[field.id] ?? ""}
+                                  onChange={(event) =>
+                                    props.setAuthValues({
+                                      ...props.authValues,
+                                      [field.id]: event.target.value
+                                    })
+                                  }
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <div className="figma-doc-card">
+                          <strong>{copy.helpTitle}</strong>
+                          <a href={selectedProvider.docsUrl} target="_blank" rel="noreferrer">
+                            {copy.helpLink(selectedProvider.label)}
+                          </a>
+                        </div>
+
+                        <div className="button-row spread top-gap">
+                          <button className="button ghost" onClick={() => props.setShowAddModelDialog(false)}>
+                            {copy.cancel}
+                          </button>
+                          <button
+                            className="button primary"
+                            onClick={() => void (selectedProviderConfigured ? props.onAddConfiguredModel() : props.onAuthenticateProvider())}
+                            disabled={
+                              props.busy !== null ||
+                              props.providerConfigPending ||
+                              (selectedProviderConfigured && (!props.selectedModelKey || selectedModelAlreadyConfigured))
+                            }
+                          >
+                            {props.providerConfigPending
+                              ? copy.configuringProvider
+                              : selectedProviderConfigured
+                              ? props.busy === "model-add"
+                                ? copy.savingModel
+                                : copy.addModelAction
+                              : props.busy === "model-auth"
+                                ? copy.configuringProvider
+                                : copy.configureProvider}
+                          </button>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                )}
+              </article>
+            </section>
+          ) : null}
+
+          <section className="surface action-footer figma-save-card">
+            <div>
+              <strong>{copy.saveTitle}</strong>
+              <p>
+                {onboardingComplete ? copy.saveReady : copy.savePending}
+              </p>
+            </div>
+            <button className="button primary" onClick={() => void props.onSaveModels()}>
+              {onboardingComplete ? copy.onboardingComplete : copy.saveModels}
+            </button>
+          </section>
+        </div>
+      ) : (
+        <div className="stack config-figma">
+          {!onboardingComplete ? (
+            <section className="surface notice-card warn">
+              <strong>{copy.completeOnboardingFirst}</strong>
+              <p>{copy.completeOnboardingFirstDetail}</p>
+            </section>
+          ) : null}
+          <section className="surface figma-info-card green">
+            <div className="figma-info-icon radio">CH</div>
+            <div className="figma-info-copy">
+              <strong>{copy.channelsInfoTitle}</strong>
+              <p>{copy.channelsInfoDetail}</p>
+              <div className="figma-info-points">
+                <span>{copy.channelsPointOne}</span>
+                <span>{copy.channelsPointTwo}</span>
+                <span>{copy.channelsPointThree}</span>
+              </div>
+            </div>
+          </section>
+
+          {telegram ? (
+            <article className={`surface figma-channel-card ${channelTone(telegram.status)}`}>
+              <div className="config-card-head">
+                <div>
+                  <h3>{copy.telegram}</h3>
+                  <p>{telegram.summary}</p>
+                </div>
+                <span className={`tiny-badge ${telegram.status === "completed" ? "pass" : "pending"}`}>{telegram.status}</span>
+              </div>
+              <div className="form-grid">
+                <label>
+                  <span>{copy.telegramToken}</span>
+                  <input value={props.telegramToken} onChange={(event) => props.setTelegramToken(event.target.value)} />
+                </label>
+                <label>
+                  <span>{copy.accountName}</span>
+                  <input value={props.telegramAccountName} onChange={(event) => props.setTelegramAccountName(event.target.value)} />
+                </label>
+              </div>
+              <div className="button-row">
+                <button className="button primary" onClick={() => void props.onTelegramSetup()} disabled={props.busy !== null}>
+                  {props.busy === "channel-telegram" ? copy.savingModel : copy.saveTelegram}
+                </button>
+              </div>
+              {(telegram.status === "awaiting-pairing" || telegram.status === "completed") && (
+                <div className="form-grid">
+                  <label>
+                    <span>{copy.pairingCode}</span>
+                    <input value={props.telegramPairingCode} onChange={(event) => props.setTelegramPairingCode(event.target.value)} />
+                  </label>
+                  <div className="button-row align-end">
+                    <button className="button ghost" onClick={() => void props.onTelegramApprove()} disabled={props.busy !== null}>
+                      {copy.approveTelegram}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </article>
+          ) : null}
+
+          {whatsapp ? (
+            <article className={`surface figma-channel-card ${channelTone(whatsapp.status)}`}>
+              <div className="config-card-head">
+                <div>
+                  <h3>{copy.whatsapp}</h3>
+                  <p>{whatsapp.summary}</p>
+                </div>
+                <span className={`tiny-badge ${whatsapp.status === "completed" ? "pass" : "pending"}`}>{whatsapp.status}</span>
+              </div>
+              {whatsapp.logs?.length ? <pre className="log-box">{whatsapp.logs.join("\n")}</pre> : null}
+              <div className="button-row">
+                <button className="button primary" onClick={() => void props.onWhatsappLogin()} disabled={props.busy !== null}>
+                  {props.busy === "channel-whatsapp-login" ? t(props.locale, "connecting") : copy.startWhatsapp}
+                </button>
+              </div>
+              <div className="form-grid">
+                <label>
+                  <span>{copy.pairingCode}</span>
+                  <input value={props.whatsappPairingCode} onChange={(event) => props.setWhatsappPairingCode(event.target.value)} />
+                </label>
+                <div className="button-row align-end">
+                  <button className="button ghost" onClick={() => void props.onWhatsappApprove()} disabled={props.busy !== null}>
+                    {copy.approveWhatsapp}
+                  </button>
+                </div>
+              </div>
+            </article>
+          ) : null}
+
+          {wechat ? (
+            <article className={`surface figma-channel-card ${channelTone(wechat.status)}`}>
+              <div className="config-card-head">
+                <div>
+                  <h3>{copy.wechat}</h3>
+                  <p>{wechat.summary}</p>
+                </div>
+                <span className="tiny-badge pending">{copy.experimental}</span>
+              </div>
+              <div className="form-grid">
+                <label>
+                  <span>{copy.pluginPackage}</span>
+                  <input value={props.wechatPluginSpec} onChange={(event) => props.setWechatPluginSpec(event.target.value)} />
+                </label>
+                <label>
+                  <span>{copy.corpId}</span>
+                  <input value={props.wechatCorpId} onChange={(event) => props.setWechatCorpId(event.target.value)} />
+                </label>
+                <label>
+                  <span>{copy.agentId}</span>
+                  <input value={props.wechatAgentId} onChange={(event) => props.setWechatAgentId(event.target.value)} />
+                </label>
+                <label>
+                  <span>{copy.secret}</span>
+                  <input value={props.wechatSecret} onChange={(event) => props.setWechatSecret(event.target.value)} />
+                </label>
+                <label>
+                  <span>{copy.webhookToken}</span>
+                  <input value={props.wechatToken} onChange={(event) => props.setWechatToken(event.target.value)} />
+                </label>
+                <label>
+                  <span>{copy.encodingAesKey}</span>
+                  <input value={props.wechatEncodingAesKey} onChange={(event) => props.setWechatEncodingAesKey(event.target.value)} />
+                </label>
+              </div>
+              <div className="button-row spread">
+                <button className="button primary" onClick={() => void props.onWechatSetup()} disabled={props.busy !== null}>
+                  {copy.configureWechat}
+                </button>
+                <button className="button ghost" onClick={() => void props.onGatewayStart()} disabled={props.busy !== null}>
+                  {copy.restartGateway}
+                </button>
+              </div>
+            </article>
+          ) : null}
+
+          <section className="surface action-footer figma-save-card">
+            <div>
+              <strong>{copy.saveTitle}</strong>
+              <p>{copy.channelSaveDetail}</p>
+            </div>
+            <button className="button primary" onClick={() => void props.onGatewayStart()} disabled={props.busy !== null || !onboardingComplete}>
+              {props.busy === "channel-gateway" ? copy.restarting : copy.restartGateway}
+            </button>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SkillsView(props: {
+  skillsTab: SkillsTab;
+  setSkillsTab: (tab: SkillsTab) => void;
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  skills: SkillItem[];
+  setSkills: (skills: SkillItem[]) => void;
+}) {
+  const filtered = props.skills.filter(
+    (skill) =>
+      skill.name.toLowerCase().includes(props.searchQuery.toLowerCase()) ||
+      skill.description.toLowerCase().includes(props.searchQuery.toLowerCase())
+  );
+  const enabled = filtered.filter((skill) => skill.enabled);
+  const disabled = filtered.filter((skill) => !skill.enabled);
+
+  const visible = props.skillsTab === "enabled" ? enabled : props.skillsTab === "disabled" ? disabled : filtered;
+
+  return (
+    <div className="page-wrap">
+      <header className="page-header">
+        <h2>Skills Management</h2>
+        <p>Set up and manage SlackClaw’s office-work skill set.</p>
+      </header>
+
+      <div className="top-toolbar">
+        <input
+          className="search-input"
+          placeholder="Search skills..."
+          value={props.searchQuery}
+          onChange={(event) => props.setSearchQuery(event.target.value)}
+        />
+        <button className="button ghost" onClick={() => props.setSkills(props.skills.map((skill) => ({ ...skill, enabled: true })))}>
+          Preload All Skills
+        </button>
+        <button className="button primary">Add Custom Skill</button>
+      </div>
+
+      <section className="stats-grid small">
+        <article className="surface stat-card"><div><p className="label">Total Skills</p><strong>{props.skills.length}</strong></div></article>
+        <article className="surface stat-card"><div><p className="label">Enabled</p><strong>{props.skills.filter((skill) => skill.enabled).length}</strong></div></article>
+        <article className="surface stat-card"><div><p className="label">Preloaded</p><strong>{props.skills.filter((skill) => skill.preloaded).length}</strong></div></article>
+        <article className="surface stat-card"><div><p className="label">Custom</p><strong>{props.skills.filter((skill) => !skill.preloaded).length}</strong></div></article>
+      </section>
+
+      <div className="tabs-row">
+        <button className={`tab-button ${props.skillsTab === "all" ? "active" : ""}`} onClick={() => props.setSkillsTab("all")}>All Skills</button>
+        <button className={`tab-button ${props.skillsTab === "enabled" ? "active" : ""}`} onClick={() => props.setSkillsTab("enabled")}>Enabled</button>
+        <button className={`tab-button ${props.skillsTab === "disabled" ? "active" : ""}`} onClick={() => props.setSkillsTab("disabled")}>Disabled</button>
+      </div>
+
+      <div className="stack">
+        {visible.map((skill) => (
+          <article key={skill.id} className={`surface skill-card ${skill.enabled ? "" : "muted"}`}>
+            <div className="skill-icon">{skill.icon}</div>
+            <div className="skill-body">
+              <div className="config-card-head">
+                <div>
+                  <h3>{skill.name}</h3>
+                  <p>{skill.description}</p>
+                </div>
+                <label className="toggle-line">
+                  <input
+                    type="checkbox"
+                    checked={skill.enabled}
+                    onChange={() => props.setSkills(props.skills.map((item) => (item.id === skill.id ? { ...item, enabled: !item.enabled } : item)))}
+                  />
+                  <span>{skill.enabled ? "Enabled" : "Disabled"}</span>
+                </label>
+              </div>
+              <div className="button-row spread">
+                <div className="button-row">
+                  <span className="tiny-badge pending">{skill.category}</span>
+                  {skill.preloaded ? <span className="tiny-badge pass">Preloaded</span> : null}
+                </div>
+                <div className="button-row">
+                  <button className="button ghost">View Details</button>
+                  <button className="button ghost">Configure</button>
+                </div>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChatView(props: {
+  messages: ChatMessage[];
+  input: string;
+  setInput: (value: string) => void;
+  busy: string | null;
+  onSend: () => Promise<void>;
+  onNewChat: () => void;
+  templates: TaskTemplate[];
+  onTemplateClick: (template: TaskTemplate) => void;
+  workflowReady: boolean;
+  blockMessage: string;
+}) {
+  return (
+    <div className="page-wrap chat-page">
+      <header className="page-header inline">
+        <div>
+          <h2>Chat with OpenClaw</h2>
+          <p>{props.workflowReady ? "Connected to your local SlackClaw workflow." : props.blockMessage}</p>
+        </div>
+        <button className="button ghost" onClick={props.onNewChat}>
+          New Chat
+        </button>
+      </header>
+
+      <section className="surface chat-surface">
+        <div className="chat-messages">
+          {props.messages.map((message) => (
+            <article key={message.id} className={`chat-row ${message.role}`}>
+              <div className={`chat-avatar ${message.role}`}>{message.role === "assistant" ? "✦" : "U"}</div>
+              <div className="chat-bubble-wrap">
+                <div className={`chat-bubble ${message.role}`}>
+                  <p>{message.content}</p>
+                </div>
+                <div className="chat-meta">
+                  <span>{formatTime(message.timestamp)}</span>
+                  {message.meta ? <span className="tiny-badge pending">{message.meta}</span> : null}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="chat-composer">
+          <textarea
+            value={props.input}
+            onChange={(event) => props.setInput(event.target.value)}
+            placeholder="Type your message..."
+          />
+          <div className="button-row spread">
+            <div className="button-row wrap">
+              {props.templates.slice(0, 4).map((template) => (
+                <button key={template.id} className="button ghost small" onClick={() => props.onTemplateClick(template)}>
+                  {template.title}
+                </button>
+              ))}
+            </div>
+            <button className="button primary" onClick={() => void props.onSend()} disabled={!props.workflowReady || props.busy === "task"}>
+              {props.busy === "task" ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingsView(props: {
+  tab: SettingsTab;
+  setTab: (tab: SettingsTab) => void;
+  settings: LocalSettingsState;
+  setSettings: (settings: LocalSettingsState) => void;
+  busy: string | null;
+  onSave: () => void;
+  onExportDiagnostics: () => Promise<void>;
+  onUpdate: () => Promise<void>;
+  onInstallService: () => Promise<void>;
+  onRestartService: () => Promise<void>;
+  onUninstallService: () => Promise<void>;
+  onStopApp: () => Promise<void>;
+  onUninstallApp: () => Promise<void>;
+  appVersion: string;
+}) {
+  return (
+    <div className="page-wrap">
+      <header className="page-header">
+        <h2>Settings</h2>
+        <p>Configure your SlackClaw system preferences.</p>
+      </header>
+
+      <div className="tabs-row">
+        {(["general", "deployment", "logging", "advanced"] as SettingsTab[]).map((tab) => (
+          <button key={tab} className={`tab-button ${props.tab === tab ? "active" : ""}`} onClick={() => props.setTab(tab)}>
+            {tab[0].toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {props.tab === "general" ? (
+        <section className="surface form-surface">
+          <label>
+            <span>Instance Name</span>
+            <input
+              value={props.settings.general.instanceName}
+              onChange={(event) =>
+                props.setSettings({
+                  ...props.settings,
+                  general: { ...props.settings.general, instanceName: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label className="toggle-line">
+            <input
+              type="checkbox"
+              checked={props.settings.general.autoStart}
+              onChange={() =>
+                props.setSettings({
+                  ...props.settings,
+                  general: { ...props.settings.general, autoStart: !props.settings.general.autoStart }
+                })
+              }
+            />
+            <span>Auto-start on boot</span>
+          </label>
+          <label className="toggle-line">
+            <input
+              type="checkbox"
+              checked={props.settings.general.checkUpdates}
+              onChange={() =>
+                props.setSettings({
+                  ...props.settings,
+                  general: { ...props.settings.general, checkUpdates: !props.settings.general.checkUpdates }
+                })
+              }
+            />
+            <span>Check for updates</span>
+          </label>
+          <label className="toggle-line">
+            <input
+              type="checkbox"
+              checked={props.settings.general.telemetry}
+              onChange={() =>
+                props.setSettings({
+                  ...props.settings,
+                  general: { ...props.settings.general, telemetry: !props.settings.general.telemetry }
+                })
+              }
+            />
+            <span>Send telemetry</span>
+          </label>
+          <div className="button-row spread top-gap">
+            <div>
+              <strong>Current Version</strong>
+              <p className="subtle">v{props.appVersion}</p>
+            </div>
+            <button className="button primary" onClick={props.onSave}>
+              Save Changes
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {props.tab === "deployment" ? (
+        <section className="surface form-surface">
+          <label className="toggle-line">
+            <input
+              type="checkbox"
+              checked={props.settings.deployment.autoRestart}
+              onChange={() =>
+                props.setSettings({
+                  ...props.settings,
+                  deployment: { ...props.settings.deployment, autoRestart: !props.settings.deployment.autoRestart }
+                })
+              }
+            />
+            <span>Auto-restart on failure</span>
+          </label>
+          <label>
+            <span>Max Retry Attempts</span>
+            <select
+              value={String(props.settings.deployment.maxRetries)}
+              onChange={(event) =>
+                props.setSettings({
+                  ...props.settings,
+                  deployment: { ...props.settings.deployment, maxRetries: Number(event.target.value) }
+                })
+              }
+            >
+              <option value="0">No retries</option>
+              <option value="1">1 retry</option>
+              <option value="3">3 retries</option>
+              <option value="5">5 retries</option>
+            </select>
+          </label>
+          <label className="toggle-line">
+            <input
+              type="checkbox"
+              checked={props.settings.deployment.healthCheck}
+              onChange={() =>
+                props.setSettings({
+                  ...props.settings,
+                  deployment: { ...props.settings.deployment, healthCheck: !props.settings.deployment.healthCheck }
+                })
+              }
+            />
+            <span>Health check monitoring</span>
+          </label>
+          <button className="button primary top-gap" onClick={props.onSave}>
+            Save Deployment Settings
+          </button>
+        </section>
+      ) : null}
+
+      {props.tab === "logging" ? (
+        <section className="surface form-surface">
+          <label>
+            <span>Log Level</span>
+            <select
+              value={props.settings.logging.level}
+              onChange={(event) =>
+                props.setSettings({
+                  ...props.settings,
+                  logging: { ...props.settings.logging, level: event.target.value }
+                })
+              }
+            >
+              <option value="error">Error only</option>
+              <option value="warn">Warnings</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+            </select>
+          </label>
+          <label>
+            <span>Log Retention (days)</span>
+            <input
+              type="number"
+              value={props.settings.logging.retention}
+              onChange={(event) =>
+                props.setSettings({
+                  ...props.settings,
+                  logging: { ...props.settings.logging, retention: Number(event.target.value) }
+                })
+              }
+            />
+          </label>
+          <label className="toggle-line">
+            <input
+              type="checkbox"
+              checked={props.settings.logging.enableDebug}
+              onChange={() =>
+                props.setSettings({
+                  ...props.settings,
+                  logging: { ...props.settings.logging, enableDebug: !props.settings.logging.enableDebug }
+                })
+              }
+            />
+            <span>Enable debug mode</span>
+          </label>
+          <div className="button-row">
+            <button className="button ghost" onClick={() => void props.onExportDiagnostics()} disabled={props.busy !== null}>
+              Download Logs
+            </button>
+            <button className="button primary" onClick={props.onSave}>
+              Save Logging Settings
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {props.tab === "advanced" ? (
+        <section className="stack">
+          <article className="surface form-surface">
+            <h3>Configuration Management</h3>
+            <div className="button-column">
+              <button className="button ghost" onClick={() => void props.onExportDiagnostics()} disabled={props.busy !== null}>
+                Export Diagnostics
+              </button>
+              <button className="button ghost" onClick={() => void props.onUpdate()} disabled={props.busy !== null}>
+                Check for Updates
+              </button>
+            </div>
+          </article>
+
+          <article className="surface form-surface">
+            <h3>System Controls</h3>
+            <div className="button-column">
+              <button className="button ghost" onClick={() => void props.onInstallService()} disabled={props.busy !== null}>
+                Install Service
+              </button>
+              <button className="button ghost" onClick={() => void props.onRestartService()} disabled={props.busy !== null}>
+                Restart Service
+              </button>
+              <button className="button ghost" onClick={() => void props.onUninstallService()} disabled={props.busy !== null}>
+                Remove Service
+              </button>
+            </div>
+          </article>
+
+          <article className="surface danger-zone">
+            <h3>Danger Zone</h3>
+            <p>These actions stop or remove the current SlackClaw app.</p>
+            <div className="button-column">
+              <button className="button ghost" onClick={() => void props.onStopApp()} disabled={props.busy !== null}>
+                Stop SlackClaw
+              </button>
+              <button className="button destructive" onClick={() => void props.onUninstallApp()} disabled={props.busy !== null}>
+                Uninstall SlackClaw
+              </button>
+            </div>
+          </article>
+        </section>
+      ) : null}
+    </div>
+  );
 }
 
 export default function App() {
   const [overview, setOverview] = useState<ProductOverview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedProfileId, setSelectedProfileId] = useState("email-admin");
-  const [selectedTemplateId, setSelectedTemplateId] = useState("summarize-thread");
-  const [prompt, setPrompt] = useState("");
-  const [taskResult, setTaskResult] = useState<EngineTaskResult | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [lastInstall, setLastInstall] = useState<InstallResponse | null>(null);
+  const [view, setView] = useState<View>("onboarding");
   const [locale, setLocale] = useState<Locale>(detectLocale());
-  const [setupSteps, setSetupSteps] = useState<SetupStepResult[]>([]);
-  const [setupAutostarted, setSetupAutostarted] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(1);
+  const [configTab, setConfigTab] = useState<ConfigTab>("models");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [skillsTab, setSkillsTab] = useState<SkillsTab>("all");
+  const [selectedVariant, setSelectedVariant] = useState<string | null>(null);
+  const [deploySteps, setDeploySteps] = useState<SetupStepResult[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState("email-admin");
+  const [modelConfig, setModelConfig] = useState<ModelConfigOverview | null>(null);
+  const [showAddModelDialog, setShowAddModelDialog] = useState(false);
+  const [modelAuthSession, setModelAuthSession] = useState<ModelAuthSession | null>(null);
+  const [modelAuthSessionInput, setModelAuthSessionInput] = useState("");
+  const [providerConfigPending, setProviderConfigPending] = useState(false);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>("openai");
+  const [selectedAuthMethodId, setSelectedAuthMethodId] = useState<string>("api-key");
+  const [authValues, setAuthValues] = useState<Record<string, string>>({});
+  const [selectedModelKey, setSelectedModelKey] = useState<string>("");
+  const [settings, setSettings] = useState<LocalSettingsState>(() => loadStoredJson("slackclaw.settings", defaultSettingsState));
+  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: "Hello! I'm OpenClaw through SlackClaw. Finish setup, then ask me to help with office work.",
+      timestamp: new Date().toISOString(),
+      meta: "SlackClaw"
+    }
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("summarize-thread");
   const [telegramToken, setTelegramToken] = useState("");
   const [telegramAccountName, setTelegramAccountName] = useState("");
   const [telegramPairingCode, setTelegramPairingCode] = useState("");
@@ -386,202 +2487,269 @@ export default function App() {
   const [wechatEncodingAesKey, setWechatEncodingAesKey] = useState("");
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+    saveStoredJson("slackclaw.settings", settings);
+  }, [settings]);
 
-    const stored = window.localStorage.getItem("slackclaw.locale") as Locale | null;
-    if (stored && localeOptions.some((option) => option.value === stored)) {
-      setLocale(stored);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("slackclaw.locale", locale);
     }
-  }, []);
+  }, [locale]);
+
 
   useEffect(() => {
     void loadOverview();
   }, []);
 
   useEffect(() => {
-    if (overview?.firstRun.selectedProfileId) {
-      setSelectedProfileId(overview.firstRun.selectedProfileId);
-    }
-  }, [overview?.firstRun.selectedProfileId]);
+    void loadModelConfiguration();
+  }, []);
 
   useEffect(() => {
-    const whatsappState = overview?.channelSetup.channels.find((channel) => channel.id === "whatsapp");
+    if (view !== "onboarding" || onboardingStep !== 2) {
+      return;
+    }
 
-    if (!whatsappState || (whatsappState.status !== "in-progress" && whatsappState.status !== "awaiting-pairing")) {
+    void loadOverview();
+  }, [onboardingStep, view]);
+
+  useEffect(() => {
+    if (!overview?.channelSetup.baseOnboardingCompleted && configTab === "channels") {
+      setConfigTab("models");
+    }
+  }, [configTab, overview?.channelSetup.baseOnboardingCompleted]);
+
+  useEffect(() => {
+    const provider = modelConfig?.providers.find((entry) => entry.id === selectedProviderId);
+    if (!provider) {
+      return;
+    }
+
+    setSelectedAuthMethodId((current) => provider.authMethods.find((method) => method.id === current)?.id ?? provider.authMethods[0]?.id ?? "");
+    setSelectedModelKey((current) => {
+      if (current && modelConfig?.models.some((model) => model.key === current && provider.providerRefs.some((prefix) => model.key.startsWith(prefix)))) {
+        return current;
+      }
+
+      return provider.sampleModels[0] || "";
+    });
+    setAuthValues({});
+  }, [modelConfig, selectedProviderId]);
+
+  useEffect(() => {
+    if (!modelAuthSession || (modelAuthSession.status !== "running" && modelAuthSession.status !== "awaiting-input")) {
       return;
     }
 
     const timer = window.setInterval(() => {
-      void loadOverview();
-    }, 4000);
+      void (async () => {
+        try {
+          const result = await fetchModelAuthSession(modelAuthSession.id);
+          setModelAuthSession(result.session);
+          setModelConfig(result.modelConfig);
+
+          if (result.session.status === "completed") {
+            setNotice(result.session.message);
+            setError(null);
+          }
+        } catch (sessionError) {
+          setError(sessionError instanceof Error ? sessionError.message : "Unable to refresh provider authentication status.");
+        }
+      })();
+    }, 1200);
 
     return () => window.clearInterval(timer);
-  }, [overview?.channelSetup.channels]);
+  }, [modelAuthSession]);
 
   useEffect(() => {
-    if (!overview?.firstRun.introCompleted || overview.firstRun.setupCompleted || setupAutostarted) {
+    if (!providerConfigPending || !showAddModelDialog || !selectedProviderId) {
       return;
     }
 
-    setSetupAutostarted(true);
-    void handleFirstRunSetup();
-  }, [overview?.firstRun.introCompleted, overview?.firstRun.setupCompleted, setupAutostarted]);
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const next = await fetchModelConfig();
+          setModelConfig(next);
 
-  function selectLocale(nextLocale: Locale) {
-    setLocale(nextLocale);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("slackclaw.locale", nextLocale);
+          const provider = next.providers.find((entry) => entry.id === selectedProviderId);
+          if (provider?.configured) {
+            setProviderConfigPending(false);
+            setNotice((current) => current ?? `${provider.label} is configured. Select a model to add it.`);
+            setError(null);
+          }
+        } catch (modelError) {
+          setError(modelError instanceof Error ? modelError.message : "Unable to refresh OpenClaw provider configuration.");
+        }
+      })();
+    }, 1200);
+
+    return () => window.clearInterval(timer);
+  }, [providerConfigPending, selectedProviderId, showAddModelDialog]);
+
+  useEffect(() => {
+    if (!showAddModelDialog) {
+      setProviderConfigPending(false);
+      setModelAuthSession(null);
+      setModelAuthSessionInput("");
     }
-  }
+  }, [showAddModelDialog]);
 
-  const selectedTemplate: TaskTemplate | undefined = overview?.templates.find(
-    (template) => template.id === selectedTemplateId
-  );
-  const isDeploying =
-    busy === "first-run-local-deploy" || busy === "first-run-setup" || busy === "install-local" || busy === "install";
-  const telegramChannel = overview?.channelSetup.channels.find((channel) => channel.id === "telegram");
-  const whatsappChannel = overview?.channelSetup.channels.find((channel) => channel.id === "whatsapp");
-  const wechatChannel = overview?.channelSetup.channels.find((channel) => channel.id === "wechat");
-  const nextChannelId = overview?.channelSetup.nextChannelId;
-  const onboardingCompleted = Boolean(overview?.channelSetup.baseOnboardingCompleted);
-  const workflowReady =
-    onboardingCompleted && Boolean(overview?.channelSetup.gatewayStarted) && Boolean(overview?.engine.running);
+  useEffect(() => {
+    if (!busy?.startsWith("deploy") || deploySteps.length === 0) {
+      return;
+    }
 
-  const criticalChecks = (overview?.healthChecks ?? [])
-    .filter((check) => check.severity === "error" || check.severity === "warning")
-    .sort((left, right) => severityRank(right) - severityRank(left));
+    const timer = window.setInterval(() => {
+      setDeploySteps((current) => {
+        const runningIndex = current.findIndex((step) => step.status === "running");
 
-  const recommendedRecoveryActions = (overview?.recoveryActions ?? []).filter((action) =>
-    criticalChecks.some((check) => check.remediationActionIds.includes(action.id))
-  );
+        if (runningIndex === -1 || runningIndex === current.length - 1) {
+          return current;
+        }
 
-  const prioritizedRecoveryActions: RecoveryAction[] =
-    recommendedRecoveryActions.length > 0
-      ? [
-          ...recommendedRecoveryActions,
-          ...(overview?.recoveryActions ?? []).filter(
-            (action) => !recommendedRecoveryActions.some((candidate) => candidate.id === action.id)
-          )
-        ]
-      : (overview?.recoveryActions ?? []);
+        return current.map((step, index) => {
+          if (index < runningIndex) {
+            return { ...step, status: "completed" };
+          }
+
+          if (index === runningIndex) {
+            return { ...step, status: "completed" };
+          }
+
+          if (index === runningIndex + 1) {
+            return { ...step, status: "running" };
+          }
+
+          return step;
+        });
+      });
+    }, 1400);
+
+    return () => window.clearInterval(timer);
+  }, [busy, deploySteps.length]);
 
   async function loadOverview() {
     try {
-      setError(null);
       const nextOverview = await fetchOverview();
       setOverview(nextOverview);
+      setSelectedProfileId(nextOverview.firstRun.selectedProfileId ?? "email-admin");
+      setSkills((current) => (current.length ? current : toSkillItems(nextOverview.templates)));
+
+      if (!nextOverview.firstRun.introCompleted || !nextOverview.firstRun.setupCompleted) {
+        setView("onboarding");
+      } else if (view === "onboarding") {
+        setView("dashboard");
+      }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t(locale, "loadFailed"));
+      setError(loadError instanceof Error ? loadError.message : "Unable to load SlackClaw.");
     }
   }
 
-  async function handleGetStarted() {
+  async function loadModelConfiguration() {
+    try {
+      const next = await fetchModelConfig();
+      setModelConfig(next);
+
+      const nextProvider = next.providers.find((provider) => provider.id === selectedProviderId) ?? next.providers[0];
+      if (nextProvider) {
+        setSelectedProviderId(nextProvider.id);
+        setSelectedAuthMethodId(nextProvider.authMethods[0]?.id ?? "");
+        setSelectedModelKey((current) => current || next.defaultModel || nextProvider.sampleModels[0] || "");
+      }
+    } catch (modelError) {
+      setError(modelError instanceof Error ? modelError.message : "Unable to load OpenClaw model providers.");
+    }
+  }
+
+  const workflowReady = Boolean(
+    overview?.firstRun.setupCompleted &&
+      overview?.channelSetup.baseOnboardingCompleted &&
+      overview?.channelSetup.gatewayStarted &&
+      overview?.engine.running
+  );
+
+  async function handleStartIntro() {
     setBusy("first-run-intro");
     setError(null);
-    setNotice(null);
-    setSetupSteps([]);
-    setSetupAutostarted(false);
 
     try {
-      const nextOverview = await markFirstRunIntroComplete();
-      setOverview(nextOverview);
+      if (!overview?.firstRun.introCompleted) {
+        await markFirstRunIntroComplete();
+        await loadOverview();
+      }
+      setOnboardingStep(2);
     } catch (introError) {
-      setError(introError instanceof Error ? introError.message : t(locale, "loadFailed"));
+      setError(introError instanceof Error ? introError.message : "Could not start onboarding.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleFirstRunSetup() {
-    setBusy("first-run-setup");
+  function handleContinueAfterCheck() {
+    if (overview?.firstRun.setupCompleted) {
+      setView("dashboard");
+      return;
+    }
+
+    setView("deploy");
+  }
+
+  async function handleDeploy(variant: "standard" | "managed-local" | "planned") {
+    if (variant === "planned") {
+      setNotice("This engine target is planned but not implemented yet.");
+      return;
+    }
+
+    setBusy(`deploy-${variant}`);
     setError(null);
     setNotice(null);
+    setDeploySteps(createDeploySteps(variant === "managed-local"));
 
     try {
-      const result = await runFirstRunSetup();
+      const result = await runFirstRunSetup(variant === "managed-local");
       setOverview(result.overview);
-      setSetupSteps(result.steps);
-      setLastInstall(result.install ?? null);
-
-      if (result.status === "completed") {
-        setNotice(t(locale, "setupCompletedNotice"));
-      } else {
-        setError(t(locale, "setupFailedNotice"));
-      }
-    } catch (setupError) {
-      setError(setupError instanceof Error ? setupError.message : t(locale, "installFailed"));
+      setDeploySteps(result.steps);
+      setNotice(result.message);
+      setView("config");
+    } catch (deployError) {
+      setDeploySteps((current) =>
+        current.map((step, index) =>
+          index === current.findIndex((item) => item.status === "running")
+            ? { ...step, status: "failed", detail: deployError instanceof Error ? deployError.message : "Deployment failed." }
+            : step
+        )
+      );
+      setError(deployError instanceof Error ? deployError.message : "Deployment failed.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleLocalDeploySetup() {
-    setBusy("first-run-local-deploy");
+  async function handleUninstallEngine() {
+    setBusy("engine-uninstall");
     setError(null);
     setNotice(null);
 
     try {
-      const result = await runFirstRunSetup(true);
+      const result = await uninstallEngine();
       setOverview(result.overview);
-      setSetupSteps(result.steps);
-      setLastInstall(result.install ?? null);
-
-      if (result.status === "completed") {
-        setNotice(t(locale, "setupCompletedNotice"));
-      } else {
-        setError(result.install?.message ?? t(locale, "setupFailedNotice"));
-      }
-    } catch (setupError) {
-      setError(setupError instanceof Error ? setupError.message : t(locale, "installFailed"));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleInstall() {
-    setBusy("install");
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await installSlackClaw(true);
-      setOverview(result.overview);
-      setLastInstall(result.install);
-      setNotice(summarizeInstallDisposition(locale, result.install));
-    } catch (installError) {
-      setError(installError instanceof Error ? installError.message : t(locale, "installFailed"));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleInstallLocal() {
-    setBusy("install-local");
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await installSlackClaw(true, true);
-      setOverview(result.overview);
-      setLastInstall(result.install);
-      setNotice(summarizeInstallDisposition(locale, result.install));
-    } catch (installError) {
-      setError(installError instanceof Error ? installError.message : t(locale, "installFailed"));
+      setDeploySteps([]);
+      setSelectedVariant(null);
+      setView("onboarding");
+      setOnboardingStep(2);
+      setNotice(result.result.message);
+    } catch (engineError) {
+      setError(engineError instanceof Error ? engineError.message : "Engine uninstall failed.");
     } finally {
       setBusy(null);
     }
   }
 
   async function handleTelegramSetup() {
-    if (!telegramToken.trim()) {
-      setError(t(locale, "telegramTokenRequired"));
-      return;
-    }
-
     setBusy("channel-telegram");
     setError(null);
     setNotice(null);
-
     try {
       const result = await setupTelegramChannel({
         token: telegramToken.trim(),
@@ -590,29 +2758,23 @@ export default function App() {
       setOverview(result.overview);
       setNotice(result.message);
     } catch (channelError) {
-      setError(channelError instanceof Error ? channelError.message : t(locale, "setupFailedNotice"));
+      setError(channelError instanceof Error ? channelError.message : "Telegram setup failed.");
     } finally {
       setBusy(null);
     }
   }
 
   async function handleTelegramApprove() {
-    if (!telegramPairingCode.trim()) {
-      setError(t(locale, "pairingCodeRequired"));
-      return;
-    }
-
     setBusy("channel-telegram-approve");
     setError(null);
     setNotice(null);
-
     try {
       const result = await approveTelegramPairing({ code: telegramPairingCode.trim() });
       setOverview(result.overview);
       setNotice(result.message);
       setTelegramPairingCode("");
     } catch (channelError) {
-      setError(channelError instanceof Error ? channelError.message : t(locale, "setupFailedNotice"));
+      setError(channelError instanceof Error ? channelError.message : "Telegram pairing failed.");
     } finally {
       setBusy(null);
     }
@@ -622,50 +2784,37 @@ export default function App() {
     setBusy("channel-whatsapp-login");
     setError(null);
     setNotice(null);
-
     try {
       const result = await startWhatsappLogin();
       setOverview(result.overview);
       setNotice(result.message);
     } catch (channelError) {
-      setError(channelError instanceof Error ? channelError.message : t(locale, "setupFailedNotice"));
+      setError(channelError instanceof Error ? channelError.message : "WhatsApp login failed.");
     } finally {
       setBusy(null);
     }
   }
 
   async function handleWhatsappApprove() {
-    if (!whatsappPairingCode.trim()) {
-      setError(t(locale, "pairingCodeRequired"));
-      return;
-    }
-
     setBusy("channel-whatsapp-approve");
     setError(null);
     setNotice(null);
-
     try {
       const result = await approveWhatsappPairing({ code: whatsappPairingCode.trim() });
       setOverview(result.overview);
       setNotice(result.message);
       setWhatsappPairingCode("");
     } catch (channelError) {
-      setError(channelError instanceof Error ? channelError.message : t(locale, "setupFailedNotice"));
+      setError(channelError instanceof Error ? channelError.message : "WhatsApp pairing failed.");
     } finally {
       setBusy(null);
     }
   }
 
   async function handleWechatSetup() {
-    if (!wechatCorpId.trim() || !wechatAgentId.trim() || !wechatSecret.trim() || !wechatToken.trim() || !wechatEncodingAesKey.trim()) {
-      setError(t(locale, "wechatFieldsRequired"));
-      return;
-    }
-
     setBusy("channel-wechat");
     setError(null);
     setNotice(null);
-
     try {
       const result = await setupWechatWorkaround({
         pluginSpec: wechatPluginSpec.trim() || undefined,
@@ -678,79 +2827,179 @@ export default function App() {
       setOverview(result.overview);
       setNotice(result.message);
     } catch (channelError) {
-      setError(channelError instanceof Error ? channelError.message : t(locale, "setupFailedNotice"));
+      setError(channelError instanceof Error ? channelError.message : "WeChat workaround failed.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleChannelGatewayStart() {
+  async function handleGatewayStart() {
     setBusy("channel-gateway");
     setError(null);
     setNotice(null);
-
     try {
       const result = await startGatewayAfterChannels();
       setOverview(result.overview);
       setNotice(result.message);
     } catch (channelError) {
-      setError(channelError instanceof Error ? channelError.message : t(locale, "setupFailedNotice"));
+      setError(channelError instanceof Error ? channelError.message : "Gateway restart failed.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleOnboarding() {
+  async function handleSendMessage() {
+    if (!overview || !chatInput.trim()) {
+      return;
+    }
+
+    const userMessage: ChatMessage = {
+      id: `${Date.now()}-user`,
+      role: "user",
+      content: chatInput,
+      timestamp: new Date().toISOString()
+    };
+
+    setChatMessages((current) => [...current, userMessage]);
+    setBusy("task");
+    setError(null);
+
+    try {
+      const result: EngineTaskResult = await runTask({
+        profileId: selectedProfileId,
+        templateId: selectedTemplateId,
+        prompt: chatInput
+      });
+
+      const assistantMessage: ChatMessage = {
+        id: result.taskId,
+        role: "assistant",
+        content: result.output,
+        timestamp: result.finishedAt ?? new Date().toISOString(),
+        meta: result.summary
+      };
+
+      setChatMessages((current) => [...current, assistantMessage]);
+      setChatInput("");
+      await loadOverview();
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : "Task failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSaveModels() {
     setBusy("onboarding");
-    setNotice(null);
     setError(null);
     try {
       const nextOverview = await completeOnboarding({ profileId: selectedProfileId });
       setOverview(nextOverview);
-      setNotice(t(locale, "onboardingReady"));
+      setNotice("Model preferences saved and onboarding completed. Continue with channels.");
+      setConfigTab("channels");
     } catch (onboardingError) {
-      setError(onboardingError instanceof Error ? onboardingError.message : t(locale, "onboardingFailed"));
+      setError(onboardingError instanceof Error ? onboardingError.message : "Onboarding failed while saving models.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleRunTask() {
-    if (!prompt.trim()) {
-      setError(t(locale, "enterPrompt"));
+  async function handleProviderAuth() {
+    if (!modelConfig) {
       return;
     }
 
-    setBusy("task");
+    setBusy("model-auth");
     setError(null);
     setNotice(null);
+    setProviderConfigPending(true);
 
     try {
-      const result = await runTask({
-        profileId: selectedProfileId,
-        templateId: selectedTemplateId,
-        prompt
+      const result = await authenticateModelProvider({
+        providerId: selectedProviderId,
+        methodId: selectedAuthMethodId,
+        values: authValues
       });
-      setTaskResult(result);
+      setModelConfig(result.modelConfig);
+      setModelAuthSession(result.authSession ?? null);
+      setModelAuthSessionInput("");
+      const provider = result.modelConfig.providers.find((entry) => entry.id === selectedProviderId);
+      if (provider?.configured) {
+        setProviderConfigPending(false);
+      }
+      setNotice(result.message);
       await loadOverview();
-      setNotice(result.status === "completed" ? t(locale, "taskCompleted") : t(locale, "taskFailedNotice"));
-    } catch (taskError) {
-      setError(taskError instanceof Error ? taskError.message : t(locale, "taskFailed"));
+    } catch (providerError) {
+      setProviderConfigPending(false);
+      setError(providerError instanceof Error ? providerError.message : "Provider authentication failed.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleRecovery(actionId: string) {
-    setBusy(actionId);
+  async function handleAddConfiguredModel() {
+    if (!selectedModelKey) {
+      setError("Select a model first.");
+      return;
+    }
+
+    setBusy("model-add");
+    setError(null);
     setNotice(null);
+
+    try {
+      const result = await setDefaultModel({ modelKey: selectedModelKey });
+      setModelConfig(result.modelConfig);
+      setModelAuthSession(null);
+      setProviderConfigPending(false);
+      setModelAuthSessionInput("");
+      setShowAddModelDialog(false);
+      setNotice(result.message);
+      await loadOverview();
+    } catch (modelError) {
+      setError(modelError instanceof Error ? modelError.message : "Adding model failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSubmitModelAuthInput() {
+    if (!modelAuthSession) {
+      return;
+    }
+
+    setBusy("model-auth-input");
+    setError(null);
+    setNotice(null);
+
+    try {
+      const result = await submitModelAuthSessionInput(modelAuthSession.id, {
+        value: modelAuthSessionInput
+      });
+      setModelAuthSession(result.session);
+      setModelConfig(result.modelConfig);
+      setModelAuthSessionInput("");
+      setNotice(result.session.message);
+    } catch (sessionError) {
+      setError(sessionError instanceof Error ? sessionError.message : "Unable to send the redirect URL / code to OpenClaw.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function handleSaveSettings() {
+    saveStoredJson("slackclaw.settings", settings);
+    setNotice("Settings saved successfully.");
+  }
+
+  async function handleExportDiagnostics() {
+    setBusy("diagnostics");
     setError(null);
     try {
-      const result = await runRecovery(actionId);
-      setOverview(result.overview);
-      setNotice(result.result.message);
-    } catch (recoveryError) {
-      setError(recoveryError instanceof Error ? recoveryError.message : t(locale, "recoveryFailed"));
+      const result = await exportDiagnostics();
+      setNotice(`${result.message} ${result.path}`);
+    } catch (diagnosticsError) {
+      setError(diagnosticsError instanceof Error ? diagnosticsError.message : "Export failed.");
     } finally {
       setBusy(null);
     }
@@ -764,621 +3013,226 @@ export default function App() {
       setNotice(result.message);
       await loadOverview();
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : t(locale, "updateFailed"));
+      setError(updateError instanceof Error ? updateError.message : "Update failed.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleExportDiagnostics() {
-    setBusy("diagnostics");
+  async function handleInstallService() {
+    setBusy("service-install");
     setError(null);
     try {
-      const result = await exportDiagnostics();
-      setNotice(`${result.message} ${result.path}`);
-    } catch (diagnosticsError) {
-      setError(diagnosticsError instanceof Error ? diagnosticsError.message : t(locale, "exportFailed"));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleServiceAction(action: "install" | "restart" | "uninstall") {
-    setBusy(`service-${action}`);
-    setError(null);
-    setNotice(null);
-
-    try {
-      const result =
-        action === "install"
-          ? await installAppService()
-          : action === "restart"
-            ? await restartAppService()
-            : await uninstallAppService();
-
+      const result = await installAppService();
       setOverview(result.overview);
       setNotice(result.result.message);
     } catch (serviceError) {
-      setError(serviceError instanceof Error ? serviceError.message : t(locale, "recoveryFailed"));
+      setError(serviceError instanceof Error ? serviceError.message : "Service install failed.");
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleAppControl(action: "stop" | "uninstall") {
-    setBusy(`app-${action}`);
+  async function handleRestartService() {
+    setBusy("service-restart");
     setError(null);
-    setNotice(null);
-
     try {
-      const result = action === "stop" ? await stopSlackClawApp() : await uninstallSlackClawApp();
+      const result = await restartAppService();
+      setOverview(result.overview);
+      setNotice(result.result.message);
+    } catch (serviceError) {
+      setError(serviceError instanceof Error ? serviceError.message : "Service restart failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUninstallService() {
+    setBusy("service-uninstall");
+    setError(null);
+    try {
+      const result = await uninstallAppService();
+      setOverview(result.overview);
+      setNotice(result.result.message);
+    } catch (serviceError) {
+      setError(serviceError instanceof Error ? serviceError.message : "Service uninstall failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleStopApp() {
+    setBusy("app-stop");
+    try {
+      const result = await stopSlackClawApp();
       setNotice(result.message);
-      attemptCloseUi();
     } catch (appError) {
-      setError(appError instanceof Error ? appError.message : t(locale, "recoveryFailed"));
+      setError(appError instanceof Error ? appError.message : "Stop failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUninstallApp() {
+    setBusy("app-uninstall");
+    try {
+      const result = await uninstallSlackClawApp();
+      setNotice(result.message);
+    } catch (appError) {
+      setError(appError instanceof Error ? appError.message : "Uninstall failed.");
     } finally {
       setBusy(null);
     }
   }
 
   if (!overview) {
-    return (
-      <div className="shell">
-        <div className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">{t(locale, "appEyebrow")}</p>
-            <h1>{t(locale, "heroTitle")}</h1>
-            <p className="detail">{t(locale, "heroDetail")}</p>
-          </div>
-          <div className="hero-status">
-            <span className="status-pill warning">{t(locale, "connecting")}</span>
-            <p>Connecting to local SlackClaw daemon...</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <div className="loading-page">{locale === "zh" ? "正在加载 SlackClaw…" : locale === "ja" ? "SlackClaw を読み込み中…" : locale === "ko" ? "SlackClaw를 불러오는 중…" : locale === "es" ? "Cargando SlackClaw…" : "Loading SlackClaw…"}</div>;
   }
 
-  if (!overview.firstRun.introCompleted) {
+  if (!overview.firstRun.introCompleted || view === "onboarding") {
     return (
-      <div className="shell">
-        <div className="hero first-run-hero">
-          <div className="hero-copy">
-            <p className="eyebrow">{t(locale, "introEyebrow")}</p>
-            <h1>{t(locale, "introTitle")}</h1>
-            <p className="detail">{t(locale, "introDetail")}</p>
-            <div className="action-row">
-              <button className="primary" onClick={handleGetStarted} disabled={busy !== null}>
-                {busy === "first-run-intro" ? t(locale, "connecting") : t(locale, "getStarted")}
-              </button>
-              <label className="locale-picker">
-                <span>{t(locale, "language")}</span>
-                <select value={locale} onChange={(event) => selectLocale(event.target.value as Locale)}>
-                  {localeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <article className="install-outcome">
-              <strong>{t(locale, "appControlTitle")}</strong>
-              <p>{t(locale, "appControlDetail")}</p>
-            </article>
-            <AppControlButtons locale={locale} busy={busy} onAction={handleAppControl} />
-          </div>
-          <div className="hero-status">
-            <div className="setup-points">
-              <article className="install-outcome">
-                <strong>1.</strong>
-                <p>{t(locale, "introPointOne")}</p>
-              </article>
-              <article className="install-outcome">
-                <strong>2.</strong>
-                <p>{t(locale, "introPointTwo")}</p>
-              </article>
-              <article className="install-outcome">
-                <strong>3.</strong>
-                <p>{t(locale, "introPointThree")}</p>
-              </article>
-            </div>
-          </div>
-        </div>
-        {error ? <div className="banner error">{error}</div> : null}
-      </div>
+      <OnboardingScreen
+        locale={locale}
+        overview={overview}
+        onboardingStep={onboardingStep}
+        setOnboardingStep={setOnboardingStep}
+        busy={busy}
+        onStartIntro={handleStartIntro}
+        onContinueAfterCheck={handleContinueAfterCheck}
+        onSelectLocale={setLocale}
+        onUninstallEngine={handleUninstallEngine}
+      />
     );
   }
-
-  if (!overview.firstRun.setupCompleted) {
-    return (
-      <div className="shell">
-        <div className="hero first-run-hero setup-hero">
-          <div className="hero-copy">
-            <div className="topbar-row">
-              <p className="brand-mark">SlackClaw</p>
-              <span className={`status-pill ${installHealthChip(overview).tone}`}>{installHealthChip(overview).label}</span>
-            </div>
-            <p className="eyebrow">{t(locale, "setupEyebrow")}</p>
-            <h1>Run OpenClaw without terminal setup</h1>
-            <p className="detail">
-              SlackClaw checks your environment and deploys OpenClaw or a compatible managed runtime before guiding the rest of setup.
-            </p>
-            <div className="action-row">
-              <button
-                className="primary"
-                onClick={() => void handleLocalDeploySetup()}
-                disabled={busy !== null}
-              >
-                {busy === "first-run-local-deploy" ? t(locale, "setupRunning") : t(locale, "deployLocalOpenClaw")}
-              </button>
-              <button className="ghost" onClick={() => void handleFirstRunSetup()} disabled={busy !== null}>
-                {busy === "first-run-setup" ? t(locale, "setupRunning") : t(locale, "setupRetry")}
-              </button>
-              <label className="locale-picker">
-                <span>{t(locale, "language")}</span>
-                <select value={locale} onChange={(event) => selectLocale(event.target.value as Locale)}>
-                  {localeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </div>
-          <div className="hero-status setup-status">
-            <EnvironmentCheckCard overview={overview} locale={locale} />
-            {isDeploying ? <LoadingIndicator label={t(locale, "setupRunning")} /> : null}
-            <article className="install-outcome">
-              <strong>{t(locale, "appControlTitle")}</strong>
-              <p>{t(locale, "appControlDetail")}</p>
-            </article>
-            <AppControlButtons locale={locale} busy={busy} onAction={handleAppControl} />
-          </div>
-        </div>
-
-        {error ? <div className="banner error">{error}</div> : null}
-        {notice ? <div className="banner ok">{notice}</div> : null}
-
-        <main className="grid">
-          <section className="panel workspace-panel wizard-panel">
-            <SectionHeader
-              eyebrow="Setup Wizard"
-              title="Deploy first, then continue in SlackClaw"
-              detail="This mirrors the design flow: environment check first, deploy OpenClaw second, then onboarding and channels inside the app."
-            />
-            <div className="setup-steps">
-              {setupSteps.length > 0 ? (
-                setupSteps.map((step) => (
-                  <article key={step.id} className={`setup-step ${step.status}`}>
-                    <div className="setup-step-head">
-                      <strong>{setupStepTitle(locale, step)}</strong>
-                      <SetupStepStatus status={step.status} />
-                    </div>
-                    <p>{step.detail}</p>
-                  </article>
-                ))
-              ) : (
-                <p className="detail">{t(locale, "setupNoSteps")}</p>
-              )}
-            </div>
-
-            {lastInstall ? (
-              <article className="install-outcome">
-                <strong>{summarizeInstallDisposition(locale, lastInstall)}</strong>
-                <p>{lastInstall.message}</p>
-              </article>
-            ) : null}
-            {isDeploying ? <LoadingIndicator label={t(locale, "deployingDependencies")} /> : null}
-          </section>
-        </main>
-      </div>
-    );
-  }
-
-  const heroStatusLabel = overview.engine.running ? t(locale, "engineReady") : t(locale, "needsAttention");
 
   return (
-    <div className="shell">
-      <div className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">{t(locale, "appEyebrow")}</p>
-          <h1>{t(locale, "heroTitle")}</h1>
-          <p className="detail">{t(locale, "heroDetail")}</p>
-          <div className="action-row">
-            <button className="ghost" onClick={() => void loadOverview()} disabled={busy !== null}>
-              {t(locale, "refreshStatus")}
-            </button>
-            <label className="locale-picker">
-              <span>{t(locale, "language")}</span>
-              <select value={locale} onChange={(event) => selectLocale(event.target.value as Locale)}>
-                {localeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-        <div className="hero-status">
-          <span className={`status-pill ${overview.engine.running ? "ok" : "warning"}`}>{heroStatusLabel}</span>
-          <p>{overview.engine.summary}</p>
-          <p className="micro">{t(locale, "platformTarget", { value: overview.platformTarget })}</p>
-          {criticalChecks[0] ? (
-            <div className="hero-alert">
-              <strong>{t(locale, "immediateBlocker")}</strong>
-              <p>{criticalChecks[0].summary}</p>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
+    <AppShell activeView={view} onSelectView={setView} locale={locale} onSelectLocale={setLocale} overview={overview}>
       {error ? <div className="banner error">{error}</div> : null}
       {notice ? <div className="banner ok">{notice}</div> : null}
 
-      <main className="grid">
-        <section className="panel install-panel">
-          <SectionHeader
-            eyebrow={t(locale, "installEyebrow")}
-            title={t(locale, "installTitle")}
-            detail={t(locale, "installDetail")}
-          />
-          <EnvironmentCheckCard overview={overview} locale={locale} />
-          <ul className="check-list">
-            {overview.installChecks.map((check) => (
-              <li key={check.id}>
-                <strong>{check.label}</strong>
-                <span>{check.detail}</span>
-              </li>
-            ))}
-          </ul>
-
-          <div className="install-summary">
-            <div className="install-kv">
-              <span>{t(locale, "pinnedOpenClaw")}</span>
-              <strong>{overview.installSpec.desiredVersion}</strong>
-            </div>
-            <div className="install-kv">
-              <span>{t(locale, "detectedVersion")}</span>
-              <strong>{overview.engine.version ?? "Not detected"}</strong>
-            </div>
-            <div className="install-kv">
-              <span>{t(locale, "installSource")}</span>
-              <strong>{formatInstallSource(locale, overview.installSpec.installSource)}</strong>
-            </div>
-            {overview.installSpec.installPath ? (
-              <div className="install-kv">
-                <span>{t(locale, "installPath")}</span>
-                <strong>{overview.installSpec.installPath}</strong>
-              </div>
-            ) : null}
-          </div>
-
-          {lastInstall ? (
-            <article className="install-outcome">
-              <strong>{summarizeInstallDisposition(locale, lastInstall)}</strong>
-              <p>{lastInstall.message}</p>
-              <span className="micro">
-                {t(locale, "installOutcomeExisting", {
-                  value: lastInstall.hadExisting ? lastInstall.existingVersion ?? "detected" : "none"
-                })}{" "}
-                |{" "}
-                {t(locale, "installOutcomeActive", {
-                  value: lastInstall.actualVersion ?? lastInstall.engineStatus.version ?? "unknown"
-                })}
-              </span>
-            </article>
-          ) : null}
-          {isDeploying ? <LoadingIndicator label={t(locale, "deployingDependencies")} /> : null}
-
-          <button className="primary" onClick={handleInstall} disabled={busy !== null}>
-            {busy === "install" ? t(locale, "installing") : t(locale, "installAndConfigure")}
-          </button>
-          <button className="ghost" onClick={handleInstallLocal} disabled={busy !== null}>
-            {busy === "install-local" ? t(locale, "installing") : t(locale, "deployLocalOpenClaw")}
-          </button>
-        </section>
-
-        <section className="panel">
-          <SectionHeader
-            eyebrow={t(locale, "serviceEyebrow")}
-            title={t(locale, "serviceTitle")}
-            detail={t(locale, "serviceDetail")}
-          />
-          <div className="install-summary">
-            <div className="install-kv">
-              <span>{t(locale, "serviceMode")}</span>
-              <strong>{overview.appService.mode}</strong>
-            </div>
-            <div className="install-kv">
-              <span>{t(locale, "serviceInstalled")}</span>
-              <strong>{overview.appService.installed ? t(locale, "yes") : t(locale, "no")}</strong>
-            </div>
-            <div className="install-kv">
-              <span>{t(locale, "serviceManagedAtLogin")}</span>
-              <strong>{overview.appService.managedAtLogin ? t(locale, "yes") : t(locale, "no")}</strong>
-            </div>
-          </div>
-          <article className="install-outcome">
-            <strong>{overview.appService.summary}</strong>
-            <p>{overview.appService.detail}</p>
-          </article>
-          <div className="action-row">
-            <button className="secondary" onClick={() => void handleServiceAction("install")} disabled={busy !== null}>
-              {t(locale, "serviceInstall")}
-            </button>
-            <button className="ghost" onClick={() => void handleServiceAction("restart")} disabled={busy !== null}>
-              {t(locale, "serviceRestart")}
-            </button>
-            <button className="ghost" onClick={() => void handleServiceAction("uninstall")} disabled={busy !== null}>
-              {t(locale, "serviceUninstall")}
-            </button>
-          </div>
-          <article className="install-outcome">
-            <strong>{t(locale, "appControlTitle")}</strong>
-            <p>{t(locale, "appControlDetail")}</p>
-          </article>
-          <AppControlButtons locale={locale} busy={busy} onAction={handleAppControl} />
-        </section>
-
-        <SetupWizardCard
+      {view === "dashboard" ? <DashboardView overview={overview} onSelectView={setView} /> : null}
+      {view === "deploy" ? (
+        <DeployView
           locale={locale}
-          onboardingCompleted={onboardingCompleted}
-          nextChannelId={nextChannelId}
+          overview={overview}
           busy={busy}
-          selectedProfileId={selectedProfileId}
-          profiles={overview.profiles}
-          onSelectProfile={setSelectedProfileId}
-          onCompleteOnboarding={handleOnboarding}
-          gatewayStarted={overview.channelSetup.gatewayStarted}
+          onDeploy={handleDeploy}
+          onUninstallEngine={handleUninstallEngine}
+          selectedVariant={selectedVariant}
+          setSelectedVariant={setSelectedVariant}
+          deploySteps={deploySteps}
         />
-
-        <section className="panel workspace-panel">
-          <SectionHeader
-            eyebrow={t(locale, "channelEyebrow")}
-            title={t(locale, "channelTitle")}
-            detail={t(locale, "channelDetail")}
-          />
-          <article className="install-outcome">
-            <strong>{overview.channelSetup.gatewaySummary}</strong>
-            <p>
-              {overview.channelSetup.baseOnboardingCompleted
-                ? t(locale, "baseOnboardingCompleted")
-                : t(locale, "baseOnboardingPending")}
-            </p>
-          </article>
-          <div className="health-stack">
-            {telegramChannel ? (
-              <article className={`health-card ${channelStatusClass(telegramChannel.status)}`}>
-                <strong>{telegramChannel.title}</strong>
-                <p>{telegramChannel.summary}</p>
-                <span className="micro">{telegramChannel.detail}</span>
-                {!onboardingCompleted ? (
-                  <p className="micro">{t(locale, "baseOnboardingPending")}</p>
-                ) : nextChannelId && nextChannelId !== "telegram" && telegramChannel.status !== "completed" ? (
-                  <p className="micro">{t(locale, "channelLocked")}</p>
-                ) : (
-                  <>
-                    <label>
-                      <span>{t(locale, "telegramTokenLabel")}</span>
-                      <input value={telegramToken} onChange={(event) => setTelegramToken(event.target.value)} />
-                    </label>
-                    <label>
-                      <span>{t(locale, "accountNameLabel")}</span>
-                      <input value={telegramAccountName} onChange={(event) => setTelegramAccountName(event.target.value)} />
-                    </label>
-                    <div className="action-row">
-                      <button className="secondary" onClick={handleTelegramSetup} disabled={busy !== null}>
-                        {busy === "channel-telegram" ? t(locale, "setupRunning") : t(locale, "saveTelegram")}
-                      </button>
-                    </div>
-                    {telegramChannel.status === "awaiting-pairing" || telegramChannel.status === "completed" ? (
-                      <>
-                        <label>
-                          <span>{t(locale, "pairingCodeLabel")}</span>
-                          <input value={telegramPairingCode} onChange={(event) => setTelegramPairingCode(event.target.value)} />
-                        </label>
-                        <button className="ghost" onClick={handleTelegramApprove} disabled={busy !== null}>
-                          {busy === "channel-telegram-approve" ? t(locale, "setupRunning") : t(locale, "approveTelegram")}
-                        </button>
-                      </>
-                    ) : null}
-                  </>
-                )}
-              </article>
-            ) : null}
-
-            {whatsappChannel ? (
-              <article className={`health-card ${channelStatusClass(whatsappChannel.status)}`}>
-                <strong>{whatsappChannel.title}</strong>
-                <p>{whatsappChannel.summary}</p>
-                <span className="micro">{whatsappChannel.detail}</span>
-                {whatsappChannel.logs?.length ? <pre>{whatsappChannel.logs.join("\n")}</pre> : null}
-                {!onboardingCompleted ? (
-                  <p className="micro">{t(locale, "baseOnboardingPending")}</p>
-                ) : nextChannelId && nextChannelId !== "whatsapp" && whatsappChannel.status !== "completed" ? (
-                  <p className="micro">{t(locale, "channelLocked")}</p>
-                ) : (
-                  <>
-                    <button className="secondary" onClick={handleWhatsappLogin} disabled={busy !== null}>
-                      {busy === "channel-whatsapp-login" ? t(locale, "setupRunning") : t(locale, "startWhatsapp")}
-                    </button>
-                    <label>
-                      <span>{t(locale, "pairingCodeLabel")}</span>
-                      <input value={whatsappPairingCode} onChange={(event) => setWhatsappPairingCode(event.target.value)} />
-                    </label>
-                    <button className="ghost" onClick={handleWhatsappApprove} disabled={busy !== null}>
-                      {busy === "channel-whatsapp-approve" ? t(locale, "setupRunning") : t(locale, "approveWhatsapp")}
-                    </button>
-                  </>
-                )}
-              </article>
-            ) : null}
-
-            {wechatChannel ? (
-              <article className={`health-card ${channelStatusClass(wechatChannel.status)}`}>
-                <strong>{wechatChannel.title}</strong>
-                <p>{wechatChannel.summary}</p>
-                <span className="micro">{wechatChannel.detail}</span>
-                <span className="micro">{t(locale, "wechatExperimental")}</span>
-                {!onboardingCompleted ? (
-                  <p className="micro">{t(locale, "baseOnboardingPending")}</p>
-                ) : nextChannelId && nextChannelId !== "wechat" && wechatChannel.status !== "completed" ? (
-                  <p className="micro">{t(locale, "channelLocked")}</p>
-                ) : (
-                  <>
-                    <label>
-                      <span>{t(locale, "wechatPluginLabel")}</span>
-                      <input value={wechatPluginSpec} onChange={(event) => setWechatPluginSpec(event.target.value)} />
-                    </label>
-                    <label>
-                      <span>{t(locale, "wechatCorpIdLabel")}</span>
-                      <input value={wechatCorpId} onChange={(event) => setWechatCorpId(event.target.value)} />
-                    </label>
-                    <label>
-                      <span>{t(locale, "wechatAgentIdLabel")}</span>
-                      <input value={wechatAgentId} onChange={(event) => setWechatAgentId(event.target.value)} />
-                    </label>
-                    <label>
-                      <span>{t(locale, "wechatSecretLabel")}</span>
-                      <input value={wechatSecret} onChange={(event) => setWechatSecret(event.target.value)} />
-                    </label>
-                    <label>
-                      <span>{t(locale, "wechatTokenLabel")}</span>
-                      <input value={wechatToken} onChange={(event) => setWechatToken(event.target.value)} />
-                    </label>
-                    <label>
-                      <span>{t(locale, "wechatEncodingKeyLabel")}</span>
-                      <input
-                        value={wechatEncodingAesKey}
-                        onChange={(event) => setWechatEncodingAesKey(event.target.value)}
-                      />
-                    </label>
-                    <button className="secondary" onClick={handleWechatSetup} disabled={busy !== null}>
-                      {busy === "channel-wechat" ? t(locale, "setupRunning") : t(locale, "setupWechat")}
-                    </button>
-                  </>
-                )}
-              </article>
-            ) : null}
-          </div>
-
-          <button
-            className="primary"
-            onClick={handleChannelGatewayStart}
-            disabled={busy !== null || !onboardingCompleted || Boolean(nextChannelId)}
-          >
-            {busy === "channel-gateway" ? t(locale, "setupRunning") : t(locale, "startGateway")}
-          </button>
-        </section>
-
-        <ChatConsolePreview
+      ) : null}
+      {view === "config" ? (
+        <ConfigView
           locale={locale}
-          selectedTemplateId={selectedTemplateId}
-          setSelectedTemplateId={setSelectedTemplateId}
-          setPrompt={setPrompt}
+          configTab={configTab}
+          setConfigTab={setConfigTab}
+          showAddModelDialog={showAddModelDialog}
+          setShowAddModelDialog={setShowAddModelDialog}
+          modelAuthSession={modelAuthSession}
+          modelAuthSessionInput={modelAuthSessionInput}
+          setModelAuthSessionInput={setModelAuthSessionInput}
+          modelConfig={modelConfig}
+          selectedProviderId={selectedProviderId}
+          setSelectedProviderId={setSelectedProviderId}
+          selectedAuthMethodId={selectedAuthMethodId}
+          setSelectedAuthMethodId={setSelectedAuthMethodId}
+          authValues={authValues}
+          setAuthValues={setAuthValues}
+          selectedModelKey={selectedModelKey}
+          setSelectedModelKey={setSelectedModelKey}
+          overview={overview}
+          busy={busy}
+          providerConfigPending={providerConfigPending}
+          telegramToken={telegramToken}
+          setTelegramToken={setTelegramToken}
+          telegramAccountName={telegramAccountName}
+          setTelegramAccountName={setTelegramAccountName}
+          telegramPairingCode={telegramPairingCode}
+          setTelegramPairingCode={setTelegramPairingCode}
+          whatsappPairingCode={whatsappPairingCode}
+          setWhatsappPairingCode={setWhatsappPairingCode}
+          wechatPluginSpec={wechatPluginSpec}
+          setWechatPluginSpec={setWechatPluginSpec}
+          wechatCorpId={wechatCorpId}
+          setWechatCorpId={setWechatCorpId}
+          wechatAgentId={wechatAgentId}
+          setWechatAgentId={setWechatAgentId}
+          wechatSecret={wechatSecret}
+          setWechatSecret={setWechatSecret}
+          wechatToken={wechatToken}
+          setWechatToken={setWechatToken}
+          wechatEncodingAesKey={wechatEncodingAesKey}
+          setWechatEncodingAesKey={setWechatEncodingAesKey}
+          onSaveModels={handleSaveModels}
+          onTelegramSetup={handleTelegramSetup}
+          onTelegramApprove={handleTelegramApprove}
+          onWhatsappLogin={handleWhatsappLogin}
+          onWhatsappApprove={handleWhatsappApprove}
+          onWechatSetup={handleWechatSetup}
+          onGatewayStart={handleGatewayStart}
+          onAuthenticateProvider={handleProviderAuth}
+          onSubmitModelAuthInput={handleSubmitModelAuthInput}
+          onAddConfiguredModel={handleAddConfiguredModel}
+          onRefreshModelConfig={loadModelConfiguration}
+        />
+      ) : null}
+      {view === "skills" ? (
+        <SkillsView
+          skillsTab={skillsTab}
+          setSkillsTab={setSkillsTab}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          skills={skills}
+          setSkills={setSkills}
+        />
+      ) : null}
+      {view === "chat" ? (
+        <ChatView
+          messages={chatMessages}
+          input={chatInput}
+          setInput={setChatInput}
+          busy={busy}
+          onSend={handleSendMessage}
+          onNewChat={() =>
+            setChatMessages([
+              {
+                id: "welcome",
+                role: "assistant",
+                content: "Hello! I'm OpenClaw through SlackClaw. How can I help you today?",
+                timestamp: new Date().toISOString(),
+                meta: "SlackClaw"
+              }
+            ])
+          }
           templates={overview.templates}
-          selectedTemplate={selectedTemplate}
-          prompt={prompt}
-          onPromptChange={setPrompt}
+          onTemplateClick={(template) => {
+            setSelectedTemplateId(template.id);
+            setChatInput(template.promptHint);
+          }}
           workflowReady={workflowReady}
-          gatewaySummary={overview.channelSetup.gatewaySummary}
-          busy={busy}
-          onRun={handleRunTask}
-          taskResult={taskResult}
+          blockMessage={overview.channelSetup.gatewaySummary}
         />
-
-        <section className="panel">
-          <SectionHeader
-            eyebrow={t(locale, "healthEyebrow")}
-            title={t(locale, "healthTitle")}
-            detail={t(locale, "healthDetail")}
-          />
-          {criticalChecks.length > 0 ? (
-            <div className="priority-list">
-              {criticalChecks.map((check) => (
-                <article key={check.id} className={`priority-card ${check.severity}`}>
-                  <strong>{check.title}</strong>
-                  <p>{check.summary}</p>
-                  <span className="micro">{check.detail}</span>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="detail">{t(locale, "noUrgentBlockers")}</p>
-          )}
-
-          <div className="health-stack">
-            {overview.healthChecks.map((check) => (
-              <article key={check.id} className={`health-card ${check.severity}`}>
-                <div>
-                  <strong>{check.title}</strong>
-                  <p>{check.summary}</p>
-                </div>
-                <span className="micro">{check.detail}</span>
-              </article>
-            ))}
-          </div>
-          <div className="action-row">
-            <button className="secondary" onClick={handleUpdate} disabled={busy !== null}>
-              {busy === "update" ? t(locale, "checkingUpdates") : t(locale, "checkUpdates")}
-            </button>
-            <button className="ghost" onClick={handleExportDiagnostics} disabled={busy !== null}>
-              {busy === "diagnostics" ? t(locale, "exportingDiagnostics") : t(locale, "exportDiagnostics")}
-            </button>
-          </div>
-        </section>
-
-        <section className="panel">
-          <SectionHeader
-            eyebrow={t(locale, "recoveryEyebrow")}
-            title={t(locale, "recoveryTitle")}
-            detail={t(locale, "recoveryDetail")}
-          />
-          <div className="recovery-list">
-            {prioritizedRecoveryActions.map((action) => (
-              <article key={action.id} className="recovery-card">
-                <div>
-                  <strong>
-                    {action.title}
-                    {recommendedRecoveryActions.some((candidate) => candidate.id === action.id)
-                      ? ` ${t(locale, "recommended")}`
-                      : ""}
-                  </strong>
-                  <p>{action.description}</p>
-                  <span className="micro">{action.expectedImpact}</span>
-                </div>
-                <button className="ghost" onClick={() => void handleRecovery(action.id)} disabled={busy !== null}>
-                  {busy === action.id ? "Running..." : "Run"}
-                </button>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <SectionHeader
-            eyebrow={t(locale, "historyEyebrow")}
-            title={t(locale, "historyTitle")}
-            detail={t(locale, "historyDetail")}
-          />
-          <div className="history-list">
-            {overview.recentTasks.length ? (
-              overview.recentTasks.map((task) => (
-                <article key={task.taskId} className="history-card">
-                  <strong>{task.title}</strong>
-                  <p>{task.summary}</p>
-                  <span className="micro">{new Date(task.startedAt).toLocaleString()}</span>
-                </article>
-              ))
-            ) : (
-              <p className="detail">{t(locale, "noHistory")}</p>
-            )}
-          </div>
-        </section>
-      </main>
-    </div>
+      ) : null}
+      {view === "settings" ? (
+        <SettingsView
+          tab={settingsTab}
+          setTab={setSettingsTab}
+          settings={settings}
+          setSettings={setSettings}
+          busy={busy}
+          onSave={handleSaveSettings}
+          onExportDiagnostics={handleExportDiagnostics}
+          onUpdate={handleUpdate}
+          onInstallService={handleInstallService}
+          onRestartService={handleRestartService}
+          onUninstallService={handleUninstallService}
+          onStopApp={handleStopApp}
+          onUninstallApp={handleUninstallApp}
+          appVersion={overview.appVersion}
+        />
+      ) : null}
+    </AppShell>
   );
 }

@@ -1,0 +1,64 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
+import type { ProductOverview } from "@slackclaw/contracts";
+
+import { fetchOverview } from "../../shared/api/client.js";
+
+interface OverviewContextValue {
+  loading: boolean;
+  error?: string;
+  overview?: ProductOverview;
+  refresh: () => Promise<ProductOverview | undefined>;
+  setOverview: (next: ProductOverview) => void;
+}
+
+const OverviewContext = createContext<OverviewContextValue | null>(null);
+
+export function OverviewProvider(props: PropsWithChildren) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const [overview, setOverviewState] = useState<ProductOverview>();
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(undefined);
+    try {
+      const next = await fetchOverview();
+      setOverviewState(next);
+      return next;
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load SlackClaw.");
+      return undefined;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const value = useMemo(
+    () => ({
+      loading,
+      error,
+      overview,
+      refresh,
+      setOverview(next: ProductOverview) {
+        setOverviewState(next);
+      }
+    }),
+    [error, loading, overview, refresh]
+  );
+
+  return <OverviewContext.Provider value={value}>{props.children}</OverviewContext.Provider>;
+}
+
+export function useOverview() {
+  const value = useContext(OverviewContext);
+
+  if (!value) {
+    throw new Error("useOverview must be used within OverviewProvider");
+  }
+
+  return value;
+}

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.4 - 2026-03-11
+
+### Fixed
+
+- `npm start` now calls the OpenClaw bootstrap script directly instead of shelling through `npm run bootstrap:openclaw`, so local startup no longer stalls after the OpenClaw check step.
+- Local startup now reports the exact process holding a blocked port, making unmanaged daemon/UI conflicts visible instead of leaving startup stuck at a generic readiness failure.
+- The desktop shell no longer double-reserves the sidebar width, which was collapsing the main content area across routes and causing severe wrapping/layout breakage.
+- The language selector no longer uses the transparent-select overlay hack, which was rendering incorrectly in the main shell header.
+
+### Changed
+
+- `apps/desktop-ui` is now a routed, feature-based app shell with split providers, shared UI primitives, shared styles, and page-level feature modules instead of a monolithic `App.tsx`.
+- The desktop UI now implements the Figma main-file route structure for `/`, `/onboarding`, `/deploy`, `/config`, `/skills`, `/chat`, `/team`, and `/settings`.
+- The `Deploy` route now follows the Figma Make layout more closely with the Figma-style hero/info card, variant grid, progress card, deploy CTA card, and supporting deployment summary cards.
+- Frontend-only concepts from the Figma app, including digital employees, team vision, and custom skill drafts, now live in a dedicated local workspace store instead of being mixed into daemon-backed overview state.
+- Desktop UI tests now validate routed localization support and local workspace persistence against the refactored structure.
+
 ## 0.1.3 - 2026-03-11
 
 ### Fixed

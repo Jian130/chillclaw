@@ -31,6 +31,34 @@ function fail(message) {
   process.exit(1);
 }
 
+function captureCommand(command, args) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(command, args, {
+      cwd: rootDir,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", () => {
+      resolvePromise("");
+    });
+
+    child.on("exit", () => {
+      resolvePromise(stdout.trim() || stderr.trim());
+    });
+  });
+}
+
 function ensureLocalDependencies() {
   logStep("Checking local JavaScript dependencies", { step: true });
   if (!existsSync(resolve(rootDir, "node_modules"))) {
@@ -170,7 +198,11 @@ async function ensurePortIsFree(label, host, port) {
   logStep(`Checking ${label} port ${port}`, { step: true });
   try {
     await pingPort(host, port, 500);
-    throw new Error(`${label} port ${port} is already in use on ${host}. Stop the existing process and retry.`);
+    const portOwner = await captureCommand("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
+    const ownerMessage = portOwner ? ` Current listener:\n${portOwner}` : "";
+    throw new Error(
+      `${label} port ${port} is already in use on ${host}. Stop the existing process and retry.${ownerMessage}`
+    );
   } catch (error) {
     if (error instanceof Error && error.message.includes("already in use")) {
       throw error;
@@ -235,7 +267,7 @@ async function main() {
   await assertNoManagedProcessesRunning();
   logStep("No managed SlackClaw dev processes are already running.");
 
-  await runBlockingStep("Checking OpenClaw installation", "npm", ["run", "bootstrap:openclaw"]);
+  await runBlockingStep("Checking OpenClaw installation", "node", ["./scripts/bootstrap-openclaw.mjs", "--json"]);
   await runBlockingStep("Building shared contracts", "npm", ["run", "build", "--workspace", "@slackclaw/contracts"]);
   await runBlockingStep("Building daemon", "npm", ["run", "build", "--workspace", "@slackclaw/daemon"]);
   await ensurePortIsFree("Daemon", "127.0.0.1", daemonPort);

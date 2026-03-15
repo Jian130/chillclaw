@@ -19,13 +19,16 @@ describe("DeployPage helpers", () => {
         version: "2026.3.7",
         latestVersion: "2026.3.11",
         updateAvailable: true,
-        summary: "Installed"
+        summary: "Installed",
+        requirements: ["macOS", "Node.js 22 or newer"],
+        requirementsSourceUrl: "https://docs.openclaw.ai/mac/bun"
       }
     ];
 
     const [decorated] = decorateTargets(targets);
     expect(decorated.features.length).toBeGreaterThan(2);
     expect(decorated.gradientClass).toBe("deploy-variant--standard");
+    expect(decorated.requirements).toContain("Node.js 22 or newer");
   });
 
   it("marks the active step as running while work is in progress", () => {

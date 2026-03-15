@@ -10,7 +10,12 @@ export class TaskService {
   ) {}
 
   async runTask(request: EngineTaskRequest): Promise<EngineTaskResult> {
-    const result = await this.adapter.runTask(request);
+    const state = await this.store.read();
+    const member = request.memberId ? state.aiTeam?.members?.[request.memberId] : undefined;
+    const result = await this.adapter.runTask({
+      ...request,
+      memberAgentId: member?.agentId
+    });
 
     await this.store.update((current) => ({
       ...current,

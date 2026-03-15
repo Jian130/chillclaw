@@ -7,8 +7,16 @@ interface TabsContextValue {
 
 const TabsContext = createContext<TabsContextValue | null>(null);
 
-export function Tabs(props: PropsWithChildren<{ defaultValue: string; className?: string }>) {
-  const [value, setValue] = useState(props.defaultValue);
+export function Tabs(props: PropsWithChildren<{
+  defaultValue: string;
+  className?: string;
+  value?: string;
+  onValueChange?: (next: string) => void;
+}>) {
+  const [internalValue, setInternalValue] = useState(props.defaultValue);
+  const value = props.value ?? internalValue;
+  const setValue = props.onValueChange ?? setInternalValue;
+
   return (
     <TabsContext.Provider value={{ value, setValue }}>
       <div className={`tabs ${props.className ?? ""}`.trim()}>{props.children}</div>

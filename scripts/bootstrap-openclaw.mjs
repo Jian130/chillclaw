@@ -9,6 +9,48 @@ const OPENCLAW_VERSION = process.env.SLACKCLAW_OPENCLAW_VERSION ?? "2026.3.7";
 const OPENCLAW_PACKAGE = `openclaw@${OPENCLAW_VERSION}`;
 const LOCAL_INSTALL_PREFIX = process.env.SLACKCLAW_OPENCLAW_INSTALL_PREFIX;
 
+function compareOpenClawVersions(left, right) {
+  if (!left || !right) {
+    return undefined;
+  }
+
+  const leftParts = String(left)
+    .replace(/^v/i, "")
+    .split(/[^\d]+/u)
+    .filter(Boolean)
+    .map((part) => Number(part));
+  const rightParts = String(right)
+    .replace(/^v/i, "")
+    .split(/[^\d]+/u)
+    .filter(Boolean)
+    .map((part) => Number(part));
+
+  if (leftParts.length === 0 || rightParts.length === 0) {
+    return undefined;
+  }
+
+  const limit = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < limit; index += 1) {
+    const leftPart = leftParts[index] ?? 0;
+    const rightPart = rightParts[index] ?? 0;
+
+    if (leftPart > rightPart) {
+      return 1;
+    }
+
+    if (leftPart < rightPart) {
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
+function isCompatibleOpenClawVersion(version) {
+  const comparison = compareOpenClawVersions(version, OPENCLAW_VERSION);
+  return comparison !== undefined && comparison >= 0;
+}
+
 function managedOpenClawBinPath() {
   return LOCAL_INSTALL_PREFIX ? resolve(LOCAL_INSTALL_PREFIX, "node_modules", ".bin", "openclaw") : undefined;
 }
@@ -109,7 +151,7 @@ async function readExistingVersion() {
 async function ensureOpenClaw({ dryRun }) {
   const existingVersion = await readExistingVersion();
 
-  if (existingVersion === OPENCLAW_VERSION) {
+  if (isCompatibleOpenClawVersion(existingVersion)) {
     return {
       status: "reused-existing",
       changed: false,
@@ -118,7 +160,7 @@ async function ensureOpenClaw({ dryRun }) {
       version: existingVersion,
       message: LOCAL_INSTALL_PREFIX
         ? `OpenClaw ${existingVersion} is already available for SlackClaw in ${LOCAL_INSTALL_PREFIX}.`
-        : `OpenClaw ${existingVersion} is already installed and matches the pinned version.`
+        : `OpenClaw ${existingVersion} is already installed and meets SlackClaw's minimum supported version ${OPENCLAW_VERSION}.`
     };
   }
 
@@ -134,7 +176,7 @@ async function ensureOpenClaw({ dryRun }) {
           ? `SlackClaw would deploy OpenClaw ${OPENCLAW_VERSION} into ${LOCAL_INSTALL_PREFIX} instead of reusing ${existingVersion}.`
           : `SlackClaw would deploy ${OPENCLAW_PACKAGE} into ${LOCAL_INSTALL_PREFIX}.`
         : existingVersion
-          ? `OpenClaw ${existingVersion} is installed, but SlackClaw would replace it with ${OPENCLAW_VERSION}.`
+          ? `OpenClaw ${existingVersion} is installed, but SlackClaw would replace it because it is older than the minimum supported version ${OPENCLAW_VERSION}.`
           : `OpenClaw is not installed, and SlackClaw would install ${OPENCLAW_PACKAGE}.`
     };
   }

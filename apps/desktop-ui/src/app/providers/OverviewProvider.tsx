@@ -7,7 +7,7 @@ interface OverviewContextValue {
   loading: boolean;
   error?: string;
   overview?: ProductOverview;
-  refresh: () => Promise<ProductOverview | undefined>;
+  refresh: (options?: { fresh?: boolean }) => Promise<ProductOverview | undefined>;
   setOverview: (next: ProductOverview) => void;
 }
 
@@ -18,11 +18,11 @@ export function OverviewProvider(props: PropsWithChildren) {
   const [error, setError] = useState<string>();
   const [overview, setOverviewState] = useState<ProductOverview>();
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { fresh?: boolean }) => {
     setLoading(true);
     setError(undefined);
     try {
-      const next = await fetchOverview();
+      const next = await fetchOverview(options);
       setOverviewState(next);
       return next;
     } catch (loadError) {

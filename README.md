@@ -4,8 +4,8 @@ SlackClaw is a macOS-first, local-first desktop product that makes OpenClaw usab
 
 - a React + TypeScript desktop UI for deploy, configuration, task routing, health, and recovery
 - a local TypeScript daemon with an engine adapter seam
-- an `OpenClawAdapter` implementation that manages deploy targets, model entries, channels, updates, and gateway health
-- shared contracts for deployment, model/channel management, onboarding, task execution, recovery, and updates
+- an `OpenClawAdapter` implementation that manages deploy targets, model entries, channels, chat sessions, updates, and gateway health
+- shared contracts for deployment, model/channel management, AI members, chat, onboarding, task execution, recovery, and updates
 
 ## Workspace layout
 
@@ -35,6 +35,13 @@ The desktop shell is implemented as a web UI + local daemon boundary so a Tauri 
 - Channel setup:
   - supports Telegram, WhatsApp, Feishu, and a WeChat workaround path
   - keeps onboarding gating in place before channels are unlocked
+- Chat page:
+  - supports real multi-thread chat with AI members backed by OpenClaw agents
+  - creates or reuses chat threads per AI member
+  - loads history through the daemon and streams updates back into the UI
+- AI members:
+  - create or reuse one real OpenClaw agent per member
+  - seed each member with an isolated workspace containing personalized identity, soul, user, tool, memory, and bootstrap files plus per-agent folders such as `knowledge/`, `memory/`, `skills/`, `notes/`, and `deliverables/`
 - Developer workflow:
   - includes an engine compatibility test runner for evaluating future OpenClaw versions
   - includes co-located tests for compatibility-sensitive adapter, service, contract, and UI logic
@@ -67,6 +74,8 @@ flowchart LR
 - `SlackClaw.app` is a lightweight launcher that ensures the SlackClaw LaunchAgent is installed, then opens the UI.
 - In the packaged app, the daemon is intended to run under a per-user macOS `LaunchAgent` instead of a one-off background shell process.
 - The daemon serves both the `/api` endpoints and the built frontend assets when packaged.
+- The daemon also owns OpenClaw chat session lifecycle and relays live chat updates to the UI over SSE.
+- Read-only OpenClaw CLI reads are cached and coalesced inside the daemon per logical refresh cycle so one page load does not fan out into repeated duplicate CLI calls.
 - The engine seam lives behind `EngineAdapter`, so SlackClaw product logic does not talk to OpenClaw directly.
 - `OpenClawAdapter` checks for an existing pinned OpenClaw install, reuses it when compatible, and otherwise deploys a SlackClaw-managed local OpenClaw runtime under the user's SlackClaw data directory.
 - The adapter seam is intentionally future-facing: it should later support local-LLM runtimes and model families such as Qwen, MiniMax-exposed local runtimes, Llama, Mistral, and other OpenAI-compatible local gateways.
@@ -202,10 +211,32 @@ Current behavior:
 - if OpenClaw is changed outside SlackClaw, SlackClaw reconciles the active runtime chain back into the model overview so the UI stays truthful
 - duplicate saved entries for the same model can exist, but only one copy of a model can be active in the runtime chain at a time
 
+## Chat management
+
+SlackClaw now exposes a real `/chat` workspace instead of a placeholder route.
+
+- each chat thread belongs to one AI member and therefore one OpenClaw agent
+- the desktop UI talks only to the SlackClaw daemon for chat creation, history, send, and abort actions
+- the daemon bridges those requests into the OpenClaw gateway chat/session methods and keeps a daemon-owned live gateway event bridge open for chat runs
+- live assistant updates are pushed back to the UI with server-sent events, not browser-direct OpenClaw connections
+- the chat workspace is designed as a Telegram-like threaded conversation surface with optimistic user bubbles, thinking indicators, tool-activity labels, in-place assistant streaming, and multi-thread AI member switching
+
+## AI member workspaces
+
+When SlackClaw creates a new AI member, it also seeds that OpenClaw agent's workspace with a richer first-run scaffold:
+
+- `IDENTITY.md`, `SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`, `MEMORY.md`, `HEARTBEAT.md`, and `BOOT.md`
+- `BOOTSTRAP.md` for brand-new workspaces only
+- per-agent folders such as `knowledge/`, `memory/`, `skills/`, `notes/`, `briefs/`, `deliverables/`, and `scratch/`
+- a dated daily memory note under `memory/YYYY-MM-DD.md`
+
+This keeps each OpenClaw agent isolated and closer to the multi-agent workspace pattern described in the OpenClaw docs.
+
 ### Local OpenClaw deployment
 
 - Packaged SlackClaw prefers a compatible existing `openclaw` install if one is already available.
 - If no compatible install is found, SlackClaw deploys `openclaw@2026.3.7` into `~/Library/Application Support/SlackClaw/data/openclaw-runtime`.
+- A newer compatible OpenClaw install is reused as-is; SlackClaw no longer downgrades it back to the minimum supported version on the next start.
 - Once that managed runtime exists, SlackClaw prefers it over an incompatible system-level OpenClaw.
 - If the user clicks `Deploy OpenClaw locally`, SlackClaw deploys the managed local runtime even when a compatible system OpenClaw already exists.
 - If `npm` is missing but Homebrew is available, SlackClaw now tries to install the needed `node`/`npm` toolchain and `git` through Homebrew before retrying local OpenClaw deployment.

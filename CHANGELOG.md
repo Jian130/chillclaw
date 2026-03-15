@@ -23,12 +23,44 @@
 - restart the OpenClaw gateway after runtime-affecting model and channel configuration changes
 - verify gateway health after restart before reporting success
 - improved Telegram, WhatsApp, Feishu, and WeChat setup flows and recovery messaging
+- restored the Feishu setup guide in-product with direct links to the official OpenClaw and platform docs
+- changed channel management to detect and show existing live OpenClaw channel accounts in addition to SlackClaw-managed entries
+
+### AI members and teams
+
+- added real daemon-backed AI member and AI team management
+- map each SlackClaw AI member to one OpenClaw agent with live detection of existing agents
+- added member create, edit, remove, bind, and retention-aware delete flows
+- generate richer per-agent workspaces with identity, soul, user, brain, tools, memory, bootstrap, knowledge, and skill files
+- switched new member agent ids to readable `name + datetime` identifiers
+
+### Skills
+
+- replaced the demo Skills page with a live installed-skill manager backed by OpenClaw
+- added ClawHub explore, search, inspect, install, update, and remove flows
+- added SlackClaw-managed custom skill create and edit flows
+- changed AI member skill selection to use the shared live runtime skill library
+
+### Chat
+
+- replaced the placeholder `/chat` route with a real multi-thread AI member chat workspace
+- added daemon-owned OpenClaw gateway chat/session bridging with SSE updates to the UI
+- added Telegram-style chat UX with optimistic user messages, thinking indicators, stop/retry actions, unread state, and thread switching
+- fixed chat duplication issues around optimistic user messages, internal tool-result payloads, and multi-step assistant replies
+- improved chat recovery so authentication failures and history reload issues surface clearly instead of leaving threads stuck in thinking
+
+### Runtime performance and reliability
+
+- reduced duplicate OpenClaw CLI reads with adapter-level command resolution caching and short-lived snapshot caches
+- removed known channel, skill, model, overview, and AI member N+1 read patterns
+- added frontend GET dedupe and route-scoped providers to cut duplicate page-load requests
+- tightened daemon error logging and dev-process cleanup for `npm start` and `npm stop`
 
 ### Compatibility and tests
 
 - added an engine compatibility manifest and developer compatibility runner for evaluating new OpenClaw versions
 - added fixture-based compatibility parsing tests for OpenClaw CLI output
-- added co-located tests for adapter, service, contract, and UI behavior around deploy/config flows
+- expanded co-located tests for adapter, service, contract, and UI behavior around deploy, config, AI member, skill, and chat flows
 
 ### Developer experience
 

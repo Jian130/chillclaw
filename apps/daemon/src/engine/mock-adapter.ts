@@ -1,9 +1,26 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AbortChatRequest,
+  BindAIMemberChannelRequest,
+  BrainAssignment,
+  ChatMessage,
+  ChatThreadDetail,
+  DeleteAIMemberRequest,
+  InstallSkillRequest,
+  InstalledSkillDetail,
+  KnowledgePack,
+  MemberAvatar,
+  MemberBindingSummary,
+  MemberCapabilitySettings,
+  SendChatMessageRequest,
+  ChannelSession,
+  ChannelSessionInputRequest,
+  ConfiguredChannelEntry,
   DeploymentTargetActionResponse,
   DeploymentTargetsResponse,
   EngineActionResponse,
+  GatewayActionResponse,
   ChannelSetupState,
   EngineCapabilities,
   EngineInstallSpec,
@@ -13,10 +30,16 @@ import type {
   ModelConfigActionResponse,
   ModelConfigOverview,
   ModelProviderConfig,
+  RemoveChannelEntryRequest,
+  RemoveSkillRequest,
   ReplaceFallbackModelEntriesRequest,
+  SaveChannelEntryRequest,
+  SaveCustomSkillRequest,
   SaveModelEntryRequest,
   SavedModelEntry,
   SetDefaultModelEntryRequest,
+  SkillMarketplaceDetail,
+  SkillMarketplaceEntry,
   EngineStatus,
   EngineTaskRequest,
   EngineTaskResult,
@@ -27,10 +50,33 @@ import type {
   RecoveryRunResponse,
   FeishuSetupRequest,
   TelegramSetupRequest,
+  UpdateSkillRequest,
   WechatSetupRequest
 } from "@slackclaw/contracts";
+import { resolveReadableMemberAgentId } from "./member-agent-id.js";
 
 import type { EngineAdapter } from "./adapter.js";
+import type {
+  AIMemberRuntimeCandidate,
+  AIMemberRuntimeRequest,
+  AIMemberRuntimeState,
+  EngineChatLiveEvent,
+  SkillRuntimeCatalog,
+  SkillRuntimeEntry
+} from "./adapter.js";
+
+const MOCK_STANDARD_OPENCLAW_REQUIREMENTS = [
+  "macOS",
+  "Node.js 22 or newer",
+  "A global openclaw CLI install for local mode",
+  "pnpm only if you build OpenClaw from source"
+];
+
+const MOCK_MANAGED_OPENCLAW_REQUIREMENTS = [
+  "macOS",
+  "Node.js 22 or newer",
+  "pnpm only if you build OpenClaw from source"
+];
 
 export class MockAdapter implements EngineAdapter {
   readonly installSpec: EngineInstallSpec = {
@@ -51,6 +97,8 @@ export class MockAdapter implements EngineAdapter {
     starterSkillCategories: ["communication", "research", "docs", "operations"],
     futureLocalModelFamilies: ["qwen", "minimax", "llama", "mistral", "custom-openai-compatible"]
   };
+
+  invalidateReadCaches(): void {}
 
   private installed = true;
   private profileId = "email-admin";
@@ -102,35 +150,158 @@ export class MockAdapter implements EngineAdapter {
       id: "telegram",
       title: "Telegram",
       officialSupport: true,
-      status: "ready",
-      summary: "Mock Telegram setup is ready.",
+      status: "not-started",
+      summary: "Mock Telegram setup has not started yet.",
       detail: "Mock mode simulates Telegram token setup and pairing approval."
     },
     whatsapp: {
       id: "whatsapp",
       title: "WhatsApp",
       officialSupport: true,
-      status: "ready",
-      summary: "Mock WhatsApp setup is ready.",
+      status: "not-started",
+      summary: "Mock WhatsApp setup has not started yet.",
       detail: "Mock mode simulates WhatsApp login and pairing approval."
     },
     feishu: {
       id: "feishu",
       title: "Feishu (飞书)",
       officialSupport: true,
-      status: "ready",
-      summary: "Mock Feishu setup is ready.",
+      status: "not-started",
+      summary: "Mock Feishu setup has not started yet.",
       detail: "Mock mode simulates the official OpenClaw Feishu plugin setup flow."
     },
     wechat: {
       id: "wechat",
       title: "WeChat workaround",
       officialSupport: false,
-      status: "ready",
-      summary: "Mock WeChat workaround is ready.",
+      status: "not-started",
+      summary: "Mock WeChat workaround has not started yet.",
       detail: "Mock mode simulates a community plugin workaround."
     }
   };
+  private activeChannelSession?: ChannelSession;
+  private skillRuntimeCatalog: SkillRuntimeCatalog = {
+    workspaceDir: "/mock/openclaw/workspace",
+    managedSkillsDir: "/mock/openclaw/workspace/skills",
+    marketplaceAvailable: true,
+    marketplaceSummary: "Mock ClawHub is available.",
+    readiness: {
+      total: 3,
+      eligible: 2,
+      disabled: 0,
+      blocked: 0,
+      missing: 1,
+      warnings: [],
+      summary: "2 ready · 1 missing requirements"
+    },
+    skills: [
+      {
+        id: "weather",
+        slug: "weather",
+        name: "weather",
+        description: "Weather forecasts.",
+        source: "openclaw-bundled",
+        bundled: true,
+        eligible: true,
+        disabled: false,
+        blockedByAllowlist: false,
+        missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+        homepage: "https://wttr.in/:help",
+        version: "1.0.0"
+      },
+      {
+        id: "Skill Finder - Search Skills",
+        slug: "skill-finder",
+        name: "Skill Finder - Search Skills",
+        description: "Find, evaluate, and recommend skills.",
+        source: "openclaw-workspace",
+        bundled: false,
+        eligible: true,
+        disabled: false,
+        blockedByAllowlist: false,
+        missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+        homepage: "https://clawic.com/skills/skill-finder",
+        version: "1.1.2",
+        filePath: "/mock/openclaw/workspace/skills/skill-finder/SKILL.md",
+        baseDir: "/mock/openclaw/workspace/skills/skill-finder"
+      },
+      {
+        id: "slack",
+        slug: "slack",
+        name: "slack",
+        description: "Slack operations.",
+        source: "openclaw-bundled",
+        bundled: true,
+        eligible: false,
+        disabled: false,
+        blockedByAllowlist: false,
+        missing: { bins: [], anyBins: [], env: [], config: ["channels.slack"], os: [] },
+        version: "1.0.0"
+      }
+    ]
+  };
+  private marketplaceInstalled: Array<{ slug: string; version?: string }> = [
+    { slug: "skill-finder", version: "1.1.2" }
+  ];
+  private marketplaceCatalog: SkillMarketplaceDetail[] = [
+    {
+      slug: "skill-finder",
+      name: "Skill Finder",
+      summary: "Find, compare, and install agent skills.",
+      latestVersion: "1.1.5",
+      updatedLabel: "just now",
+      ownerHandle: "ivangdavila",
+      ownerDisplayName: "Iván",
+      ownerImageUrl: "https://example.com/avatar.png",
+      downloads: 4015,
+      stars: 7,
+      installed: true,
+      curated: true,
+      changelog: "Broader discovery guidance.",
+      license: "MIT-0",
+      installsCurrent: 29,
+      installsAllTime: 32,
+      versions: 11,
+      filePreview: "# Skill Finder",
+      homepage: "https://clawic.com/skills/skill-finder"
+    },
+    {
+      slug: "weather-api",
+      name: "Weather API",
+      summary: "Query weather from a remote API.",
+      latestVersion: "1.0.1",
+      updatedLabel: "2 days ago",
+      ownerHandle: "weather-team",
+      downloads: 125,
+      stars: 4,
+      installed: false,
+      curated: true,
+      changelog: "Bug fixes.",
+      license: "MIT",
+      installsCurrent: 12,
+      installsAllTime: 28,
+      versions: 2,
+      filePreview: "# Weather API"
+    }
+  ];
+  private readonly memberRuntimeState = new Map<
+    string,
+    AIMemberRuntimeState & {
+      name: string;
+      jobTitle: string;
+      avatar: MemberAvatar;
+      personality: string;
+      soul: string;
+      workStyles: string[];
+      skillIds: string[];
+      capabilitySettings: MemberCapabilitySettings;
+      knowledgePacks: KnowledgePack[];
+      brain: BrainAssignment;
+    }
+  >();
+  private readonly chatSessions = new Map<string, ChatMessage[]>();
+  private readonly chatListeners = new Set<(event: EngineChatLiveEvent) => void>();
+  private readonly activeChatTimers = new Map<string, NodeJS.Timeout[]>();
 
   async install(_autoConfigure = true, _options?: { forceLocal?: boolean }): Promise<InstallResponse> {
     this.installed = true;
@@ -149,6 +320,162 @@ export class MockAdapter implements EngineAdapter {
       message: "Mock OpenClaw runtime was removed.",
       engineStatus: await this.status()
     };
+  }
+
+  async getSkillRuntimeCatalog(): Promise<SkillRuntimeCatalog> {
+    return this.skillRuntimeCatalog;
+  }
+
+  async getInstalledSkillDetail(skillId: string): Promise<InstalledSkillDetail> {
+    const skill = this.skillRuntimeCatalog.skills.find((entry) => entry.id === skillId);
+
+    if (!skill) {
+      throw new Error("Skill not found.");
+    }
+
+    return {
+      ...skill,
+      source: skill.source === "openclaw-bundled" ? "bundled" : skill.source === "openclaw-extra" ? "extra" : "workspace",
+      readiness: skill.disabled ? "disabled" : skill.blockedByAllowlist ? "blocked" : skill.eligible ? "ready" : "missing",
+      managedBy: this.marketplaceInstalled.some((entry) => entry.slug === skill.slug)
+        ? "clawhub"
+        : skill.source === "openclaw-workspace"
+          ? "slackclaw-custom"
+          : "openclaw",
+      editable: skill.source === "openclaw-workspace" && !this.marketplaceInstalled.some((entry) => entry.slug === skill.slug),
+      removable: skill.source === "openclaw-workspace",
+      updatable: this.marketplaceInstalled.some((entry) => entry.slug === skill.slug),
+      contentPreview: "# Mock skill"
+    };
+  }
+
+  async listMarketplaceInstalledSkills(): Promise<Array<{ slug: string; version?: string }>> {
+    return this.marketplaceInstalled;
+  }
+
+  async exploreSkillMarketplace(limit = 8): Promise<SkillMarketplaceEntry[]> {
+    return this.marketplaceCatalog.slice(0, limit).map((entry) => ({ ...entry }));
+  }
+
+  async searchSkillMarketplace(query: string, limit = 10): Promise<SkillMarketplaceEntry[]> {
+    const normalized = query.trim().toLowerCase();
+    return this.marketplaceCatalog
+      .filter((entry) => entry.slug.includes(normalized) || entry.name.toLowerCase().includes(normalized))
+      .slice(0, limit)
+      .map((entry) => ({ ...entry }));
+  }
+
+  async getSkillMarketplaceDetail(slug: string): Promise<SkillMarketplaceDetail> {
+    const entry = this.marketplaceCatalog.find((item) => item.slug === slug);
+
+    if (!entry) {
+      throw new Error("Marketplace skill not found.");
+    }
+
+    return { ...entry };
+  }
+
+  async installMarketplaceSkill(request: InstallSkillRequest): Promise<void> {
+    const detail = this.marketplaceCatalog.find((entry) => entry.slug === request.slug);
+    if (!detail) {
+      throw new Error("Marketplace skill not found.");
+    }
+
+    if (!this.marketplaceInstalled.some((entry) => entry.slug === request.slug)) {
+      this.marketplaceInstalled = [
+        ...this.marketplaceInstalled,
+        { slug: request.slug, version: request.version ?? detail.latestVersion }
+      ];
+      this.skillRuntimeCatalog = {
+        ...this.skillRuntimeCatalog,
+        skills: [
+          ...this.skillRuntimeCatalog.skills,
+          {
+            id: detail.name,
+            slug: detail.slug,
+            name: detail.name,
+            description: detail.summary,
+            source: "openclaw-workspace",
+            bundled: false,
+            eligible: true,
+            disabled: false,
+            blockedByAllowlist: false,
+            missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+            homepage: detail.homepage,
+            version: request.version ?? detail.latestVersion,
+            filePath: `/mock/openclaw/workspace/skills/${detail.slug}/SKILL.md`,
+            baseDir: `/mock/openclaw/workspace/skills/${detail.slug}`
+          }
+        ],
+        readiness: {
+          ...this.skillRuntimeCatalog.readiness,
+          total: this.skillRuntimeCatalog.readiness.total + 1,
+          eligible: this.skillRuntimeCatalog.readiness.eligible + 1
+        }
+      };
+    }
+  }
+
+  async updateMarketplaceSkill(slug: string, request: UpdateSkillRequest): Promise<void> {
+    const latestVersion = request.version ?? this.marketplaceCatalog.find((entry) => entry.slug === slug)?.latestVersion ?? "1.0.0";
+    this.marketplaceInstalled = this.marketplaceInstalled.map((entry) => entry.slug === slug ? { ...entry, version: latestVersion } : entry);
+    this.skillRuntimeCatalog = {
+      ...this.skillRuntimeCatalog,
+      skills: this.skillRuntimeCatalog.skills.map((entry) => entry.slug === slug ? { ...entry, version: latestVersion } : entry)
+    };
+  }
+
+  async saveCustomSkill(skillId: string | undefined, request: SaveCustomSkillRequest): Promise<{ slug: string }> {
+    const slug = request.slug?.trim() || request.name.toLowerCase().replace(/\s+/g, "-");
+    const nextSkill: SkillRuntimeEntry = {
+      id: request.name,
+      slug,
+      name: request.name,
+      description: request.description,
+      source: "openclaw-workspace",
+      bundled: false,
+      eligible: true,
+      disabled: false,
+      blockedByAllowlist: false,
+      missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+      homepage: request.homepage,
+      version: "0.1.0",
+      filePath: `/mock/openclaw/workspace/skills/${slug}/SKILL.md`,
+      baseDir: `/mock/openclaw/workspace/skills/${slug}`
+    };
+
+    const exists = this.skillRuntimeCatalog.skills.some((entry) => entry.id === skillId || entry.slug === slug);
+    this.skillRuntimeCatalog = {
+      ...this.skillRuntimeCatalog,
+      skills: exists
+        ? this.skillRuntimeCatalog.skills.map((entry) => entry.id === skillId || entry.slug === slug ? nextSkill : entry)
+        : [...this.skillRuntimeCatalog.skills, nextSkill],
+      readiness: exists
+        ? this.skillRuntimeCatalog.readiness
+        : {
+            ...this.skillRuntimeCatalog.readiness,
+            total: this.skillRuntimeCatalog.readiness.total + 1,
+            eligible: this.skillRuntimeCatalog.readiness.eligible + 1
+          }
+    };
+
+    return { slug };
+  }
+
+  async removeInstalledSkill(slug: string, _request: RemoveSkillRequest & { managedBy: "clawhub" | "slackclaw-custom" }): Promise<void> {
+    const removed = this.skillRuntimeCatalog.skills.find((entry) => entry.slug === slug);
+    this.skillRuntimeCatalog = {
+      ...this.skillRuntimeCatalog,
+      skills: this.skillRuntimeCatalog.skills.filter((entry) => entry.slug !== slug),
+      readiness: removed
+        ? {
+            ...this.skillRuntimeCatalog.readiness,
+            total: this.skillRuntimeCatalog.readiness.total - 1,
+            eligible: removed.eligible ? this.skillRuntimeCatalog.readiness.eligible - 1 : this.skillRuntimeCatalog.readiness.eligible
+          }
+        : this.skillRuntimeCatalog.readiness
+    };
+    this.marketplaceInstalled = this.marketplaceInstalled.filter((entry) => entry.slug !== slug);
   }
 
   async getModelConfig(): Promise<ModelConfigOverview> {
@@ -239,6 +566,42 @@ export class MockAdapter implements EngineAdapter {
     return {
       status: "completed",
       message: "Mock saved model entry updated.",
+      modelConfig: await this.getModelConfig()
+    };
+  }
+
+  async removeSavedModelEntry(entryId: string): Promise<ModelConfigActionResponse> {
+    const existing = this.savedEntries.find((entry) => entry.id === entryId);
+
+    if (!existing) {
+      throw new Error("Saved model entry not found.");
+    }
+
+    const remaining = this.savedEntries.filter((entry) => entry.id !== entryId);
+    let nextDefaultId = remaining.find((entry) => entry.isDefault)?.id;
+    let nextFallbackIds = remaining.filter((entry) => entry.isFallback).map((entry) => entry.id);
+
+    if (existing.isDefault) {
+      const promotedFallbackId = nextFallbackIds[0];
+
+      if (!promotedFallbackId) {
+        throw new Error("Set another default AI model before removing the current default model.");
+      }
+
+      nextDefaultId = promotedFallbackId;
+      nextFallbackIds = nextFallbackIds.filter((id) => id !== promotedFallbackId);
+    }
+
+    this.savedEntries = remaining.map((entry) => ({
+      ...entry,
+      isDefault: entry.id === nextDefaultId,
+      isFallback: nextFallbackIds.includes(entry.id),
+      updatedAt: entry.id === nextDefaultId || nextFallbackIds.includes(entry.id) ? new Date().toISOString() : entry.updatedAt
+    }));
+
+    return {
+      status: "completed",
+      message: "Mock saved model entry removed.",
       modelConfig: await this.getModelConfig()
     };
   }
@@ -349,6 +712,8 @@ export class MockAdapter implements EngineAdapter {
           version: status.version,
           desiredVersion: this.installSpec.desiredVersion,
           updateAvailable: false,
+          requirements: MOCK_STANDARD_OPENCLAW_REQUIREMENTS,
+          requirementsSourceUrl: "https://docs.openclaw.ai/mac/bun",
           summary: this.installed ? "Mock system OpenClaw is available." : "Mock system OpenClaw is not installed.",
           updateSummary: "Mock adapter is already on the recommended version."
         },
@@ -364,6 +729,8 @@ export class MockAdapter implements EngineAdapter {
           active: false,
           desiredVersion: this.installSpec.desiredVersion,
           updateAvailable: false,
+          requirements: MOCK_MANAGED_OPENCLAW_REQUIREMENTS,
+          requirementsSourceUrl: "https://docs.openclaw.ai/install",
           summary: "Mock managed local runtime is not installed."
         },
         {
@@ -377,6 +744,7 @@ export class MockAdapter implements EngineAdapter {
           recommended: false,
           active: false,
           updateAvailable: false,
+          requirements: [],
           summary: "Planned future adapter."
         },
         {
@@ -390,6 +758,7 @@ export class MockAdapter implements EngineAdapter {
           recommended: false,
           active: false,
           updateAvailable: false,
+          requirements: [],
           summary: "Planned future adapter."
         }
       ]
@@ -404,6 +773,15 @@ export class MockAdapter implements EngineAdapter {
         targetId === "standard"
           ? "Mock system OpenClaw is already on the current version."
           : "Mock managed local OpenClaw is already on the current version.",
+      engineStatus: await this.status()
+    };
+  }
+
+  async restartGateway(): Promise<GatewayActionResponse> {
+    return {
+      action: "restart-gateway",
+      status: "completed",
+      message: "Mock OpenClaw gateway restarted and is reachable.",
       engineStatus: await this.status()
     };
   }
@@ -480,6 +858,299 @@ export class MockAdapter implements EngineAdapter {
     return this.channels[channelId];
   }
 
+  async getConfiguredChannelEntries(): Promise<ConfiguredChannelEntry[]> {
+    return (Object.entries(this.channels) as Array<[ConfiguredChannelEntry["channelId"], ChannelSetupState]>)
+      .filter(([, channel]) => channel.status !== "not-started")
+      .map(([channelId, channel]) => ({
+        id: `${channelId}:default`,
+        channelId,
+        label: channel.title,
+        status: channel.status,
+        summary: channel.summary,
+        detail: channel.detail,
+        maskedConfigSummary: channelId === "whatsapp" ? [{ label: "Account", value: "Linked through OpenClaw" }] : [],
+        editableValues: {},
+        pairingRequired: channel.status === "awaiting-pairing",
+        lastUpdatedAt: channel.lastUpdatedAt
+      }));
+  }
+
+  async getActiveChannelSession(): Promise<ChannelSession | undefined> {
+    return this.activeChannelSession;
+  }
+
+  async getChannelSession(sessionId: string): Promise<ChannelSession> {
+    if (!this.activeChannelSession || this.activeChannelSession.id !== sessionId) {
+      throw new Error("Mock channel session not found.");
+    }
+
+    return this.activeChannelSession;
+  }
+
+  async submitChannelSessionInput(_sessionId: string, _request: ChannelSessionInputRequest): Promise<ChannelSession> {
+    throw new Error("Mock channel sessions do not accept direct input.");
+  }
+
+  async saveChannelEntry(
+    request: SaveChannelEntryRequest
+  ): Promise<{ message: string; channel: ChannelSetupState; session?: ChannelSession }> {
+    switch (request.channelId) {
+      case "telegram":
+        if (request.action === "approve-pairing") {
+          return this.approvePairing("telegram", { code: request.values.code ?? "" });
+        }
+
+        return this.configureTelegram({ token: request.values.token ?? "", accountName: request.values.accountName });
+      case "whatsapp":
+        if (request.action === "approve-pairing") {
+          return this.approvePairing("whatsapp", { code: request.values.code ?? "" });
+        }
+
+        {
+          const result = await this.startWhatsappLogin();
+          return {
+            ...result,
+            session: this.activeChannelSession
+          };
+        }
+      case "feishu":
+        if (request.action === "prepare") {
+          return this.prepareFeishu();
+        }
+
+        if (request.action === "approve-pairing") {
+          return this.approvePairing("feishu", { code: request.values.code ?? "" });
+        }
+
+        return this.configureFeishu({
+          appId: request.values.appId ?? "",
+          appSecret: request.values.appSecret ?? "",
+          domain: request.values.domain,
+          botName: request.values.botName
+        });
+      case "wechat":
+        return this.configureWechatWorkaround({
+          pluginSpec: request.values.pluginSpec,
+          corpId: request.values.corpId ?? "",
+          agentId: request.values.agentId ?? "",
+          secret: request.values.secret ?? "",
+          token: request.values.token ?? "",
+          encodingAesKey: request.values.encodingAesKey ?? ""
+        });
+      default:
+        throw new Error("Unsupported mock channel.");
+    }
+  }
+
+  async removeChannelEntry(
+    request: RemoveChannelEntryRequest
+  ): Promise<{ message: string; channelId: "telegram" | "whatsapp" | "feishu" | "wechat" }> {
+    const channelId = (request.channelId ?? request.entryId.split(":")[0]) as "telegram" | "whatsapp" | "feishu" | "wechat";
+    const template = new MockAdapter().channels[channelId];
+    this.channels[channelId] = { ...template };
+    if (this.activeChannelSession?.channelId === channelId) {
+      this.activeChannelSession = undefined;
+    }
+
+    return {
+      message: `Mock ${template.title} configuration removed.`,
+      channelId
+    };
+  }
+
+  async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState> {
+    const agentId =
+      request.existingAgentId ??
+      resolveReadableMemberAgentId(
+        request.name,
+        [...this.memberRuntimeState.values()].map((entry) => entry.agentId)
+      );
+    const runtime: AIMemberRuntimeState = {
+      agentId,
+      agentDir: `/mock/agents/${agentId}`,
+      workspaceDir: `/mock/workspaces/${request.memberId}`,
+      bindings: this.memberRuntimeState.get(request.memberId)?.bindings ?? []
+    };
+
+    this.memberRuntimeState.set(request.memberId, {
+      ...runtime,
+      name: request.name,
+      jobTitle: request.jobTitle,
+      avatar: request.avatar,
+      personality: request.personality,
+      soul: request.soul,
+      workStyles: request.workStyles,
+      skillIds: request.skillIds,
+      capabilitySettings: request.capabilitySettings,
+      knowledgePacks: request.knowledgePacks,
+      brain: request.brain
+    });
+
+    return runtime;
+  }
+
+  async listAIMemberRuntimeCandidates(): Promise<AIMemberRuntimeCandidate[]> {
+    return [...this.memberRuntimeState.values()].map((entry) => ({
+      agentId: entry.agentId,
+      name: entry.name,
+      modelKey: entry.brain.modelKey,
+      agentDir: entry.agentDir,
+      workspaceDir: entry.workspaceDir,
+      bindingCount: entry.bindings.length,
+      bindings: entry.bindings
+    }));
+  }
+
+  async getAIMemberBindings(agentId: string): Promise<MemberBindingSummary[]> {
+    const runtime = [...this.memberRuntimeState.values()].find((entry) => entry.agentId === agentId);
+    return runtime?.bindings ?? [];
+  }
+
+  async bindAIMemberChannel(agentId: string, request: BindAIMemberChannelRequest): Promise<MemberBindingSummary[]> {
+    const entry = [...this.memberRuntimeState.entries()].find(([, value]) => value.agentId === agentId);
+    if (!entry) {
+      return [];
+    }
+
+    const bindings = entry[1].bindings.some((binding) => binding.target === request.binding)
+      ? entry[1].bindings
+      : [...entry[1].bindings, { id: request.binding, target: request.binding }];
+
+    this.memberRuntimeState.set(entry[0], {
+      ...entry[1],
+      bindings
+    });
+
+    return bindings;
+  }
+
+  async unbindAIMemberChannel(agentId: string, request: BindAIMemberChannelRequest): Promise<MemberBindingSummary[]> {
+    const entry = [...this.memberRuntimeState.entries()].find(([, value]) => value.agentId === agentId);
+    if (!entry) {
+      return [];
+    }
+
+    const bindings = entry[1].bindings.filter((binding) => binding.target !== request.binding);
+    this.memberRuntimeState.set(entry[0], {
+      ...entry[1],
+      bindings
+    });
+
+    return bindings;
+  }
+
+  async deleteAIMemberRuntime(agentId: string, _request: DeleteAIMemberRequest): Promise<void> {
+    const entry = [...this.memberRuntimeState.entries()].find(([, value]) => value.agentId === agentId);
+    if (entry) {
+      this.memberRuntimeState.delete(entry[0]);
+    }
+  }
+
+  async getChatThreadDetail(request: { agentId: string; threadId: string; sessionKey: string }): Promise<ChatThreadDetail> {
+    return {
+      id: request.threadId,
+      memberId: "",
+      agentId: request.agentId,
+      sessionKey: request.sessionKey,
+      title: "",
+      createdAt: "",
+      updatedAt: "",
+      unreadCount: 0,
+      historyStatus: "ready",
+      composerState: {
+        status: "idle",
+        canSend: true,
+        canAbort: false
+      },
+      messages: [...(this.chatSessions.get(request.sessionKey) ?? [])]
+    };
+  }
+
+  async subscribeToLiveChatEvents(listener: (event: EngineChatLiveEvent) => void): Promise<() => void> {
+    this.chatListeners.add(listener);
+    listener({ type: "connected" });
+    return () => {
+      this.chatListeners.delete(listener);
+    };
+  }
+
+  async sendChatMessage(
+    request: SendChatMessageRequest & { agentId: string; threadId: string; sessionKey: string }
+  ): Promise<{ runId?: string }> {
+    const existing = this.chatSessions.get(request.sessionKey) ?? [];
+    const timestamp = new Date().toISOString();
+    const runId = `mock-run-${randomUUID()}`;
+    const userMessage: ChatMessage = {
+      id: `${request.threadId}:user:${existing.length}`,
+      role: "user",
+      text: request.message,
+      timestamp,
+      clientMessageId: request.clientMessageId,
+      status: "sent"
+    };
+    const assistantMessage: ChatMessage = {
+      id: `${request.threadId}:assistant:${existing.length + 1}`,
+      role: "assistant",
+      text: `Mock reply from ${request.agentId}: ${request.message}`,
+      timestamp,
+      status: "sent"
+    };
+    this.chatSessions.set(request.sessionKey, [...existing, userMessage]);
+
+    const timers = [
+      setTimeout(() => {
+        this.emitChatEvent({
+          type: "assistant-tool-status",
+          runId,
+          activityLabel: "Using tools: mock-search"
+        });
+      }, 5),
+      setTimeout(() => {
+        this.emitChatEvent({
+          type: "assistant-delta",
+          sessionKey: request.sessionKey,
+          runId,
+          message: {
+            id: `${request.threadId}:assistant:stream`,
+            role: "assistant",
+            text: "Mock reply from",
+            status: "streaming"
+          }
+        });
+      }, 10),
+      setTimeout(() => {
+        this.chatSessions.set(request.sessionKey, [...(this.chatSessions.get(request.sessionKey) ?? []), assistantMessage]);
+        this.emitChatEvent({
+          type: "assistant-completed",
+          sessionKey: request.sessionKey,
+          runId
+        });
+        this.activeChatTimers.delete(request.sessionKey);
+      }, 20)
+    ];
+    this.activeChatTimers.set(request.sessionKey, timers);
+
+    return { runId };
+  }
+
+  async abortChatMessage(request: AbortChatRequest & { agentId: string; threadId: string; sessionKey: string }): Promise<void> {
+    for (const timer of this.activeChatTimers.get(request.sessionKey) ?? []) {
+      clearTimeout(timer);
+    }
+
+    this.activeChatTimers.delete(request.sessionKey);
+    this.emitChatEvent({
+      type: "assistant-aborted",
+      sessionKey: request.sessionKey
+    });
+  }
+
+  private emitChatEvent(event: EngineChatLiveEvent): void {
+    for (const listener of this.chatListeners) {
+      listener(event);
+    }
+  }
+
   async configureTelegram(_request: TelegramSetupRequest): Promise<{ message: string; channel: ChannelSetupState }> {
     this.channels.telegram = {
       ...this.channels.telegram,
@@ -497,6 +1168,14 @@ export class MockAdapter implements EngineAdapter {
       summary: "Mock WhatsApp login started.",
       detail: "Pretend a QR code was shown, then approve the pairing code."
     };
+    this.activeChannelSession = {
+      id: "whatsapp:default:login",
+      channelId: "whatsapp",
+      entryId: "whatsapp:default",
+      status: "running",
+      message: "Mock WhatsApp login started.",
+      logs: ["Mock WhatsApp login session started."]
+    };
     return { message: "Mock WhatsApp login started.", channel: this.channels.whatsapp };
   }
 
@@ -510,6 +1189,14 @@ export class MockAdapter implements EngineAdapter {
       summary: `Mock ${this.channels[channelId].title} pairing approved.`,
       detail: "Mock mode marked this channel as completed."
     };
+    if (this.activeChannelSession?.channelId === channelId) {
+      this.activeChannelSession = {
+        ...this.activeChannelSession,
+        status: "completed",
+        message: "Mock pairing approved.",
+        logs: [...this.activeChannelSession.logs, "Mock pairing approved."]
+      };
+    }
     return { message: "Mock pairing approved.", channel: this.channels[channelId] };
   }
 

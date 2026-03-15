@@ -3,7 +3,19 @@ import { readFile, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 
 import type {
-  PairingApprovalRequest,
+  AbortChatRequest,
+  BindAIMemberChannelRequest,
+  CreateChatThreadRequest,
+  DeleteAIMemberRequest,
+  InstallSkillRequest,
+  SendChatMessageRequest,
+  SaveAIMemberRequest,
+  SaveTeamRequest,
+  ChannelSessionInputRequest,
+  RemoveChannelEntryRequest,
+  RemoveSkillRequest,
+  SaveChannelEntryRequest,
+  SaveCustomSkillRequest,
   EngineTaskRequest,
   InstallRequest,
   ModelAuthSessionInputRequest,
@@ -13,18 +25,19 @@ import type {
   SaveModelEntryRequest,
   SetDefaultModelRequest,
   SetDefaultModelEntryRequest,
-  FeishuSetupRequest,
-  TelegramSetupRequest,
-  WechatSetupRequest
+  UpdateSkillRequest
 } from "@slackclaw/contracts";
 
 import { createEngineAdapter } from "./engine/registry.js";
 import { AppControlService } from "./services/app-control-service.js";
 import { AppServiceManager } from "./services/app-service-manager.js";
+import { AITeamService } from "./services/ai-team-service.js";
+import { ChatService } from "./services/chat-service.js";
 import { ChannelSetupService } from "./services/channel-setup-service.js";
 import { errorToLogDetails, writeErrorLog, writeInfoLog } from "./services/logger.js";
 import { OverviewService } from "./services/overview-service.js";
 import { SetupService } from "./services/setup-service.js";
+import { SkillService } from "./services/skill-service.js";
 import { StateStore } from "./services/state-store.js";
 import { TaskService } from "./services/task-service.js";
 import { getDataDir, getStaticDir } from "./runtime-paths.js";
@@ -34,7 +47,7 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS"
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS"
   });
   response.end(JSON.stringify(body));
 }
@@ -90,7 +103,13 @@ async function serveStaticAsset(requestUrl: string, response: ServerResponse): P
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(fallback);
       return true;
-    } catch {
+    } catch (error) {
+      void writeErrorLog("SlackClaw could not serve a static asset or the packaged UI fallback.", {
+        requestUrl,
+        assetPath,
+        fallbackPath,
+        error: errorToLogDetails(error)
+      });
       return false;
     }
   }
@@ -101,7 +120,10 @@ export function startServer(port = 4545) {
   const store = new StateStore();
   const appServiceManager = new AppServiceManager();
   const overviewService = new OverviewService(adapter, store, appServiceManager);
-  const channelSetupService = new ChannelSetupService(adapter, store, overviewService);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store);
+  const chatService = new ChatService(adapter, store, aiTeamService);
+  const skillService = new SkillService(adapter, store);
   const setupService = new SetupService(adapter, store, overviewService);
   const taskService = new TaskService(adapter, store);
   let server: ReturnType<typeof createServer>;
@@ -110,7 +132,19 @@ export function startServer(port = 4545) {
   });
 
   server = createServer(async (request, response) => {
+    request.on("error", (error) => {
+      void writeErrorLog("Incoming daemon request stream failed.", {
+        method: request.method,
+        url: request.url,
+        error: errorToLogDetails(error)
+      });
+    });
+
     if (!request.url || !request.method) {
+      void writeErrorLog("SlackClaw daemon received a malformed request.", {
+        method: request.method,
+        url: request.url
+      });
       sendJson(response, 400, { error: "Malformed request." });
       return;
     }
@@ -121,17 +155,25 @@ export function startServer(port = 4545) {
     }
 
     try {
-      if (request.method === "GET" && request.url === "/api/ping") {
+      const requestUrl = new URL(request.url, "http://127.0.0.1");
+      const pathname = requestUrl.pathname;
+      const freshRead = requestUrl.searchParams.get("fresh") === "1";
+
+      if (request.method === "GET" && pathname.startsWith("/api/") && pathname !== "/api/ping" && pathname !== "/api/chat/events" && freshRead) {
+        adapter.invalidateReadCaches();
+      }
+
+      if (request.method === "GET" && pathname === "/api/ping") {
         sendJson(response, 200, { ok: true });
         return;
       }
 
-      if (request.method === "GET" && request.url === "/api/overview") {
+      if (request.method === "GET" && pathname === "/api/overview") {
         sendJson(response, 200, await overviewService.getOverview());
         return;
       }
 
-      if (request.method === "GET" && request.url === "/api/deploy/targets") {
+      if (request.method === "GET" && pathname === "/api/deploy/targets") {
         sendJson(response, 200, await adapter.getDeploymentTargets());
         return;
       }
@@ -146,7 +188,12 @@ export function startServer(port = 4545) {
         return;
       }
 
-      if (request.method === "GET" && request.url === "/api/models/config") {
+      if (request.method === "POST" && pathname === "/api/deploy/gateway/restart") {
+        sendJson(response, 200, await adapter.restartGateway());
+        return;
+      }
+
+      if (request.method === "GET" && pathname === "/api/models/config") {
         sendJson(response, 200, await adapter.getModelConfig());
         return;
       }
@@ -161,6 +208,12 @@ export function startServer(port = 4545) {
         const entryId = request.url.slice("/api/models/entries/".length);
         const body = await readJson<SaveModelEntryRequest>(request);
         sendJson(response, 200, await adapter.updateSavedModelEntry(entryId, body));
+        return;
+      }
+
+      if (request.method === "DELETE" && pathname.startsWith("/api/models/entries/")) {
+        const entryId = pathname.slice("/api/models/entries/".length);
+        sendJson(response, 200, await adapter.removeSavedModelEntry(entryId));
         return;
       }
 
@@ -243,56 +296,199 @@ export function startServer(port = 4545) {
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/telegram") {
-        const body = await readJson<TelegramSetupRequest>(request);
-        sendJson(response, 200, await channelSetupService.configureTelegram(body));
+      if (request.method === "GET" && pathname === "/api/channels/config") {
+        sendJson(response, 200, await channelSetupService.getConfigOverview());
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/telegram/approve") {
-        const body = await readJson<PairingApprovalRequest>(request);
-        sendJson(response, 200, await channelSetupService.approvePairing("telegram", body));
+      if (request.method === "GET" && pathname === "/api/skills/config") {
+        sendJson(response, 200, await skillService.getConfigOverview());
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/whatsapp/login") {
-        sendJson(response, 200, await channelSetupService.startWhatsappLogin());
+      if (request.method === "GET" && pathname === "/api/skills/marketplace/explore") {
+        sendJson(response, 200, await adapter.exploreSkillMarketplace(10));
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/whatsapp/approve") {
-        const body = await readJson<PairingApprovalRequest>(request);
-        sendJson(response, 200, await channelSetupService.approvePairing("whatsapp", body));
+      if (request.method === "GET" && pathname === "/api/skills/marketplace/search") {
+        sendJson(response, 200, await skillService.searchMarketplace(requestUrl.searchParams.get("q") ?? ""));
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/wechat") {
-        const body = await readJson<WechatSetupRequest>(request);
-        sendJson(response, 200, await channelSetupService.configureWechatWorkaround(body));
+      if (request.method === "GET" && pathname.startsWith("/api/skills/marketplace/")) {
+        const slug = decodeURIComponent(pathname.slice("/api/skills/marketplace/".length));
+        sendJson(response, 200, await skillService.getMarketplaceDetail(slug));
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/feishu") {
-        const body = await readJson<FeishuSetupRequest>(request);
-        sendJson(response, 200, await channelSetupService.configureFeishu(body));
+      if (request.method === "POST" && request.url === "/api/skills/install") {
+        const body = await readJson<InstallSkillRequest>(request);
+        sendJson(response, 200, await skillService.installMarketplaceSkill(body));
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/feishu/prepare") {
-        sendJson(response, 200, await channelSetupService.prepareFeishu());
+      if (request.method === "POST" && request.url === "/api/skills/custom") {
+        const body = await readJson<SaveCustomSkillRequest>(request);
+        sendJson(response, 200, await skillService.saveCustomSkill(undefined, body));
         return;
       }
 
-      if (request.method === "POST" && request.url === "/api/channels/feishu/approve") {
-        const body = await readJson<PairingApprovalRequest>(request);
-        sendJson(response, 200, await channelSetupService.approvePairing("feishu", body));
+      if (request.method === "GET" && pathname === "/api/ai-team/overview") {
+        sendJson(response, 200, await aiTeamService.getOverview());
         return;
       }
 
-      if (
-        (request.method === "GET" || request.method === "POST") &&
-        request.url.startsWith("/api/channels/feishu/callback")
-      ) {
+      if (request.method === "GET" && pathname === "/api/chat/events") {
+        const unsubscribe = chatService.subscribe(response);
+        request.on("close", unsubscribe);
+        return;
+      }
+
+      if (request.method === "GET" && pathname === "/api/chat/overview") {
+        sendJson(response, 200, await chatService.getOverview());
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/chat/threads") {
+        const body = await readJson<CreateChatThreadRequest>(request);
+        sendJson(response, 200, await chatService.createThread(body));
+        return;
+      }
+
+      if (request.method === "GET" && pathname.startsWith("/api/chat/threads/")) {
+        const threadId = decodeURIComponent(pathname.slice("/api/chat/threads/".length));
+        sendJson(response, 200, await chatService.getThreadDetail(threadId));
+        return;
+      }
+
+      if (request.method === "POST" && request.url.startsWith("/api/chat/threads/") && request.url.endsWith("/messages")) {
+        const threadId = decodeURIComponent(request.url.slice("/api/chat/threads/".length, -"/messages".length));
+        const body = await readJson<SendChatMessageRequest>(request);
+        sendJson(response, 200, await chatService.sendMessage(threadId, body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url.startsWith("/api/chat/threads/") && request.url.endsWith("/abort")) {
+        const threadId = decodeURIComponent(request.url.slice("/api/chat/threads/".length, -"/abort".length));
+        const body = await readJson<AbortChatRequest>(request);
+        sendJson(response, 200, await chatService.abortThread(threadId, body));
+        return;
+      }
+
+      if (request.method === "GET" && pathname.startsWith("/api/skills/")) {
+        const skillId = decodeURIComponent(pathname.slice("/api/skills/".length));
+        sendJson(response, 200, await skillService.getInstalledSkillDetail(skillId));
+        return;
+      }
+
+      if (request.method === "GET" && pathname.startsWith("/api/ai-members/") && pathname.endsWith("/bindings")) {
+        const memberId = decodeURIComponent(pathname.slice("/api/ai-members/".length, -"/bindings".length));
+        sendJson(response, 200, await aiTeamService.getMemberBindings(memberId));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/ai-members") {
+        const body = await readJson<SaveAIMemberRequest>(request);
+        sendJson(response, 200, await aiTeamService.saveMember(undefined, body));
+        return;
+      }
+
+      if (request.method === "PATCH" && request.url.startsWith("/api/ai-members/")) {
+        const memberId = request.url.slice("/api/ai-members/".length);
+        const body = await readJson<SaveAIMemberRequest>(request);
+        sendJson(response, 200, await aiTeamService.saveMember(memberId, body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url.startsWith("/api/ai-members/") && request.url.endsWith("/bindings")) {
+        const memberId = request.url.slice("/api/ai-members/".length, -"/bindings".length);
+        const body = await readJson<BindAIMemberChannelRequest>(request);
+        sendJson(response, 200, await aiTeamService.bindMemberChannel(memberId, body));
+        return;
+      }
+
+      if (request.method === "DELETE" && request.url.startsWith("/api/ai-members/") && request.url.endsWith("/bindings")) {
+        const memberId = request.url.slice("/api/ai-members/".length, -"/bindings".length);
+        const body = await readJson<BindAIMemberChannelRequest>(request);
+        sendJson(response, 200, await aiTeamService.unbindMemberChannel(memberId, body));
+        return;
+      }
+
+      if (request.method === "DELETE" && request.url.startsWith("/api/ai-members/")) {
+        const memberId = request.url.slice("/api/ai-members/".length);
+        const body = await readJson<DeleteAIMemberRequest>(request);
+        sendJson(response, 200, await aiTeamService.deleteMember(memberId, body));
+        return;
+      }
+
+      if (request.method === "PATCH" && request.url.startsWith("/api/skills/")) {
+        const skillId = decodeURIComponent(request.url.slice("/api/skills/".length));
+        const body = await readJson<UpdateSkillRequest>(request);
+        sendJson(response, 200, await skillService.updateSkill(skillId, body));
+        return;
+      }
+
+      if (request.method === "DELETE" && request.url.startsWith("/api/skills/")) {
+        const skillId = decodeURIComponent(request.url.slice("/api/skills/".length));
+        const body = await readJson<RemoveSkillRequest>(request);
+        sendJson(response, 200, await skillService.removeSkill(skillId, body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/teams") {
+        const body = await readJson<SaveTeamRequest>(request);
+        sendJson(response, 200, await aiTeamService.saveTeam(undefined, body));
+        return;
+      }
+
+      if (request.method === "PATCH" && request.url.startsWith("/api/teams/")) {
+        const teamId = request.url.slice("/api/teams/".length);
+        const body = await readJson<SaveTeamRequest>(request);
+        sendJson(response, 200, await aiTeamService.saveTeam(teamId, body));
+        return;
+      }
+
+      if (request.method === "DELETE" && request.url.startsWith("/api/teams/")) {
+        const teamId = request.url.slice("/api/teams/".length);
+        sendJson(response, 200, await aiTeamService.deleteTeam(teamId));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/channels/entries") {
+        const body = await readJson<SaveChannelEntryRequest>(request);
+        sendJson(response, 200, await channelSetupService.saveEntry(undefined, body));
+        return;
+      }
+
+      if (request.method === "PATCH" && request.url.startsWith("/api/channels/entries/")) {
+        const entryId = request.url.slice("/api/channels/entries/".length);
+        const body = await readJson<SaveChannelEntryRequest>(request);
+        sendJson(response, 200, await channelSetupService.saveEntry(entryId, body));
+        return;
+      }
+
+      if (request.method === "DELETE" && request.url.startsWith("/api/channels/entries/")) {
+        const entryId = request.url.slice("/api/channels/entries/".length);
+        const body = await readJson<RemoveChannelEntryRequest>(request);
+        sendJson(response, 200, await channelSetupService.removeEntry({ ...body, entryId }));
+        return;
+      }
+
+      if (request.method === "GET" && pathname.startsWith("/api/channels/session/")) {
+        const sessionId = pathname.slice("/api/channels/session/".length);
+        sendJson(response, 200, await channelSetupService.getSession(sessionId));
+        return;
+      }
+
+      if (request.method === "POST" && request.url.startsWith("/api/channels/session/") && request.url.endsWith("/input")) {
+        const sessionId = request.url.slice("/api/channels/session/".length, -"/input".length);
+        const body = await readJson<ChannelSessionInputRequest>(request);
+        sendJson(response, 200, await channelSetupService.submitSessionInput(sessionId, body));
+        return;
+      }
+
+      if ((request.method === "GET" || request.method === "POST") && pathname.startsWith("/api/channels/feishu/callback")) {
         const body = request.method === "POST" ? await readJson<Record<string, unknown>>(request) : {};
         const challenge =
           typeof body.challenge === "string"
@@ -301,11 +497,6 @@ export function startServer(port = 4545) {
               ? body.encrypt
               : undefined;
         sendJson(response, 200, challenge ? { challenge } : { ok: true, message: "SlackClaw Feishu callback is reachable." });
-        return;
-      }
-
-      if (request.method === "POST" && request.url === "/api/channels/gateway/start") {
-        sendJson(response, 200, await channelSetupService.startGateway());
         return;
       }
 
@@ -320,7 +511,7 @@ export function startServer(port = 4545) {
         return;
       }
 
-      if (request.method === "GET" && request.url === "/api/service/status") {
+      if (request.method === "GET" && pathname === "/api/service/status") {
         sendJson(response, 200, await appServiceManager.getStatus());
         return;
       }
@@ -359,7 +550,7 @@ export function startServer(port = 4545) {
         return;
       }
 
-      if (request.method === "GET" && request.url === "/api/diagnostics") {
+      if (request.method === "GET" && pathname === "/api/diagnostics") {
         const bundle = await adapter.exportDiagnostics();
         const diagnosticsPath = resolve(getDataDir(), bundle.filename);
         await writeFile(diagnosticsPath, bundle.content);
@@ -386,8 +577,8 @@ export function startServer(port = 4545) {
         return;
       }
 
-      if (request.method === "GET" && !request.url.startsWith("/api/")) {
-        if (await serveStaticAsset(request.url, response)) {
+      if (request.method === "GET" && !pathname.startsWith("/api/")) {
+        if (await serveStaticAsset(pathname, response)) {
           return;
         }
       }
@@ -405,6 +596,17 @@ export function startServer(port = 4545) {
         error: errorToLogDetails(error)
       });
       sendJson(response, 500, { error: message });
+    }
+  });
+
+  server.on("error", (error) => {
+    void writeErrorLog("SlackClaw daemon server emitted an error.", errorToLogDetails(error));
+  });
+
+  server.on("clientError", (error, socket) => {
+    void writeErrorLog("SlackClaw daemon rejected a malformed client connection.", errorToLogDetails(error));
+    if (socket.writable) {
+      socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
     }
   });
 

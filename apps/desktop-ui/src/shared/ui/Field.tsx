@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import type { InputHTMLAttributes, PropsWithChildren, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 export function FieldLabel(props: PropsWithChildren<{ htmlFor?: string; className?: string }>) {
@@ -8,17 +9,17 @@ export function FieldLabel(props: PropsWithChildren<{ htmlFor?: string; classNam
   );
 }
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(props, ref) {
   const { className = "", ...rest } = props;
-  return <input className={`field__control ${className}`.trim()} {...rest} />;
-}
+  return <input ref={ref} className={`field__control ${className}`.trim()} {...rest} />;
+});
 
-export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea(props, ref) {
   const { className = "", ...rest } = props;
-  return <textarea className={`field__control field__control--textarea ${className}`.trim()} {...rest} />;
-}
+  return <textarea ref={ref} className={`field__control field__control--textarea ${className}`.trim()} {...rest} />;
+});
 
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
+export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(function Select(props, ref) {
   const { className = "", ...rest } = props;
-  return <select className={`field__control ${className}`.trim()} {...rest} />;
-}
+  return <select ref={ref} className={`field__control ${className}`.trim()} {...rest} />;
+});

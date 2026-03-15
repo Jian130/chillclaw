@@ -1,27 +1,57 @@
 import type {
+  AbortChatRequest,
+  AITeamActionResponse,
+  AITeamOverview,
   AppControlResponse,
   AppServiceActionResponse,
+  BindAIMemberChannelRequest,
+  ChatActionResponse,
+  ChatOverview,
+  ChatStreamEvent,
+  ChatThreadDetail,
+  DeleteAIMemberRequest,
   ChannelActionResponse,
+  ChannelConfigActionResponse,
+  ChannelConfigOverview,
+  ChannelSessionInputRequest,
+  ChannelSessionResponse,
   DeploymentTargetActionResponse,
   DeploymentTargetsResponse,
   EngineActionResponse,
   EngineTaskRequest,
   EngineTaskResult,
+  GatewayActionResponse,
   InstallResponse,
+  InstallSkillRequest,
+  InstalledSkillDetail,
   ModelAuthRequest,
   ModelAuthSessionInputRequest,
   ModelAuthSessionResponse,
   ModelConfigActionResponse,
   ModelConfigOverview,
+  MemberBindingsResponse,
   OnboardingSelection,
   PairingApprovalRequest,
   ProductOverview,
+  RemoveSkillRequest,
+  RemoveChannelEntryRequest,
   ReplaceFallbackModelEntriesRequest,
-  RecoveryRunResponse
+  RecoveryRunResponse,
+  SaveCustomSkillRequest,
+  SendChatMessageRequest,
+  SkillCatalogActionResponse,
+  SkillCatalogOverview,
+  SkillMarketplaceDetail,
+  SkillMarketplaceEntry,
+  UpdateSkillRequest
 } from "@slackclaw/contracts";
 import type {
+  CreateChatThreadRequest,
   FeishuSetupRequest,
+  SaveAIMemberRequest,
+  SaveChannelEntryRequest,
   SaveModelEntryRequest,
+  SaveTeamRequest,
   SetDefaultModelRequest,
   SetDefaultModelEntryRequest,
   SetupRunResponse,
@@ -34,7 +64,21 @@ const API_BASE =
     ? `${window.location.origin}/api`
     : "http://127.0.0.1:4545/api";
 
-async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
+const inflightGetRequests = new Map<string, Promise<unknown>>();
+
+type JsonRequestInit = RequestInit & {
+  fresh?: boolean;
+};
+
+function buildApiPath(path: string, fresh?: boolean): string {
+  if (!fresh) {
+    return path;
+  }
+
+  return `${path}${path.includes("?") ? "&" : "?"}fresh=1`;
+}
+
+async function performJsonRequest<T>(path: string, init?: JsonRequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json"
@@ -60,12 +104,39 @@ async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function fetchOverview(): Promise<ProductOverview> {
-  return readJson<ProductOverview>("/overview");
+async function readJson<T>(path: string, init?: JsonRequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const requestPath = buildApiPath(path, init?.fresh);
+  const nextInit = { ...init };
+  delete nextInit.fresh;
+
+  if (method !== "GET") {
+    return performJsonRequest<T>(requestPath, nextInit);
+  }
+
+  const cacheKey = `${method}:${requestPath}`;
+  const existing = inflightGetRequests.get(cacheKey);
+
+  if (existing) {
+    return existing as Promise<T>;
+  }
+
+  const promise = performJsonRequest<T>(requestPath, nextInit).finally(() => {
+    if (inflightGetRequests.get(cacheKey) === promise) {
+      inflightGetRequests.delete(cacheKey);
+    }
+  });
+
+  inflightGetRequests.set(cacheKey, promise);
+  return promise;
 }
 
-export function fetchDeploymentTargets(): Promise<DeploymentTargetsResponse> {
-  return readJson<DeploymentTargetsResponse>("/deploy/targets");
+export function fetchOverview(options?: { fresh?: boolean }): Promise<ProductOverview> {
+  return readJson<ProductOverview>("/overview", options);
+}
+
+export function fetchDeploymentTargets(options?: { fresh?: boolean }): Promise<DeploymentTargetsResponse> {
+  return readJson<DeploymentTargetsResponse>("/deploy/targets", options);
 }
 
 export function updateDeploymentTarget(
@@ -76,14 +147,20 @@ export function updateDeploymentTarget(
   });
 }
 
+export function restartGateway(): Promise<GatewayActionResponse> {
+  return readJson<GatewayActionResponse>("/deploy/gateway/restart", {
+    method: "POST"
+  });
+}
+
 export function markFirstRunIntroComplete(): Promise<ProductOverview> {
   return readJson<ProductOverview>("/first-run/intro", {
     method: "POST"
   });
 }
 
-export function fetchModelConfig(): Promise<ModelConfigOverview> {
-  return readJson<ModelConfigOverview>("/models/config");
+export function fetchModelConfig(options?: { fresh?: boolean }): Promise<ModelConfigOverview> {
+  return readJson<ModelConfigOverview>("/models/config", options);
 }
 
 export function createSavedModelEntry(request: SaveModelEntryRequest): Promise<ModelConfigActionResponse> {
@@ -97,6 +174,12 @@ export function updateSavedModelEntry(entryId: string, request: SaveModelEntryRe
   return readJson<ModelConfigActionResponse>(`/models/entries/${entryId}`, {
     method: "PATCH",
     body: JSON.stringify(request)
+  });
+}
+
+export function removeSavedModelEntry(entryId: string): Promise<ModelConfigActionResponse> {
+  return readJson<ModelConfigActionResponse>(`/models/entries/${entryId}`, {
+    method: "DELETE"
   });
 }
 
@@ -169,6 +252,200 @@ export function completeOnboarding(selection: OnboardingSelection): Promise<Prod
   return readJson<ProductOverview>("/onboarding", {
     method: "POST",
     body: JSON.stringify(selection)
+  });
+}
+
+export function fetchChannelConfig(options?: { fresh?: boolean }): Promise<ChannelConfigOverview> {
+  return readJson<ChannelConfigOverview>("/channels/config", options);
+}
+
+export function fetchSkillConfig(options?: { fresh?: boolean }): Promise<SkillCatalogOverview> {
+  return readJson<SkillCatalogOverview>("/skills/config", options);
+}
+
+export function fetchMarketplacePreview(): Promise<SkillMarketplaceEntry[]> {
+  return readJson<SkillMarketplaceEntry[]>("/skills/marketplace/explore");
+}
+
+export function searchMarketplaceSkills(query: string): Promise<SkillMarketplaceEntry[]> {
+  return readJson<SkillMarketplaceEntry[]>(`/skills/marketplace/search?q=${encodeURIComponent(query)}`);
+}
+
+export function fetchMarketplaceSkillDetail(slug: string): Promise<SkillMarketplaceDetail> {
+  return readJson<SkillMarketplaceDetail>(`/skills/marketplace/${encodeURIComponent(slug)}`);
+}
+
+export function installMarketplaceSkill(request: InstallSkillRequest): Promise<SkillCatalogActionResponse> {
+  return readJson<SkillCatalogActionResponse>("/skills/install", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function createCustomSkill(request: SaveCustomSkillRequest): Promise<SkillCatalogActionResponse> {
+  return readJson<SkillCatalogActionResponse>("/skills/custom", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function fetchInstalledSkillDetail(skillId: string): Promise<InstalledSkillDetail> {
+  return readJson<InstalledSkillDetail>(`/skills/${encodeURIComponent(skillId)}`);
+}
+
+export function updateSkill(skillId: string, request: UpdateSkillRequest): Promise<SkillCatalogActionResponse> {
+  return readJson<SkillCatalogActionResponse>(`/skills/${encodeURIComponent(skillId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(request)
+  });
+}
+
+export function removeSkill(skillId: string, request: RemoveSkillRequest = {}): Promise<SkillCatalogActionResponse> {
+  return readJson<SkillCatalogActionResponse>(`/skills/${encodeURIComponent(skillId)}`, {
+    method: "DELETE",
+    body: JSON.stringify(request)
+  });
+}
+
+export function fetchAITeamOverview(options?: { fresh?: boolean }): Promise<AITeamOverview> {
+  return readJson<AITeamOverview>("/ai-team/overview", options);
+}
+
+export function fetchAIMemberBindings(memberId: string, options?: { fresh?: boolean }): Promise<MemberBindingsResponse> {
+  return readJson<MemberBindingsResponse>(`/ai-members/${encodeURIComponent(memberId)}/bindings`, options);
+}
+
+export function fetchChatOverview(): Promise<ChatOverview> {
+  return readJson<ChatOverview>("/chat/overview");
+}
+
+export function createChatThread(request: CreateChatThreadRequest): Promise<ChatActionResponse> {
+  return readJson<ChatActionResponse>("/chat/threads", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function fetchChatThread(threadId: string): Promise<ChatThreadDetail> {
+  return readJson<ChatThreadDetail>(`/chat/threads/${encodeURIComponent(threadId)}`);
+}
+
+export function sendChatMessage(threadId: string, request: SendChatMessageRequest): Promise<ChatActionResponse> {
+  return readJson<ChatActionResponse>(`/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function abortChatThread(threadId: string, request: AbortChatRequest = {}): Promise<ChatActionResponse> {
+  return readJson<ChatActionResponse>(`/chat/threads/${encodeURIComponent(threadId)}/abort`, {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function subscribeToChatEvents(
+  onEvent: (event: ChatStreamEvent | { type: "connected" }) => void,
+  onError?: (error: Event) => void
+): () => void {
+  const source = new EventSource(`${API_BASE}/chat/events`);
+  source.onmessage = (event) => {
+    onEvent(JSON.parse(event.data) as ChatStreamEvent | { type: "connected" });
+  };
+  if (onError) {
+    source.onerror = onError;
+  }
+
+  return () => source.close();
+}
+
+export function createAIMember(request: SaveAIMemberRequest): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>("/ai-members", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function updateAIMember(memberId: string, request: SaveAIMemberRequest): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>(`/ai-members/${memberId}`, {
+    method: "PATCH",
+    body: JSON.stringify(request)
+  });
+}
+
+export function deleteAIMember(memberId: string, request: DeleteAIMemberRequest): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>(`/ai-members/${memberId}`, {
+    method: "DELETE",
+    body: JSON.stringify(request)
+  });
+}
+
+export function bindAIMemberChannel(memberId: string, request: BindAIMemberChannelRequest): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>(`/ai-members/${memberId}/bindings`, {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function unbindAIMemberChannel(memberId: string, request: BindAIMemberChannelRequest): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>(`/ai-members/${memberId}/bindings`, {
+    method: "DELETE",
+    body: JSON.stringify(request)
+  });
+}
+
+export function createTeam(request: SaveTeamRequest): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>("/teams", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function updateTeam(teamId: string, request: SaveTeamRequest): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>(`/teams/${teamId}`, {
+    method: "PATCH",
+    body: JSON.stringify(request)
+  });
+}
+
+export function deleteTeam(teamId: string): Promise<AITeamActionResponse> {
+  return readJson<AITeamActionResponse>(`/teams/${teamId}`, {
+    method: "DELETE"
+  });
+}
+
+export function createChannelEntry(request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
+  return readJson<ChannelConfigActionResponse>("/channels/entries", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function updateChannelEntry(entryId: string, request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
+  return readJson<ChannelConfigActionResponse>(`/channels/entries/${entryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(request)
+  });
+}
+
+export function removeChannelEntry(entryId: string, request: RemoveChannelEntryRequest = { entryId }): Promise<ChannelConfigActionResponse> {
+  return readJson<ChannelConfigActionResponse>(`/channels/entries/${entryId}`, {
+    method: "DELETE",
+    body: JSON.stringify(request)
+  });
+}
+
+export function fetchChannelSession(sessionId: string): Promise<ChannelSessionResponse> {
+  return readJson<ChannelSessionResponse>(`/channels/session/${sessionId}`);
+}
+
+export function submitChannelSessionInput(
+  sessionId: string,
+  request: ChannelSessionInputRequest
+): Promise<ChannelSessionResponse> {
+  return readJson<ChannelSessionResponse>(`/channels/session/${sessionId}/input`, {
+    method: "POST",
+    body: JSON.stringify(request)
   });
 }
 

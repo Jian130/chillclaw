@@ -10,7 +10,7 @@ import {
   Zap
 } from "lucide-react";
 
-import { fetchDeploymentTargets, runFirstRunSetup, updateDeploymentTarget } from "../../shared/api/client.js";
+import { fetchDeploymentTargets, restartGateway, runFirstRunSetup, updateDeploymentTarget } from "../../shared/api/client.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
 import { useOverview } from "../../app/providers/OverviewProvider.js";
 import { t } from "../../shared/i18n/messages.js";
@@ -26,11 +26,6 @@ type VariantMeta = {
   hoverBorderClass: string;
   iconClass: string;
   features: string[];
-  requirements: {
-    memory: string;
-    disk: string;
-    runtime: string;
-  };
 };
 
 type DeployTargetCard = DeploymentTargetStatus & VariantMeta;
@@ -59,12 +54,7 @@ const variantMeta: Record<DeploymentTargetId, VariantMeta> = {
       "Keeps existing OpenClaw settings",
       "Fastest path to first deploy",
       "Uses the real SlackClaw setup flow"
-    ],
-    requirements: {
-      memory: "4GB RAM",
-      disk: "10GB",
-      runtime: "System install"
-    }
+    ]
   },
   "managed-local": {
     icon: "🦞",
@@ -76,12 +66,7 @@ const variantMeta: Record<DeploymentTargetId, VariantMeta> = {
       "Cleaner isolation for desktop installs",
       "Pinned SlackClaw-managed version",
       "Uses the real SlackClaw setup flow"
-    ],
-    requirements: {
-      memory: "4GB RAM",
-      disk: "10GB",
-      runtime: "Managed local"
-    }
+    ]
   },
   zeroclaw: {
     icon: "🦞",
@@ -93,12 +78,7 @@ const variantMeta: Record<DeploymentTargetId, VariantMeta> = {
       "Planned adapter-backed install path",
       "Same onboarding and config UX",
       "Not available in v0.1"
-    ],
-    requirements: {
-      memory: "Planned",
-      disk: "Planned",
-      runtime: "Coming soon"
-    }
+    ]
   },
   ironclaw: {
     icon: "🦞",
@@ -110,12 +90,7 @@ const variantMeta: Record<DeploymentTargetId, VariantMeta> = {
       "Adapter-ready product architecture",
       "Same deploy and config surfaces",
       "Not available in v0.1"
-    ],
-    requirements: {
-      memory: "Planned",
-      disk: "Planned",
-      runtime: "Coming soon"
-    }
+    ]
   }
 };
 
@@ -206,7 +181,18 @@ export default function DeployPage() {
     [copy]
   );
   const updateStepLabels = useMemo(
-    () => [copy.updateStepInspect, copy.updateStepRequest, copy.updateStepSync, copy.updateStepVerify],
+    () => [
+      copy.updateStepInspect,
+      copy.updateStepRequest,
+      copy.updateStepReload,
+      copy.updateStepRestart,
+      copy.updateStepHealth,
+      copy.updateStepVerify
+    ],
+    [copy]
+  );
+  const restartStepLabels = useMemo(
+    () => [copy.restartStepCommand, copy.restartStepWait, copy.restartStepVerify],
     [copy]
   );
   const [selectedVariant, setSelectedVariant] = useState<DeploymentTargetId | null>(null);
@@ -214,17 +200,18 @@ export default function DeployPage() {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   const [message, setMessage] = useState("");
   const [updatingTargetId, setUpdatingTargetId] = useState<"standard" | "managed-local" | "">("");
+  const [restartingGateway, setRestartingGateway] = useState(false);
   const [targetsLoading, setTargetsLoading] = useState(true);
   const [targetsError, setTargetsError] = useState("");
   const [checkedAt, setCheckedAt] = useState<string>();
   const [targets, setTargets] = useState<DeploymentTargetStatus[]>([]);
 
-  async function loadTargets() {
+  async function loadTargets(options?: { fresh?: boolean }) {
     setTargetsLoading(true);
     setTargetsError("");
 
     try {
-      const result = await fetchDeploymentTargets();
+      const result = await fetchDeploymentTargets(options);
       const selectableTarget = result.targets.find((target) => !target.installed && target.installable && !target.planned);
 
       setTargets(result.targets);
@@ -258,7 +245,7 @@ export default function DeployPage() {
     () => deployTargets.find((target) => target.id === selectedVariant)?.title,
     [deployTargets, selectedVariant]
   );
-  const actionBusy = deploying || Boolean(updatingTargetId);
+  const actionBusy = deploying || Boolean(updatingTargetId) || restartingGateway;
 
   function startActivity(title: string, stepLabels: string[]) {
     let stepIndex = 0;
@@ -294,14 +281,13 @@ export default function DeployPage() {
       const result = await runFirstRunSetup(selectedVariant === "managed-local");
       setMessage(result.message);
       activityRun.complete(result.message);
-      await Promise.all([refresh(), loadTargets()]);
+      await Promise.all([refresh({ fresh: true }), loadTargets({ fresh: true })]);
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : copy.progressFailed;
       setMessage(nextMessage);
       activityRun.fail(nextMessage);
     } finally {
       setDeploying(false);
-      setActivity(null);
     }
   }
 
@@ -314,14 +300,36 @@ export default function DeployPage() {
       const result = await updateDeploymentTarget(targetId);
       setMessage(result.message);
       activityRun.complete(result.message);
-      await Promise.all([refresh(), loadTargets()]);
+      await Promise.all([refresh({ fresh: true }), loadTargets({ fresh: true })]);
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : copy.progressFailed;
       setMessage(nextMessage);
       activityRun.fail(nextMessage);
     } finally {
       setUpdatingTargetId("");
-      setActivity(null);
+    }
+  }
+
+  async function handleRestartGateway() {
+    setRestartingGateway(true);
+    setMessage("");
+    const activityRun = startActivity(copy.progressRestartTitle, restartStepLabels);
+
+    try {
+      const result = await restartGateway();
+      setMessage(result.message);
+      if (result.status === "completed") {
+        activityRun.complete(result.message);
+      } else {
+        activityRun.fail(result.message);
+      }
+      await Promise.all([refresh({ fresh: true }), loadTargets({ fresh: true })]);
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : copy.progressFailed;
+      setMessage(nextMessage);
+      activityRun.fail(nextMessage);
+    } finally {
+      setRestartingGateway(false);
     }
   }
 
@@ -451,20 +459,25 @@ export default function DeployPage() {
             </div>
             <div className="deploy-requirements">
               <h4>{copy.requirementsTitle}</h4>
-              <div className="deploy-requirements__grid">
-                <div>
-                  <p>{copy.memoryLabel}</p>
-                  <strong>{target.requirements.memory}</strong>
-                </div>
-                <div>
-                  <p>{copy.diskLabel}</p>
-                  <strong>{target.requirements.disk}</strong>
-                </div>
-                <div>
-                  <p>{copy.runtimeLabel}</p>
-                  <strong>{target.requirements.runtime}</strong>
-                </div>
-              </div>
+              {target.requirements && target.requirements.length > 0 ? (
+                <ul className="deploy-requirements__list">
+                  {target.requirements.map((requirement) => (
+                    <li key={requirement}>
+                      <CheckCircle2 size={16} />
+                      <span>{requirement}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="deploy-requirements__empty">{copy.requirementsUnavailable}</p>
+              )}
+              {target.requirementsSourceUrl ? (
+                <p className="deploy-requirements__source">
+                  <a href={target.requirementsSourceUrl} rel="noreferrer" target="_blank">
+                    {copy.requirementsSourceLabel}
+                  </a>
+                </p>
+              ) : null}
             </div>
           </div>
         </CardContent>
@@ -479,7 +492,7 @@ export default function DeployPage() {
         <p>{copy.subtitle}</p>
       </div>
 
-      {actionBusy && activity ? (
+      {activity ? (
         <Card
           className={[
             "deploy-progress-card",
@@ -543,9 +556,27 @@ export default function DeployPage() {
             </div>
           </div>
           <div className="deploy-info-card__actions">
-            <Button disabled={actionBusy} onClick={() => void loadTargets()} size="sm" variant="outline">
+            <Button disabled={actionBusy} onClick={() => void loadTargets({ fresh: true })} size="sm" variant="outline">
               <RefreshCw size={16} />
               {targetsLoading ? copy.detectingTargets : common.refresh}
+            </Button>
+            <Button
+              disabled={actionBusy || installedTargets.length === 0}
+              onClick={() => void handleRestartGateway()}
+              size="sm"
+              variant="outline"
+            >
+              {restartingGateway ? (
+                <>
+                  <Loader2 className="deploy-cta-button__spinner" size={16} />
+                  {copy.restartingGatewayLabel}
+                </>
+              ) : (
+                <>
+                  <Zap size={16} />
+                  {copy.restartGatewayButton}
+                </>
+              )}
             </Button>
             {checkedAt ? <p>{copy.lastChecked.replace("{time}", formatCheckedAt(checkedAt) ?? checkedAt)}</p> : null}
           </div>
@@ -559,7 +590,7 @@ export default function DeployPage() {
               title={copy.targetsErrorTitle}
               description={targetsError}
               actionLabel={common.retry}
-              onAction={() => void loadTargets()}
+              onAction={() => void loadTargets({ fresh: true })}
             />
           </CardContent>
         </Card>

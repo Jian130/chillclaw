@@ -9,12 +9,15 @@ import process from "node:process";
 import {
   assertNoManagedProcessesRunning,
   clearDevProcessState,
+  findRecoverableDevProcesses,
+  stopRecoverableDevProcesses,
   writeDevProcessState
 } from "./dev-process-control.mjs";
 
 const rootDir = process.cwd();
 const daemonPort = Number(process.env.SLACKCLAW_PORT ?? "4545");
 const uiPort = Number(process.env.SLACKCLAW_UI_PORT ?? "4173");
+const viteBinPath = resolve(rootDir, "node_modules", "vite", "bin", "vite.js");
 
 let daemonProcess = null;
 let uiProcess = null;
@@ -101,12 +104,13 @@ function runBlockingStep(label, command, args, extraEnv = {}) {
   });
 }
 
-function runBackgroundStep(label, command, args, extraEnv = {}) {
+function runBackgroundStep(label, command, args, options = {}) {
+  const { cwd = rootDir, extraEnv = {} } = options;
   logStep(label, { step: true });
   logStep(`Launching: ${command} ${args.join(" ")}`);
 
   const child = spawn(command, args, {
-    cwd: rootDir,
+    cwd,
     stdio: "inherit",
     detached: true,
     env: {
@@ -135,6 +139,7 @@ function runBackgroundStep(label, command, args, extraEnv = {}) {
     void shutdown(code ?? 1);
   });
 
+  child.unref();
   return child;
 }
 
@@ -264,6 +269,19 @@ async function main() {
   logStep("Starting SlackClaw local development environment");
   ensureLocalDependencies();
   logStep("Checking for an existing managed SlackClaw dev session", { step: true });
+  const orphanedProcesses = await findRecoverableDevProcesses({
+    daemon: daemonPort,
+    ui: uiPort
+  });
+  if (orphanedProcesses.length > 0) {
+    const summary = orphanedProcesses.map((entry) => `${entry.name}(${entry.pid})`).join(", ");
+    logStep(`Found orphaned SlackClaw dev processes from this repo: ${summary}`);
+    await stopRecoverableDevProcesses("SIGTERM", {
+      daemon: daemonPort,
+      ui: uiPort
+    });
+    logStep("Recovered orphaned SlackClaw dev processes.");
+  }
   await assertNoManagedProcessesRunning();
   logStep("No managed SlackClaw dev processes are already running.");
 
@@ -282,16 +300,16 @@ async function main() {
   });
   await waitForPort("Daemon", "127.0.0.1", daemonPort);
 
-  uiProcess = runBackgroundStep("Starting UI", "npm", [
-    "run",
-    "dev",
-    "--workspace",
-    "@slackclaw/desktop-ui",
-    "--",
+  uiProcess = runBackgroundStep("Starting UI", "node", [
+    viteBinPath,
     "--host",
     "127.0.0.1",
-    "--strictPort"
-  ]);
+    "--strictPort",
+    "--port",
+    String(uiPort)
+  ], {
+    cwd: resolve(rootDir, "apps", "desktop-ui")
+  });
   await writeDevProcessState({
     startedAt: new Date().toISOString(),
     rootDir,

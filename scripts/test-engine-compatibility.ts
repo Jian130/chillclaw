@@ -739,6 +739,142 @@ async function runRuntimeChecks(context: RuntimeContext, args: Args) {
     )
   );
 
+  const chatOverviewResponse = await requestJson(context.port, "/api/chat/overview");
+  checks.push(
+    createResult(
+      context.runtimeMode,
+      "list-chat-threads",
+      chatOverviewResponse.ok ? "passed" : "failed",
+      chatOverviewResponse.ok
+        ? "Chat overview endpoint returned thread data."
+        : `Chat overview failed with HTTP ${chatOverviewResponse.status}.`,
+      {
+        engineVersion: context.detectedVersion,
+        logPath: await writeLog(context.reportDir, context.runtimeMode, "list-chat-threads", chatOverviewResponse.text)
+      }
+    )
+  );
+
+  const aiTeamResponse = await requestJson(context.port, "/api/ai-team/overview");
+  const aiTeamJson = aiTeamResponse.json as { members?: Array<{ id: string }> } | undefined;
+  const chatMemberId = aiTeamJson?.members?.[0]?.id;
+
+  if (!aiTeamResponse.ok || !chatMemberId) {
+    for (const capabilityId of ["create-chat-thread", "load-chat-history", "send-chat-message", "abort-chat-message"] as const) {
+      checks.push(
+        createResult(
+          context.runtimeMode,
+          capabilityId,
+          "skipped",
+          aiTeamResponse.ok
+            ? "Skipped because no AI member is available for chat smoke tests."
+            : `Skipped because AI member overview failed with HTTP ${aiTeamResponse.status}.`,
+          {
+            engineVersion: context.detectedVersion,
+            logPath: await writeLog(context.reportDir, context.runtimeMode, "chat-member-overview", aiTeamResponse.text)
+          }
+        )
+      );
+    }
+  } else {
+    const createChatResponse = await requestJson(context.port, "/api/chat/threads", {
+      method: "POST",
+      body: JSON.stringify({
+        memberId: chatMemberId,
+        mode: "new"
+      })
+    });
+    const createChatJson = createChatResponse.json as { thread?: { id?: string } } | undefined;
+    const chatThreadId = createChatJson?.thread?.id;
+
+    checks.push(
+      createResult(
+        context.runtimeMode,
+        "create-chat-thread",
+        createChatResponse.ok && Boolean(chatThreadId) ? "passed" : "failed",
+        createChatResponse.ok && chatThreadId
+          ? "Chat thread creation endpoint returned a thread."
+          : `Create chat thread failed with HTTP ${createChatResponse.status}.`,
+        {
+          engineVersion: context.detectedVersion,
+          logPath: await writeLog(context.reportDir, context.runtimeMode, "create-chat-thread", createChatResponse.text)
+        }
+      )
+    );
+
+    if (chatThreadId) {
+      const historyResponse = await requestJson(context.port, `/api/chat/threads/${chatThreadId}`);
+      checks.push(
+        createResult(
+          context.runtimeMode,
+          "load-chat-history",
+          historyResponse.ok ? "passed" : "failed",
+          historyResponse.ok
+            ? "Chat thread history endpoint returned successfully."
+            : `Load chat history failed with HTTP ${historyResponse.status}.`,
+          {
+            engineVersion: context.detectedVersion,
+            logPath: await writeLog(context.reportDir, context.runtimeMode, "load-chat-history", historyResponse.text)
+          }
+        )
+      );
+
+      const sendChatResponse = await requestJson(context.port, `/api/chat/threads/${chatThreadId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({
+          message: "Reply with the single word compatibility."
+        })
+      });
+      checks.push(
+        createResult(
+          context.runtimeMode,
+          "send-chat-message",
+          sendChatResponse.ok ? "passed" : "failed",
+          sendChatResponse.ok
+            ? "Chat message endpoint accepted a message."
+            : `Send chat message failed with HTTP ${sendChatResponse.status}.`,
+          {
+            engineVersion: context.detectedVersion,
+            logPath: await writeLog(context.reportDir, context.runtimeMode, "send-chat-message", sendChatResponse.text)
+          }
+        )
+      );
+
+      const abortChatResponse = await requestJson(context.port, `/api/chat/threads/${chatThreadId}/abort`, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      checks.push(
+        createResult(
+          context.runtimeMode,
+          "abort-chat-message",
+          abortChatResponse.ok ? "passed" : "failed",
+          abortChatResponse.ok
+            ? "Chat abort endpoint completed successfully."
+            : `Abort chat message failed with HTTP ${abortChatResponse.status}.`,
+          {
+            engineVersion: context.detectedVersion,
+            logPath: await writeLog(context.reportDir, context.runtimeMode, "abort-chat-message", abortChatResponse.text)
+          }
+        )
+      );
+    } else {
+      for (const capabilityId of ["load-chat-history", "send-chat-message", "abort-chat-message"] as const) {
+        checks.push(
+          createResult(
+            context.runtimeMode,
+            capabilityId,
+            "skipped",
+            "Skipped because chat thread creation failed.",
+            {
+              engineVersion: context.detectedVersion
+            }
+          )
+        );
+      }
+    }
+  }
+
   if (process.env.SLACKCLAW_COMPAT_RUN_TASK === "1") {
     const taskResponse = await requestJson(context.port, "/api/tasks", {
       method: "POST",

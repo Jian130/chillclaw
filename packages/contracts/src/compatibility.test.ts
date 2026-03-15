@@ -13,6 +13,8 @@ test("OpenClaw compatibility manifest includes the full supported capability che
   assert.equal(supported.has("detect-runtime"), true);
   assert.equal(supported.has("remove-channel"), true);
   assert.equal(supported.has("run-task-through-default-model"), true);
+  assert.equal(supported.has("create-chat-thread"), true);
+  assert.equal(supported.has("send-chat-message"), true);
 });
 
 test("future engine manifests start empty until adapter support exists", () => {

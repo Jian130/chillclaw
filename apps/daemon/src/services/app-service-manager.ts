@@ -11,6 +11,7 @@ import {
   getLaunchAgentPlistPath,
   getScriptsDir
 } from "../runtime-paths.js";
+import { writeErrorLog } from "./logger.js";
 
 interface CommandResult {
   code: number;
@@ -156,6 +157,12 @@ export class AppServiceManager {
 
     if (process.platform !== "darwin" || !scriptsDir || !(await fileExists(resolve(scriptsDir, scriptName)))) {
       const service = await this.getStatus();
+      await writeErrorLog("SlackClaw LaunchAgent action is unavailable in the current runtime.", {
+        action,
+        scriptName,
+        platform: process.platform,
+        packaged: Boolean(scriptsDir)
+      });
 
       return {
         action,
@@ -168,6 +175,16 @@ export class AppServiceManager {
     const scriptPath = resolve(scriptsDir, scriptName);
     const result = await run("/bin/sh", [scriptPath], { allowFailure: true });
     const service = await this.getStatus();
+
+    if (result.code !== 0) {
+      await writeErrorLog("SlackClaw LaunchAgent action failed.", {
+        action,
+        scriptPath,
+        code: result.code,
+        stdout: result.stdout,
+        stderr: result.stderr
+      });
+    }
 
     return {
       action,

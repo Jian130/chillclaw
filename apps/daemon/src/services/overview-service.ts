@@ -88,7 +88,8 @@ export class OverviewService {
       channelOnboarding: {
         baseOnboardingCompletedAt: current.channelOnboarding?.baseOnboardingCompletedAt ?? new Date().toISOString(),
         gatewayStartedAt: current.channelOnboarding?.gatewayStartedAt,
-        channels: current.channelOnboarding?.channels ?? {}
+        channels: current.channelOnboarding?.channels ?? {},
+        entries: current.channelOnboarding?.entries ?? {}
       }
     }));
 

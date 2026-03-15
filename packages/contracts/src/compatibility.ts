@@ -16,7 +16,21 @@ export type EngineCompatibilityCapabilityId =
   | "remove-channel"
   | "restart-gateway"
   | "verify-gateway-health"
-  | "run-task-through-default-model";
+  | "run-task-through-default-model"
+  | "list-members"
+  | "create-member"
+  | "update-member"
+  | "delete-member"
+  | "list-teams"
+  | "create-team"
+  | "update-team"
+  | "delete-team"
+  | "run-task-with-member-agent"
+  | "list-chat-threads"
+  | "create-chat-thread"
+  | "load-chat-history"
+  | "send-chat-message"
+  | "abort-chat-message";
 
 export type EngineCompatibilityRuntimeMode = "system" | "managed";
 export type EngineCompatibilityCheckStatus = "passed" | "failed" | "not-supported" | "skipped";
@@ -141,6 +155,76 @@ export const engineCompatibilityCapabilities: EngineCompatibilityCapabilityDefin
     id: "run-task-through-default-model",
     label: "Run task through default model",
     description: "Verify SlackClaw tasks run through the selected default model entry."
+  },
+  {
+    id: "list-members",
+    label: "List AI members",
+    description: "Verify SlackClaw can load daemon-backed AI members mapped to engine agents."
+  },
+  {
+    id: "create-member",
+    label: "Create AI member",
+    description: "Verify SlackClaw can create an AI member and provision its engine agent."
+  },
+  {
+    id: "update-member",
+    label: "Update AI member",
+    description: "Verify SlackClaw can update an AI member without replacing its agent."
+  },
+  {
+    id: "delete-member",
+    label: "Delete AI member",
+    description: "Verify SlackClaw can delete an AI member and remove its engine agent."
+  },
+  {
+    id: "list-teams",
+    label: "List AI teams",
+    description: "Verify SlackClaw can load daemon-backed AI team data."
+  },
+  {
+    id: "create-team",
+    label: "Create AI team",
+    description: "Verify SlackClaw can create an AI team and persist membership."
+  },
+  {
+    id: "update-team",
+    label: "Update AI team",
+    description: "Verify SlackClaw can update team metadata and roster membership."
+  },
+  {
+    id: "delete-team",
+    label: "Delete AI team",
+    description: "Verify SlackClaw can delete a team without deleting its members."
+  },
+  {
+    id: "run-task-with-member-agent",
+    label: "Run task with member agent",
+    description: "Verify SlackClaw can route a task through a selected AI member agent."
+  },
+  {
+    id: "list-chat-threads",
+    label: "List chat threads",
+    description: "Verify SlackClaw can load chat threads for AI member conversations."
+  },
+  {
+    id: "create-chat-thread",
+    label: "Create chat thread",
+    description: "Verify SlackClaw can create a new chat thread for an AI member."
+  },
+  {
+    id: "load-chat-history",
+    label: "Load chat history",
+    description: "Verify SlackClaw can reload chat history from an OpenClaw-backed session."
+  },
+  {
+    id: "send-chat-message",
+    label: "Send chat message",
+    description: "Verify SlackClaw can send a chat message through the selected AI member agent."
+  },
+  {
+    id: "abort-chat-message",
+    label: "Abort chat message",
+    description: "Verify SlackClaw can stop an in-flight assistant reply."
   }
 ];
 

@@ -1,31 +1,27 @@
-import { Copy, ExternalLink, KeyRound, Link2, MessageCircle, RefreshCw, Sparkles } from "lucide-react";
+import { Copy, ExternalLink, KeyRound, Link2, MessageCircle, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type {
-  ChannelActionResponse,
+  ChannelConfigOverview,
+  ConfiguredChannelEntry,
   ModelAuthSessionResponse,
   ModelConfigOverview,
   ModelProviderConfig,
-  ProductOverview,
   SavedModelEntry
 } from "@slackclaw/contracts";
 
 import {
-  approveFeishuPairing,
-  approveTelegramPairing,
-  approveWhatsappPairing,
   completeOnboarding,
+  createChannelEntry,
   createSavedModelEntry,
+  fetchChannelConfig,
   fetchModelAuthSession,
   fetchModelConfig,
-  prepareFeishuChannel,
+  removeSavedModelEntry,
+  removeChannelEntry,
   replaceFallbackModelEntries,
   setDefaultModelEntry,
-  setupFeishuChannel,
-  setupTelegramChannel,
-  setupWechatWorkaround,
-  startGatewayAfterChannels,
-  startWhatsappLogin,
   updateSavedModelEntry,
+  updateChannelEntry,
   submitModelAuthSessionInput
 } from "../../shared/api/client.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
@@ -40,18 +36,7 @@ import { InfoBanner } from "../../shared/ui/InfoBanner.js";
 import { PageHeader } from "../../shared/ui/PageHeader.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/Tabs.js";
 import { EmptyState } from "../../shared/ui/EmptyState.js";
-
-const providerGlyphs: Record<string, string> = {
-  openai: "OA",
-  "openai-codex": "OC",
-  anthropic: "AN",
-  gemini: "GE",
-  google: "GE",
-  github: "GH",
-  githubcopilot: "GH",
-  "github-copilot": "GH",
-  feishu: "飞"
-};
+import { ProviderLogo, providerFallbackGlyph } from "../../shared/ui/ProviderLogo.js";
 
 const feishuScopes = `{
   "scopes": {
@@ -79,11 +64,72 @@ const feishuScopes = `{
   }
 }`;
 
+export const feishuGuideSteps = [
+  "Open Feishu Open Platform and create an enterprise app for this workspace.",
+  "Copy the App ID and App Secret, then paste them into SlackClaw.",
+  "Batch-import the required scopes and confirm the bot capability is enabled for the app.",
+  "Use Prepare in SlackClaw first so OpenClaw can verify the Feishu plugin is ready.",
+  "In Feishu event subscriptions, switch delivery to long connection and enable the message receive event OpenClaw expects.",
+  "Publish the app after permissions and event settings are finished.",
+  "Save the credentials here, send the bot a direct message, then approve the pairing code in SlackClaw.",
+  "If your tenant uses Lark instead of Feishu, change the Domain field to lark before saving."
+] as const;
+
+export const feishuDirectLinks = [
+  {
+    label: "Open Feishu Open Platform",
+    url: "https://open.feishu.cn/app"
+  },
+  {
+    label: "Open Lark Open Platform",
+    url: "https://open.larksuite.com/app"
+  },
+  {
+    label: "Open official Feishu guide",
+    url: "https://docs.openclaw.ai/channels/feishu"
+  }
+] as const;
+
+export function channelStatusTone(status: ConfiguredChannelEntry["status"] | undefined) {
+  if (status === "completed" || status === "ready") {
+    return "success" as const;
+  }
+
+  if (status === "failed") {
+    return "warning" as const;
+  }
+
+  if (status === "awaiting-pairing" || status === "in-progress") {
+    return "info" as const;
+  }
+
+  return "neutral" as const;
+}
+
+export function channelIcon(channelId: string) {
+  const icons: Record<string, string> = {
+    telegram: "TG",
+    whatsapp: "WA",
+    feishu: "飞",
+    wechat: "WX"
+  };
+
+  return icons[channelId] ?? channelId.slice(0, 2).toUpperCase();
+}
+
 export function modelOptions(modelConfig: ModelConfigOverview | undefined, provider: ModelProviderConfig | undefined) {
   if (!modelConfig || !provider) return [];
   return modelConfig.models.filter((model) =>
     provider.providerRefs.some((ref) => model.key.startsWith(`${ref.replace(/\/$/, "")}/`))
   );
+}
+
+function modelKeyPlaceholder(provider: ModelProviderConfig | undefined) {
+  if (!provider) {
+    return "provider/model-name";
+  }
+
+  return provider.sampleModels[0] ?? `${provider.providerRefs[0]?.replace(/\/?$/, "/") ?? ""}model-name`;
 }
 
 export function providerConfiguredModels(modelConfig: ModelConfigOverview | undefined, provider: ModelProviderConfig | undefined) {
@@ -130,9 +176,7 @@ export function runtimeConfiguredModels(modelConfig: ModelConfigOverview | undef
     });
 }
 
-export function providerIcon(providerId: string) {
-  return providerGlyphs[providerId] ?? providerId.slice(0, 2).toUpperCase();
-}
+export const providerIcon = providerFallbackGlyph;
 
 export function entryAuthLabel(entry: Pick<SavedModelEntry, "authModeLabel" | "authMethodId">): string | undefined {
   if (entry.authModeLabel) {
@@ -206,12 +250,6 @@ export function validateModelEntryDraft(
   return undefined;
 }
 
-async function pasteInto(setter: (value: string) => void) {
-  if (!navigator.clipboard?.readText) return;
-  const value = await navigator.clipboard.readText();
-  setter(value);
-}
-
 async function copyText(value: string) {
   if (!navigator.clipboard?.writeText) return;
   await navigator.clipboard.writeText(value);
@@ -270,7 +308,7 @@ function ModelDialog(props: {
         return current;
       }
 
-      return props.initialEntry?.modelKey ?? providerActiveModel(props.modelConfig, provider) ?? models[0]?.key ?? "";
+      return props.initialEntry?.modelKey ?? providerActiveModel(props.modelConfig, provider) ?? provider.sampleModels[0] ?? models[0]?.key ?? "";
     });
   }, [models, props.initialEntry?.modelKey, props.modelConfig, props.open, provider]);
 
@@ -361,7 +399,7 @@ function ModelDialog(props: {
         <div className="provider-grid">
           {props.modelConfig?.providers.map((item) => (
             <button className="provider-tile" key={item.id} onClick={() => setProviderId(item.id)} type="button">
-              <div className="provider-logo">{providerIcon(item.id)}</div>
+              <ProviderLogo label={item.label} providerId={item.id} />
               <div className="provider-details">
                 <strong>{item.label}</strong>
                 <span className="card__description">{item.description}</span>
@@ -372,7 +410,7 @@ function ModelDialog(props: {
       ) : (
         <div className="panel-stack">
           <div className="info-banner">
-            <div className="provider-logo">{providerIcon(provider.id)}</div>
+            <ProviderLogo label={provider.label} providerId={provider.id} />
             <div>
               <h3>{provider.label}</h3>
               <p>{provider.description}</p>
@@ -397,13 +435,22 @@ function ModelDialog(props: {
             </div>
             <div>
               <FieldLabel htmlFor="model-key">Model</FieldLabel>
-              <Select id="model-key" onChange={(event) => setModelKey(event.target.value)} value={modelKey}>
-                {models.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.name}
-                  </option>
-                ))}
-              </Select>
+              <Input
+                id="model-key"
+                list={models.length ? "model-key-options" : undefined}
+                onChange={(event) => setModelKey(event.target.value)}
+                placeholder={modelKeyPlaceholder(provider)}
+                value={modelKey}
+              />
+              {models.length ? (
+                <datalist id="model-key-options">
+                  {models.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.name}
+                    </option>
+                  ))}
+                </datalist>
+              ) : null}
             </div>
             <div style={{ gridColumn: "1 / -1" }}>
               <FieldLabel htmlFor="method-id">Authentication Method</FieldLabel>
@@ -532,137 +579,267 @@ function ModelDialog(props: {
   );
 }
 
-function FeishuDialog(props: { open: boolean; onClose: () => void; onConfigured: (result: ChannelActionResponse) => Promise<void> }) {
-  const [step, setStep] = useState(1);
-  const [appId, setAppId] = useState("");
-  const [appSecret, setAppSecret] = useState("");
-  const [domain, setDomain] = useState("feishu");
-  const [botName, setBotName] = useState("SlackClaw Assistant");
-  const [busy, setBusy] = useState(false);
-  const lastStep = 6;
+function ChannelDialog(props: {
+  open: boolean;
+  onClose: () => void;
+  channelConfig?: ChannelConfigOverview;
+  onChannelConfigChange: (next: ChannelConfigOverview) => void;
+  reloadChannelConfig: () => Promise<ChannelConfigOverview>;
+  initialEntry?: ConfiguredChannelEntry;
+  initialChannelId?: string;
+}) {
+  const [channelId, setChannelId] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const capability = props.channelConfig?.capabilities.find((item) => item.id === channelId);
+  const activeSession = props.channelConfig?.activeSession?.channelId === channelId ? props.channelConfig.activeSession : undefined;
+  const isEdit = Boolean(props.initialEntry);
 
-  async function handleSave() {
-    setBusy(true);
+  useEffect(() => {
+    if (!props.open) {
+      return;
+    }
+
+    const nextChannelId = props.initialEntry?.channelId ?? props.initialChannelId ?? "";
+    setChannelId(nextChannelId);
+    setMessage("");
+    setValues({
+      domain: "feishu",
+      botName: "SlackClaw Assistant",
+      pluginSpec: "@openclaw-china/wecom-app",
+      ...props.initialEntry?.editableValues
+    });
+  }, [props.initialChannelId, props.initialEntry, props.open]);
+
+  async function applyChannelAction(action: "save" | "prepare" | "login" | "approve-pairing") {
+    if (!capability) {
+      return;
+    }
+
+    setBusy(action);
     try {
-      const result = await setupFeishuChannel({
-        appId,
-        appSecret,
-        domain,
-        botName
-      });
-      await props.onConfigured(result);
-      props.onClose();
-      setStep(1);
+      const request = { channelId: capability.id, values, action };
+      const result = props.initialEntry
+        ? await updateChannelEntry(props.initialEntry.id, request)
+        : await createChannelEntry(request);
+      props.onChannelConfigChange(result.channelConfig);
+      setMessage(result.message);
+
+      if (!result.session && action !== "approve-pairing") {
+        const refreshed = await props.reloadChannelConfig();
+        props.onChannelConfigChange(refreshed);
+      }
+
+      if (action === "save" && capability.id !== "whatsapp") {
+        props.onClose();
+      }
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   }
 
   return (
-    <Dialog description="Follow the official OpenClaw Feishu flow and save credentials into the installed engine." onClose={props.onClose} open={props.open} title="Set Up Feishu Channel" wide>
-      <div className="panel-stack">
-        <div className="actions-row" style={{ justifyContent: "space-between" }}>
-          <Badge tone="info">Step {step} / {lastStep}</Badge>
-          <div className="actions-row">
-            <Button disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))} variant="outline">
-              Back
-            </Button>
-            <Button disabled={step === lastStep} onClick={() => setStep((current) => Math.min(lastStep, current + 1))} variant="outline">
-              Continue
-            </Button>
+    <Dialog
+      description="Choose a communication channel, review the setup guidance, and save the account through SlackClaw."
+      onClose={props.onClose}
+      open={props.open}
+      title={isEdit ? "Edit Channel" : "Add Channel"}
+      wide
+    >
+      {!capability ? (
+        <div className="provider-grid">
+          {props.channelConfig?.capabilities.map((item) => (
+            <button className="provider-tile" key={item.id} onClick={() => setChannelId(item.id)} type="button">
+              <div className="provider-logo">{channelIcon(item.id)}</div>
+              <div className="provider-details">
+                <strong>{item.label}</strong>
+                <span className="card__description">{item.description}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="panel-stack">
+          <div className="info-banner">
+            <div className="provider-logo">{channelIcon(capability.id)}</div>
+            <div>
+              <h3>{capability.label}</h3>
+              <p>{capability.description}</p>
+              <div className="actions-row" style={{ marginTop: 12 }}>
+                <Button onClick={() => setChannelId("")} variant="outline">
+                  Change Channel
+                </Button>
+                {capability.docsUrl ? (
+                  <Button onClick={() => window.open(capability.docsUrl, "_blank", "noopener,noreferrer")} variant="ghost">
+                    <ExternalLink size={14} />
+                    Documentation
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {props.initialEntry ? (
+            <Card>
+              <CardContent className="panel-stack">
+                <div className="actions-row" style={{ justifyContent: "space-between" }}>
+                  <strong>Current configuration</strong>
+                  <Badge tone={channelStatusTone(props.initialEntry.status)}>{props.initialEntry.status}</Badge>
+                </div>
+                <p className="card__description">{props.initialEntry.summary}</p>
+                {props.initialEntry.maskedConfigSummary.length ? (
+                  <div className="field-grid field-grid--two">
+                    {props.initialEntry.maskedConfigSummary.map((item) => (
+                      <div key={item.label}>
+                        <FieldLabel htmlFor={`summary-${item.label}`}>{item.label}</FieldLabel>
+                        <Input id={`summary-${item.label}`} readOnly value={item.value} />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {capability.guidedSetupKind === "feishu" ? (
+            <Card>
+              <CardContent className="panel-stack">
+                <strong>Feishu setup guidance</strong>
+                <p className="card__description">
+                  Follow the official Feishu channel guide step by step, then return here to save credentials and finish pairing in SlackClaw.
+                </p>
+                <div className="actions-row" style={{ flexWrap: "wrap" }}>
+                  {feishuDirectLinks.map((link) => (
+                    <Button
+                      key={link.url}
+                      onClick={() => window.open(link.url, "_blank", "noopener,noreferrer")}
+                      variant="outline"
+                    >
+                      <ExternalLink size={14} />
+                      {link.label}
+                    </Button>
+                  ))}
+                </div>
+                <div className="panel-stack">
+                  {feishuGuideSteps.map((step, index) => (
+                    <div className="check-row" key={step}>
+                      <div className="check-row__meta">
+                        <strong>Step {index + 1}</strong>
+                        <p>{step}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="info-banner">
+                  <div>
+                    <h3>What to prepare before saving</h3>
+                    <p>
+                      App ID, App Secret, the correct tenant domain, imported scopes, bot capability enabled, long connection enabled,
+                      and the message receive event required by OpenClaw.
+                    </p>
+                  </div>
+                </div>
+                <Textarea readOnly value={feishuScopes} />
+                <div className="actions-row">
+                  <Button onClick={() => void copyText(feishuScopes)} variant="outline">
+                    <Copy size={14} />
+                    Copy scope config
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {capability.guidedSetupKind === "wechat" ? (
+            <Card>
+              <CardContent className="panel-stack">
+                <strong>WeChat workaround guidance</strong>
+                <p className="card__description">SlackClaw uses the workaround plugin path for WeChat. Confirm the plugin package, then save the Corp ID, Agent ID, webhook token, and AES key.</p>
+                <Textarea readOnly value={"openclaw plugins install @openclaw-china/wecom-app"} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeSession ? (
+            <Card>
+              <CardContent className="panel-stack">
+                <strong>Active session</strong>
+                <p className="card__description">{activeSession.message}</p>
+                <Textarea readOnly value={activeSession.logs.join("\n")} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div className="field-grid field-grid--two">
+            {capability.fieldDefs.map((field) => (
+              <div key={field.id} style={field.kind === "textarea" ? { gridColumn: "1 / -1" } : undefined}>
+                <FieldLabel htmlFor={`${capability.id}-${field.id}`}>{field.label}</FieldLabel>
+                {field.kind === "select" ? (
+                  <Select
+                    id={`${capability.id}-${field.id}`}
+                    onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
+                    value={values[field.id] ?? field.options?.[0]?.value ?? ""}
+                  >
+                    {(field.options ?? []).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                ) : field.kind === "textarea" ? (
+                  <Textarea
+                    id={`${capability.id}-${field.id}`}
+                    onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
+                    value={values[field.id] ?? ""}
+                  />
+                ) : (
+                  <Input
+                    id={`${capability.id}-${field.id}`}
+                    onChange={(event) => setValues((current) => ({ ...current, [field.id]: event.target.value }))}
+                    placeholder={field.placeholder}
+                    type={field.secret ? "password" : "text"}
+                    value={values[field.id] ?? ""}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+
+          {message ? <p className="card__description">{message}</p> : null}
+
+          <div className="actions-row" style={{ justifyContent: "space-between" }}>
+            <div className="actions-row">
+              <Badge tone={capability.officialSupport ? "success" : "warning"}>
+                {capability.officialSupport ? "Official" : "Workaround"}
+              </Badge>
+              {props.initialEntry?.pairingRequired ? <Badge tone="info">Pairing required</Badge> : null}
+            </div>
+            <div className="actions-row">
+              {capability.id === "feishu" ? (
+                <Button disabled={busy === "prepare"} onClick={() => void applyChannelAction("prepare")} variant="outline">
+                  {busy === "prepare" ? "Preparing..." : "Prepare"}
+                </Button>
+              ) : null}
+              {capability.supportsLogin ? (
+                <Button disabled={busy === "login"} onClick={() => void applyChannelAction("login")} variant="outline">
+                  {busy === "login" ? "Starting..." : "Start Login"}
+                </Button>
+              ) : null}
+              {capability.id !== "whatsapp" ? (
+                <Button disabled={busy === "save"} onClick={() => void applyChannelAction("save")}>
+                  {busy === "save" ? "Saving..." : isEdit ? "Save Changes" : "Save Channel"}
+                </Button>
+              ) : null}
+              {capability.supportsPairing ? (
+                <Button disabled={busy === "approve-pairing" || !values.code?.trim()} onClick={() => void applyChannelAction("approve-pairing")} variant="outline">
+                  {busy === "approve-pairing" ? "Approving..." : "Approve Pairing"}
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
-
-        {step === 1 ? (
-          <Card>
-            <CardContent className="panel-stack">
-              <strong>Create a Feishu app</strong>
-              <p className="card__description">Create a custom enterprise app in the Feishu developer console before pasting credentials back into SlackClaw.</p>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {step === 2 ? (
-          <Card>
-            <CardContent className="field-grid field-grid--two">
-              <div>
-                <FieldLabel htmlFor="feishu-app-id">App ID</FieldLabel>
-                <div className="actions-row">
-                  <Input id="feishu-app-id" onChange={(event) => setAppId(event.target.value)} value={appId} />
-                  <Button onClick={() => void pasteInto(setAppId)} variant="outline">
-                    Paste
-                  </Button>
-                </div>
-              </div>
-              <div>
-                <FieldLabel htmlFor="feishu-app-secret">App Secret</FieldLabel>
-                <div className="actions-row">
-                  <Input id="feishu-app-secret" onChange={(event) => setAppSecret(event.target.value)} type="password" value={appSecret} />
-                  <Button onClick={() => void pasteInto(setAppSecret)} variant="outline">
-                    Paste
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {step === 3 ? (
-          <Card>
-            <CardContent className="panel-stack">
-              <strong>Configure permissions</strong>
-              <p className="card__description">Use batch import in Feishu and paste this exact OpenClaw scope set.</p>
-              <Textarea readOnly value={feishuScopes} />
-              <Button onClick={() => void copyText(feishuScopes)} variant="outline">
-                <Copy size={14} />
-                Copy batch import config
-              </Button>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {step === 4 ? (
-          <Card>
-            <CardContent className="field-grid field-grid--two">
-              <div>
-                <FieldLabel htmlFor="feishu-domain">Domain</FieldLabel>
-                <Select id="feishu-domain" onChange={(event) => setDomain(event.target.value)} value={domain}>
-                  <option value="feishu">feishu</option>
-                  <option value="lark">lark</option>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel htmlFor="feishu-bot-name">Bot name</FieldLabel>
-                <Input id="feishu-bot-name" onChange={(event) => setBotName(event.target.value)} value={botName} />
-              </div>
-              <p className="card__description" style={{ gridColumn: "1 / -1" }}>
-                Enable Bot Capability in Feishu before moving to the OpenClaw configuration step.
-              </p>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {step === 5 ? (
-          <Card>
-            <CardContent className="panel-stack">
-              <strong>Configure OpenClaw</strong>
-              <p className="card__description">SlackClaw will write the Feishu channel configuration into the installed OpenClaw and then you can approve pairing.</p>
-              <Button disabled={busy || !appId || !appSecret} onClick={handleSave}>
-                {busy ? "Configuring..." : "Configure Feishu in OpenClaw"}
-              </Button>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {step === 6 ? (
-          <Card>
-            <CardContent className="panel-stack">
-              <strong>Gateway and test</strong>
-              <p className="card__description">After saving credentials, restart the gateway in the Channels tab and approve the Feishu pairing code from SlackClaw.</p>
-            </CardContent>
-          </Card>
-        ) : null}
-      </div>
+      )}
     </Dialog>
   );
 }
@@ -670,34 +847,44 @@ function FeishuDialog(props: { open: boolean; onClose: () => void; onConfigured:
 export default function ConfigPage() {
   const { locale } = useLocale();
   const copy = t(locale).config;
-  const { overview, refresh, setOverview } = useOverview();
+  const { overview, setOverview } = useOverview();
   const [modelConfig, setModelConfig] = useState<ModelConfigOverview>();
+  const [channelConfig, setChannelConfig] = useState<ChannelConfigOverview>();
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [selectedModelEntry, setSelectedModelEntry] = useState<SavedModelEntry>();
-  const [feishuPrepareOpen, setFeishuPrepareOpen] = useState(false);
-  const [feishuSetupOpen, setFeishuSetupOpen] = useState(false);
-  const [telegramToken, setTelegramToken] = useState("");
-  const [telegramAccountName, setTelegramAccountName] = useState("");
-  const [telegramPairingCode, setTelegramPairingCode] = useState("");
-  const [whatsappPairingCode, setWhatsappPairingCode] = useState("");
-  const [feishuPairingCode, setFeishuPairingCode] = useState("");
-  const [wechatCorpId, setWechatCorpId] = useState("");
-  const [wechatAgentId, setWechatAgentId] = useState("");
-  const [wechatSecret, setWechatSecret] = useState("");
-  const [wechatToken, setWechatToken] = useState("");
-  const [wechatEncodingKey, setWechatEncodingKey] = useState("");
+  const [channelDialogOpen, setChannelDialogOpen] = useState(false);
+  const [selectedChannelId, setSelectedChannelId] = useState<string>();
+  const [selectedChannelEntry, setSelectedChannelEntry] = useState<ConfiguredChannelEntry>();
   const [channelMessage, setChannelMessage] = useState("");
-  const [busy, setBusy] = useState<"" | "onboarding" | "telegram" | "telegram-pair" | "whatsapp" | "whatsapp-pair" | "feishu-prepare" | "feishu-pair" | "wechat" | "gateway">("");
+  const [busy, setBusy] = useState("");
 
-  const channelsLocked = !overview?.channelSetup.baseOnboardingCompleted;
+  const channelsLocked = !(channelConfig?.baseOnboardingCompleted ?? overview?.channelSetup.baseOnboardingCompleted);
 
   useEffect(() => {
-    void reloadModelConfig();
+    void Promise.all([reloadModelConfig(), reloadChannelConfig()]);
   }, []);
 
-  async function reloadModelConfig() {
-    const next = await fetchModelConfig();
+  useEffect(() => {
+    if (!channelConfig?.activeSession?.id) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void reloadChannelConfig();
+    }, 1600);
+
+    return () => window.clearInterval(timer);
+  }, [channelConfig?.activeSession?.id]);
+
+  async function reloadModelConfig(options?: { fresh?: boolean }) {
+    const next = await fetchModelConfig(options);
     setModelConfig(next);
+    return next;
+  }
+
+  async function reloadChannelConfig(options?: { fresh?: boolean }) {
+    const next = await fetchChannelConfig(options);
+    setChannelConfig(next);
     return next;
   }
 
@@ -709,115 +896,29 @@ export default function ConfigPage() {
       if (!profileId) return;
       const next = await completeOnboarding({ profileId });
       setOverview(next);
-      await refresh();
+      setChannelConfig(undefined);
+      await reloadChannelConfig({ fresh: true });
     } finally {
       setBusy("");
     }
   }
 
-  async function handleTelegram() {
-    setBusy("telegram");
+  async function handleRemoveChannel(entry: ConfiguredChannelEntry) {
+    setBusy(`remove:${entry.id}`);
     try {
-      const result = await setupTelegramChannel({ token: telegramToken, accountName: telegramAccountName });
+      const result = await removeChannelEntry(entry.id);
+      setChannelConfig(result.channelConfig);
       setChannelMessage(result.message);
-      await refresh();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function handleTelegramPairing() {
-    setBusy("telegram-pair");
-    try {
-      const result = await approveTelegramPairing({ code: telegramPairingCode });
-      setChannelMessage(result.message);
-      await refresh();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function handleWhatsappLogin() {
-    setBusy("whatsapp");
-    try {
-      const result = await startWhatsappLogin();
-      setChannelMessage(result.message);
-      await refresh();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function handleWhatsappPairing() {
-    setBusy("whatsapp-pair");
-    try {
-      const result = await approveWhatsappPairing({ code: whatsappPairingCode });
-      setChannelMessage(result.message);
-      await refresh();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function handleFeishuPrepare() {
-    setBusy("feishu-prepare");
-    try {
-      const result = await prepareFeishuChannel();
-      setChannelMessage(result.message);
-      await refresh();
-      setFeishuPrepareOpen(false);
-      setFeishuSetupOpen(true);
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function handleFeishuPairing() {
-    setBusy("feishu-pair");
-    try {
-      const result = await approveFeishuPairing({ code: feishuPairingCode });
-      setChannelMessage(result.message);
-      await refresh();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function handleWechat() {
-    setBusy("wechat");
-    try {
-      const result = await setupWechatWorkaround({
-        pluginSpec: "@openclaw-china/wecom-app",
-        corpId: wechatCorpId,
-        agentId: wechatAgentId,
-        secret: wechatSecret,
-        token: wechatToken,
-        encodingAesKey: wechatEncodingKey
-      });
-      setChannelMessage(result.message);
-      await refresh();
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function handleGateway() {
-    setBusy("gateway");
-    try {
-      const result = await startGatewayAfterChannels();
-      setChannelMessage(result.message);
-      await refresh();
     } finally {
       setBusy("");
     }
   }
 
   async function handleSetDefaultEntry(entry: SavedModelEntry) {
-    setBusy("gateway");
+    setBusy("models:gateway");
     try {
-      await setDefaultModelEntry({ entryId: entry.id });
-      await reloadModelConfig();
-      await refresh();
+      const result = await setDefaultModelEntry({ entryId: entry.id });
+      setModelConfig(result.modelConfig);
     } finally {
       setBusy("");
     }
@@ -826,7 +927,7 @@ export default function ConfigPage() {
   async function handleToggleFallback(entry: SavedModelEntry) {
     if (!modelConfig) return;
 
-    setBusy("gateway");
+    setBusy("models:gateway");
     try {
       const nextFallbackIds = modelConfig.savedEntries
         .filter((item) => {
@@ -850,9 +951,24 @@ export default function ConfigPage() {
         })
         .map((item) => item.id);
 
-      await replaceFallbackModelEntries({ entryIds: nextFallbackIds });
-      await reloadModelConfig();
-      await refresh();
+      const result = await replaceFallbackModelEntries({ entryIds: nextFallbackIds });
+      setModelConfig(result.modelConfig);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleRemoveModelEntry(entry: SavedModelEntry) {
+    if (!window.confirm(`Remove ${entry.label} from SlackClaw?`)) {
+      return;
+    }
+
+    setBusy(`models:remove:${entry.id}`);
+    try {
+      const result = await removeSavedModelEntry(entry.id);
+      setModelConfig(result.modelConfig);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "SlackClaw could not remove this saved model entry.");
     } finally {
       setBusy("");
     }
@@ -860,6 +976,8 @@ export default function ConfigPage() {
 
   const savedEntries = (modelConfig?.savedEntries ?? []).filter((entry) => !entry.id.startsWith("runtime:"));
   const runtimeModels = runtimeConfiguredModels(modelConfig);
+  const configuredChannels = channelConfig?.entries ?? [];
+  const modelBusy = busy.startsWith("models:");
 
   return (
     <div className="panel-stack">
@@ -867,7 +985,7 @@ export default function ConfigPage() {
         title={copy.title}
         subtitle={copy.subtitle}
         actions={
-          <Button onClick={() => void reloadModelConfig()} variant="outline">
+          <Button onClick={() => void reloadModelConfig({ fresh: true })} variant="outline">
             <RefreshCw size={14} />
             {copy.refreshProviders}
           </Button>
@@ -877,7 +995,7 @@ export default function ConfigPage() {
       <Tabs defaultValue="models">
         <TabsList>
           <TabsTrigger value="models">{copy.modelsTab} ({runtimeModels.length})</TabsTrigger>
-          <TabsTrigger value="channels">{copy.channelsTab} ({overview?.channelSetup.channels.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="channels">{copy.channelsTab} ({configuredChannels.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="models" className="panel-stack">
@@ -901,7 +1019,7 @@ export default function ConfigPage() {
                       <div className="configured-model-card" key={model.key}>
                         <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
                           <div className="actions-row">
-                            <div className="provider-logo">{providerIcon(provider?.id ?? model.key.split("/")[0] ?? "ai")}</div>
+                            <ProviderLogo label={provider?.label ?? model.key.split("/")[0]} providerId={provider?.id ?? model.key.split("/")[0] ?? "ai"} />
                             <div className="provider-details">
                               <strong>{model.name}</strong>
                               <span className="card__description">{provider?.label ?? model.key.split("/")[0]}</span>
@@ -939,7 +1057,7 @@ export default function ConfigPage() {
                   <div className="configured-model-card" key={entry.id}>
                     <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
                       <div className="actions-row">
-                        <div className="provider-logo">{providerIcon(entry.providerId)}</div>
+                        <ProviderLogo label={provider?.label ?? entry.providerId} providerId={entry.providerId} />
                         <div className="provider-details">
                           <strong>{entry.label}</strong>
                           <span className="card__description">{provider?.label ?? entry.providerId}</span>
@@ -953,12 +1071,12 @@ export default function ConfigPage() {
                       </div>
                       <div className="actions-row">
                         {!entry.isDefault ? (
-                          <Button disabled={busy === "gateway"} onClick={() => void handleSetDefaultEntry(entry)} variant="outline">
+                          <Button disabled={modelBusy} onClick={() => void handleSetDefaultEntry(entry)} variant="outline">
                             Set Default
                           </Button>
                         ) : null}
                         <Button
-                          disabled={entry.isDefault || busy === "gateway"}
+                          disabled={entry.isDefault || modelBusy}
                           onClick={() => void handleToggleFallback(entry)}
                           variant={entry.isFallback ? "secondary" : "outline"}
                         >
@@ -972,6 +1090,10 @@ export default function ConfigPage() {
                           variant="outline"
                         >
                           Edit
+                        </Button>
+                        <Button disabled={modelBusy} onClick={() => void handleRemoveModelEntry(entry)} variant="outline">
+                          <Trash2 size={14} />
+                          {busy === `models:remove:${entry.id}` ? "Removing..." : "Remove"}
                         </Button>
                         {provider?.docsUrl ? (
                           <Button onClick={() => window.open(provider.docsUrl, "_blank", "noopener,noreferrer")} variant="outline">
@@ -1048,152 +1170,101 @@ export default function ConfigPage() {
           {channelsLocked ? (
             <InfoBanner accent="orange" title={copy.completeOnboardingFirst} description="SlackClaw only unlocks channels after OpenClaw onboarding succeeds." />
           ) : null}
-
-          <div className="channel-grid">
-            <div className="channel-card">
-              <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
-                <div className="actions-row">
-                  <div className="channel-logo">TG</div>
-                  <div className="channel-details">
-                    <strong>{copy.telegram}</strong>
-                    <span className="card__description">Configure the Telegram bot token, then approve pairing.</span>
-                  </div>
-                </div>
-                <StatusBadge overview={overview} channelId="telegram" />
-              </div>
-              <div className="field-grid field-grid--two" style={{ marginTop: 18 }}>
-                <div>
-                  <FieldLabel htmlFor="telegram-token">Telegram bot token</FieldLabel>
-                  <Input id="telegram-token" onChange={(event) => setTelegramToken(event.target.value)} value={telegramToken} />
-                </div>
-                <div>
-                  <FieldLabel htmlFor="telegram-name">Account name</FieldLabel>
-                  <Input id="telegram-name" onChange={(event) => setTelegramAccountName(event.target.value)} value={telegramAccountName} />
-                </div>
-                <div>
-                  <FieldLabel htmlFor="telegram-pair">Pairing code</FieldLabel>
-                  <Input id="telegram-pair" onChange={(event) => setTelegramPairingCode(event.target.value)} value={telegramPairingCode} />
-                </div>
-              </div>
-              <div className="actions-row" style={{ marginTop: 18 }}>
-                <Button disabled={channelsLocked || busy === "telegram"} onClick={handleTelegram}>
-                  {busy === "telegram" ? "Saving..." : "Save Telegram"}
-                </Button>
-                <Button disabled={channelsLocked || busy === "telegram-pair"} onClick={handleTelegramPairing} variant="outline">
-                  {busy === "telegram-pair" ? "Approving..." : "Approve Telegram Pairing"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="channel-card">
-              <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
-                <div className="actions-row">
-                  <div className="channel-logo">WA</div>
-                  <div className="channel-details">
-                    <strong>{copy.whatsapp}</strong>
-                    <span className="card__description">Start the login flow, then paste the pairing code from OpenClaw.</span>
-                  </div>
-                </div>
-                <StatusBadge overview={overview} channelId="whatsapp" />
-              </div>
-              <div className="field-grid field-grid--two" style={{ marginTop: 18 }}>
-                <div>
-                  <FieldLabel htmlFor="whatsapp-pair">Pairing code</FieldLabel>
-                  <Input id="whatsapp-pair" onChange={(event) => setWhatsappPairingCode(event.target.value)} value={whatsappPairingCode} />
-                </div>
-              </div>
-              <div className="actions-row" style={{ marginTop: 18 }}>
-                <Button disabled={channelsLocked || busy === "whatsapp"} onClick={handleWhatsappLogin}>
-                  {busy === "whatsapp" ? "Starting..." : "Start WhatsApp Login"}
-                </Button>
-                <Button disabled={channelsLocked || busy === "whatsapp-pair"} onClick={handleWhatsappPairing} variant="outline">
-                  {busy === "whatsapp-pair" ? "Approving..." : "Approve WhatsApp Pairing"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="channel-card">
-              <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
-                <div className="actions-row">
-                  <div className="channel-logo">飞</div>
-                  <div className="channel-details">
-                    <strong>{copy.feishu}</strong>
-                    <span className="card__description">Use the official OpenClaw Feishu flow: prepare, configure, approve pairing, then restart the gateway.</span>
-                  </div>
-                </div>
-                <StatusBadge overview={overview} channelId="feishu" />
-              </div>
-              <div className="field-grid field-grid--two" style={{ marginTop: 18 }}>
-                <div>
-                  <FieldLabel htmlFor="feishu-pair">Pairing code</FieldLabel>
-                  <Input id="feishu-pair" onChange={(event) => setFeishuPairingCode(event.target.value)} value={feishuPairingCode} />
-                </div>
-              </div>
-              <div className="actions-row" style={{ marginTop: 18 }}>
-                <Button disabled={channelsLocked || busy === "feishu-prepare"} onClick={() => setFeishuPrepareOpen(true)}>
-                  {busy === "feishu-prepare" ? "Preparing..." : "Prepare Feishu"}
-                </Button>
-                <Button disabled={channelsLocked} onClick={() => setFeishuSetupOpen(true)} variant="outline">
-                  Configure Feishu
-                </Button>
-                <Button disabled={channelsLocked || busy === "feishu-pair"} onClick={handleFeishuPairing} variant="outline">
-                  {busy === "feishu-pair" ? "Approving..." : "Approve Feishu Pairing"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="channel-card">
-              <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
-                <div className="actions-row">
-                  <div className="channel-logo">WX</div>
-                  <div className="channel-details">
-                    <strong>{copy.wechat}</strong>
-                    <span className="card__description">Experimental workaround path. SlackClaw stores the current workaround values and sends them through the daemon.</span>
-                  </div>
-                </div>
-                <StatusBadge overview={overview} channelId="wechat" />
-              </div>
-              <div className="field-grid field-grid--two" style={{ marginTop: 18 }}>
-                <div>
-                  <FieldLabel htmlFor="wechat-corp">Corp ID</FieldLabel>
-                  <Input id="wechat-corp" onChange={(event) => setWechatCorpId(event.target.value)} value={wechatCorpId} />
-                </div>
-                <div>
-                  <FieldLabel htmlFor="wechat-agent">Agent ID</FieldLabel>
-                  <Input id="wechat-agent" onChange={(event) => setWechatAgentId(event.target.value)} value={wechatAgentId} />
-                </div>
-                <div>
-                  <FieldLabel htmlFor="wechat-secret">Secret</FieldLabel>
-                  <Input id="wechat-secret" onChange={(event) => setWechatSecret(event.target.value)} value={wechatSecret} />
-                </div>
-                <div>
-                  <FieldLabel htmlFor="wechat-token">Webhook token</FieldLabel>
-                  <Input id="wechat-token" onChange={(event) => setWechatToken(event.target.value)} value={wechatToken} />
-                </div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <FieldLabel htmlFor="wechat-encoding">Encoding AES key</FieldLabel>
-                  <Input id="wechat-encoding" onChange={(event) => setWechatEncodingKey(event.target.value)} value={wechatEncodingKey} />
-                </div>
-              </div>
-              <div className="actions-row" style={{ marginTop: 18 }}>
-                <Button disabled={channelsLocked || busy === "wechat"} onClick={handleWechat}>
-                  {busy === "wechat" ? "Saving..." : "Configure WeChat Workaround"}
-                </Button>
-              </div>
-            </div>
-          </div>
-
           <Card>
             <CardContent className="actions-row" style={{ justifyContent: "space-between" }}>
               <div>
-                <strong>Gateway and test</strong>
-                <p className="card__description">{channelMessage || "Restart the gateway after channels are configured."}</p>
+                <strong>Current channel configuration</strong>
+                <p className="card__description">
+                  {channelMessage || channelConfig?.gatewaySummary || "SlackClaw manages configured channels through the installed OpenClaw runtime."}
+                </p>
               </div>
-              <Button disabled={channelsLocked || busy === "gateway"} onClick={handleGateway}>
-                {busy === "gateway" ? "Restarting..." : copy.gatewayStart}
+              <Button
+                disabled={channelsLocked}
+                onClick={() => {
+                  setSelectedChannelEntry(undefined);
+                  setSelectedChannelId(undefined);
+                  setChannelDialogOpen(true);
+                }}
+              >
+                <Plus size={14} />
+                Add Channel
               </Button>
             </CardContent>
           </Card>
+
+          {channelConfig?.activeSession ? (
+            <Card>
+              <CardContent className="panel-stack">
+                <div className="actions-row" style={{ justifyContent: "space-between" }}>
+                  <strong>Active channel session</strong>
+                  <Badge tone="info">{channelConfig.activeSession.channelId}</Badge>
+                </div>
+                <p className="card__description">{channelConfig.activeSession.message}</p>
+                <Textarea readOnly value={channelConfig.activeSession.logs.join("\n")} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {configuredChannels.length ? (
+            <div className="panel-stack">
+              {configuredChannels.map((entry) => {
+                const capability = channelConfig?.capabilities.find((item) => item.id === entry.channelId);
+
+                return (
+                  <div className="configured-model-card" key={entry.id}>
+                    <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
+                      <div className="actions-row">
+                        <div className="provider-logo">{channelIcon(entry.channelId)}</div>
+                        <div className="provider-details">
+                          <strong>{entry.label}</strong>
+                          <span className="card__description">{capability?.label ?? entry.channelId}</span>
+                          <div className="actions-row">
+                            <Badge tone={channelStatusTone(entry.status)}>{entry.status}</Badge>
+                            {entry.pairingRequired ? <Badge tone="info">Pairing required</Badge> : null}
+                            {capability?.officialSupport === false ? <Badge tone="warning">Workaround</Badge> : null}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="actions-row">
+                        <Button
+                          onClick={() => {
+                            setSelectedChannelEntry(entry);
+                            setSelectedChannelId(entry.channelId);
+                            setChannelDialogOpen(true);
+                          }}
+                          variant="outline"
+                        >
+                          {entry.pairingRequired ? "Continue Setup" : "Edit"}
+                        </Button>
+                        <Button disabled={busy === `remove:${entry.id}`} onClick={() => void handleRemoveChannel(entry)} variant="outline">
+                          <Trash2 size={14} />
+                          {busy === `remove:${entry.id}` ? "Removing..." : "Remove"}
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="card__description" style={{ marginTop: 14 }}>{entry.summary}</p>
+                    {entry.maskedConfigSummary.length ? (
+                      <div className="field-grid field-grid--two" style={{ marginTop: 18 }}>
+                        {entry.maskedConfigSummary.map((item) => (
+                          <Card key={item.label}>
+                            <CardContent className="panel-stack">
+                              <span className="card__description">{item.label}</span>
+                              <strong>{item.value}</strong>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState
+              title="No channels are configured yet"
+              description="Add Telegram, WhatsApp, Feishu, or WeChat through the dialog to start managing communication channels in SlackClaw."
+            />
+          )}
         </TabsContent>
       </Tabs>
 
@@ -1209,40 +1280,19 @@ export default function ConfigPage() {
         reloadModelConfig={reloadModelConfig}
       />
 
-      <Dialog
-        description={copy.feishuPrepareBody}
-        onClose={() => setFeishuPrepareOpen(false)}
-        open={feishuPrepareOpen}
-        title={copy.feishuPrepareTitle}
-      >
-        <div className="panel-stack">
-          <Textarea readOnly value={"openclaw plugins install @openclaw/feishu"} />
-          <Button disabled={busy === "feishu-prepare"} onClick={handleFeishuPrepare}>
-            {busy === "feishu-prepare" ? "Preparing..." : "Prepare Feishu Channel"}
-          </Button>
-        </div>
-      </Dialog>
-
-      <FeishuDialog
-        onClose={() => setFeishuSetupOpen(false)}
-        onConfigured={async (result) => {
-          setChannelMessage(result.message);
-          await refresh();
+      <ChannelDialog
+        channelConfig={channelConfig}
+        initialChannelId={selectedChannelId}
+        initialEntry={selectedChannelEntry}
+        onChannelConfigChange={setChannelConfig}
+        onClose={() => {
+          setChannelDialogOpen(false);
+          setSelectedChannelEntry(undefined);
+          setSelectedChannelId(undefined);
         }}
-        open={feishuSetupOpen}
+        open={channelDialogOpen}
+        reloadChannelConfig={reloadChannelConfig}
       />
     </div>
   );
-}
-
-function StatusBadge(props: { overview?: ProductOverview; channelId: string }) {
-  const channel = props.overview?.channelSetup.channels.find((item) => item.id === props.channelId);
-  const tone =
-    channel?.status === "completed" || channel?.status === "ready"
-      ? "success"
-      : channel?.status === "failed"
-        ? "warning"
-        : "neutral";
-
-  return <Badge tone={tone}>{channel?.status ?? "not-started"}</Badge>;
 }

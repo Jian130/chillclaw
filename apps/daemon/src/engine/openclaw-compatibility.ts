@@ -165,6 +165,127 @@ export const openClawCompatibilitySources: Record<EngineCompatibilityCapabilityI
       "apps/daemon/src/services/task-service.ts"
     ],
     runtimeModes: ["system", "managed"]
+  },
+  "list-members": {
+    area: "AI Members",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/desktop-ui/src/features/members/MembersPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "create-member": {
+    area: "AI Members",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/daemon/src/engine/openclaw-adapter.ts",
+      "apps/desktop-ui/src/features/members/MembersPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "update-member": {
+    area: "AI Members",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/daemon/src/engine/openclaw-adapter.ts",
+      "apps/desktop-ui/src/features/members/MembersPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "delete-member": {
+    area: "AI Members",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/daemon/src/engine/openclaw-adapter.ts",
+      "apps/desktop-ui/src/features/members/MembersPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "list-teams": {
+    area: "AI Team",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/desktop-ui/src/features/team/TeamPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "create-team": {
+    area: "AI Team",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/desktop-ui/src/features/team/TeamPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "update-team": {
+    area: "AI Team",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/desktop-ui/src/features/team/TeamPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "delete-team": {
+    area: "AI Team",
+    filePaths: [
+      "apps/daemon/src/services/ai-team-service.ts",
+      "apps/desktop-ui/src/features/team/TeamPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "run-task-with-member-agent": {
+    area: "AI Team / Tasks",
+    filePaths: [
+      "apps/daemon/src/services/task-service.ts",
+      "apps/daemon/src/engine/openclaw-adapter.ts",
+      "apps/desktop-ui/src/features/team/TeamPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "list-chat-threads": {
+    area: "Chat",
+    filePaths: [
+      "apps/daemon/src/services/chat-service.ts",
+      "apps/daemon/src/server.ts",
+      "apps/desktop-ui/src/features/chat/ChatPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "create-chat-thread": {
+    area: "Chat",
+    filePaths: [
+      "apps/daemon/src/services/chat-service.ts",
+      "apps/daemon/src/server.ts",
+      "apps/desktop-ui/src/features/chat/ChatPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "load-chat-history": {
+    area: "Chat",
+    filePaths: [
+      "apps/daemon/src/services/chat-service.ts",
+      "apps/daemon/src/engine/openclaw-adapter.ts",
+      "apps/desktop-ui/src/features/chat/ChatPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "send-chat-message": {
+    area: "Chat",
+    filePaths: [
+      "apps/daemon/src/services/chat-service.ts",
+      "apps/daemon/src/engine/openclaw-adapter.ts",
+      "apps/desktop-ui/src/features/chat/ChatPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
+  },
+  "abort-chat-message": {
+    area: "Chat",
+    filePaths: [
+      "apps/daemon/src/services/chat-service.ts",
+      "apps/daemon/src/engine/openclaw-adapter.ts",
+      "apps/desktop-ui/src/features/chat/ChatPage.tsx"
+    ],
+    runtimeModes: ["system", "managed"]
   }
 };
 

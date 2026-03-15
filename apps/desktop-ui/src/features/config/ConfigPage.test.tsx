@@ -3,7 +3,11 @@ import type { ModelConfigOverview, ModelProviderConfig } from "@slackclaw/contra
 
 import {
   applyModelEntryRole,
+  channelIcon,
+  channelStatusTone,
   entryAuthLabel,
+  feishuDirectLinks,
+  feishuGuideSteps,
   modelOptions,
   providerActiveModel,
   providerConfiguredModels,
@@ -113,6 +117,14 @@ describe("ConfigPage helpers", () => {
   it("uses stable provider glyphs for known providers", () => {
     expect(providerIcon("github-copilot")).toBe("GH");
     expect(providerIcon("openai")).toBe("OA");
+    expect(channelIcon("telegram")).toBe("TG");
+  });
+
+  it("maps channel statuses to stable badge tones", () => {
+    expect(channelStatusTone("completed")).toBe("success");
+    expect(channelStatusTone("awaiting-pairing")).toBe("info");
+    expect(channelStatusTone("failed")).toBe("warning");
+    expect(channelStatusTone("not-started")).toBe("neutral");
   });
 
   it("validates required API key inputs before save", () => {
@@ -136,5 +148,18 @@ describe("ConfigPage helpers", () => {
     expect(entryAuthLabel({ authMethodId: "openai-api-key", authModeLabel: undefined })).toBe("API key");
     expect(entryAuthLabel({ authMethodId: "openai-oauth", authModeLabel: undefined })).toBe("OAuth");
     expect(entryAuthLabel({ authMethodId: "openai-api-key", authModeLabel: "API key" })).toBe("API key");
+  });
+
+  it("keeps the Feishu guide steps visible in the dialog flow", () => {
+    expect(feishuGuideSteps.length).toBeGreaterThanOrEqual(7);
+    expect(feishuGuideSteps[0]).toContain("Feishu Open Platform");
+    expect(feishuGuideSteps.some((step) => step.includes("long connection"))).toBe(true);
+    expect(feishuGuideSteps.some((step) => step.includes("pairing"))).toBe(true);
+  });
+
+  it("keeps direct Feishu links available for guided setup", () => {
+    expect(feishuDirectLinks.map((link) => link.url)).toContain("https://open.feishu.cn/app");
+    expect(feishuDirectLinks.map((link) => link.url)).toContain("https://open.larksuite.com/app");
+    expect(feishuDirectLinks.map((link) => link.url)).toContain("https://docs.openclaw.ai/channels/feishu");
   });
 });

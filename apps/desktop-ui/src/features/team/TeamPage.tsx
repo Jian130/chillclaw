@@ -1,161 +1,346 @@
-import { ArrowRight, MessageSquare, Plus, Search, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowRight, MessageSquare, Plus, Trash2, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import type { SaveTeamRequest, TeamDetail } from "@slackclaw/contracts";
 
-import { useWorkspace } from "../../app/providers/WorkspaceProvider.js";
+import { useAITeam } from "../../app/providers/AITeamProvider.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
+import { useOverview } from "../../app/providers/OverviewProvider.js";
+import { runTask } from "../../shared/api/client.js";
 import { t } from "../../shared/i18n/messages.js";
 import { Badge } from "../../shared/ui/Badge.js";
 import { Button } from "../../shared/ui/Button.js";
 import { Card, CardContent } from "../../shared/ui/Card.js";
-import { Input } from "../../shared/ui/Field.js";
+import { Dialog } from "../../shared/ui/Dialog.js";
+import { FieldLabel, Input, Textarea } from "../../shared/ui/Field.js";
 import { PageHeader } from "../../shared/ui/PageHeader.js";
+import { EmptyState } from "../../shared/ui/EmptyState.js";
+
+function TeamDialog(props: {
+  open: boolean;
+  team?: TeamDetail;
+  onClose: () => void;
+}) {
+  const { overview, saveTeam } = useAITeam();
+  const [name, setName] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    if (!props.open) {
+      return;
+    }
+
+    setName(props.team?.name ?? "");
+    setPurpose(props.team?.purpose ?? "");
+    setMemberIds(props.team?.memberIds ?? []);
+    setError(undefined);
+  }, [props.open, props.team]);
+
+  function toggle(memberId: string) {
+    setMemberIds((current) => (current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId]));
+  }
+
+  async function handleSave() {
+    setBusy(true);
+    setError(undefined);
+
+    try {
+      const request: SaveTeamRequest = {
+        name,
+        purpose,
+        memberIds
+      };
+      await saveTeam(props.team?.id, request);
+      props.onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "SlackClaw could not save this AI team.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={props.open}
+      onClose={props.onClose}
+      title={props.team ? "Edit AI Team" : "Create AI Team"}
+      description="Group AI members into reusable teams for routing and oversight."
+      wide
+    >
+      <div className="panel-stack">
+        {error ? <p className="card__description" style={{ color: "var(--danger)" }}>{error}</p> : null}
+        <div className="field-grid">
+          <div>
+            <FieldLabel htmlFor="team-name">Team name</FieldLabel>
+            <Input id="team-name" value={name} onChange={(event) => setName(event.target.value)} />
+          </div>
+          <div>
+            <FieldLabel htmlFor="team-purpose">Purpose</FieldLabel>
+            <Textarea id="team-purpose" rows={3} value={purpose} onChange={(event) => setPurpose(event.target.value)} />
+          </div>
+        </div>
+
+        <div>
+          <FieldLabel>Members</FieldLabel>
+          <div className="skill-chip-grid">
+            {overview?.members.map((member) => (
+              <button
+                key={member.id}
+                className={`badge ${memberIds.includes(member.id) ? "badge--success" : "badge--neutral"}`}
+                onClick={() => toggle(member.id)}
+                type="button"
+              >
+                {member.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="actions-row" style={{ justifyContent: "flex-end" }}>
+          <Button variant="outline" onClick={props.onClose}>Cancel</Button>
+          <Button onClick={handleSave} disabled={busy}>
+            {busy ? "Saving..." : "Save Team"}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
 
 export default function TeamPage() {
   const { locale } = useLocale();
   const copy = t(locale).team;
-  const { state } = useWorkspace();
-  const [search, setSearch] = useState("");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>();
-  const [activeTab, setActiveTab] = useState<"chat" | "tasks">("chat");
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const { overview: appOverview } = useOverview();
+  const { overview, loading, error, removeTeam } = useAITeam();
+  const [selectedTeamId, setSelectedTeamId] = useState<string>();
+  const [selectedMemberId, setSelectedMemberId] = useState<string>();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingTeam, setEditingTeam] = useState<TeamDetail>();
   const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
 
-  const selectedEmployee = state.employees.find((employee) => employee.id === selectedEmployeeId) ?? state.employees[0];
-  const filteredEmployees = useMemo(
-    () =>
-      state.employees.filter(
-        (employee) =>
-          employee.name.toLowerCase().includes(search.toLowerCase()) ||
-          employee.title.toLowerCase().includes(search.toLowerCase())
-      ),
-    [search, state.employees]
+  const teams = overview?.teams ?? [];
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? teams[0];
+  const teamMembers = useMemo(
+    () => overview?.members.filter((member) => selectedTeam?.memberIds.includes(member.id)) ?? [],
+    [overview?.members, selectedTeam?.memberIds]
   );
+  const selectedMember = teamMembers.find((member) => member.id === selectedMemberId) ?? teamMembers[0];
 
-  function sendMessage() {
-    if (!draft.trim() || !selectedEmployee) return;
-    setMessages((current) => [
-      ...current,
-      { role: "user", content: draft.trim() },
-      { role: "assistant", content: `Got it. ${selectedEmployee.name} will handle: ${draft.trim()}` }
-    ]);
+  async function handleDeleteTeam(team: TeamDetail) {
+    if (!window.confirm(`Delete ${team.name}?`)) {
+      return;
+    }
+
+    await removeTeam(team.id);
+    setSelectedTeamId(undefined);
+  }
+
+  async function handleSend() {
+    if (!draft.trim() || !selectedMember) {
+      return;
+    }
+
+    setBusy(true);
+    const prompt = draft.trim();
+    setMessages((current) => [...current, { role: "user", content: prompt }]);
     setDraft("");
+
+    try {
+      const result = await runTask({
+        prompt,
+        profileId: appOverview?.firstRun.selectedProfileId ?? "email-admin",
+        memberId: selectedMember.id
+      });
+
+      setMessages((current) => [...current, { role: "assistant", content: result.output }]);
+    } catch (taskError) {
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: taskError instanceof Error ? taskError.message : "SlackClaw could not reach the selected AI member."
+        }
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading && !overview) {
+    return <div className="panel-stack"><PageHeader title={copy.title} subtitle={copy.subtitle} /></div>;
+  }
+
+  if (error && !overview) {
+    return (
+      <EmptyState
+        title="SlackClaw could not load AI teams"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
+    );
   }
 
   return (
     <div className="panel-stack">
-      <PageHeader title={copy.title} subtitle={copy.subtitle} />
+      <PageHeader
+        title={copy.title}
+        subtitle={copy.subtitle}
+        actions={
+          <Button
+            onClick={() => {
+              setEditingTeam(undefined);
+              setDialogOpen(true);
+            }}
+          >
+            <Plus size={14} />
+            Create AI Team
+          </Button>
+        }
+      />
 
       <Card>
         <CardContent className="actions-row" style={{ justifyContent: "space-between" }}>
           <div>
             <strong>{copy.vision}</strong>
-            <p className="card__description">{state.teamVision}</p>
+            <p className="card__description">{overview?.teamVision}</p>
           </div>
-          <Button variant="outline">
-            <Sparkles size={14} />
-            Edit Vision
-          </Button>
+          <Badge tone="info">{teams.length} teams</Badge>
         </CardContent>
       </Card>
 
-      <div className="actions-row">
-        <label className="language-selector" style={{ minWidth: 320 }}>
-          <Search size={16} />
-          <Input onChange={(event) => setSearch(event.target.value)} placeholder="Search employees by name or role..." value={search} />
-        </label>
-        <Button>
-          <Plus size={14} />
-          {copy.createEmployee}
-        </Button>
-      </div>
-
       <div className="split-layout">
         <div className="employee-grid">
-          {filteredEmployees.map((employee) => (
-            <button className="employee-card" key={employee.id} onClick={() => setSelectedEmployeeId(employee.id)} type="button">
-              <div className="employee-card__avatar" style={{ background: employee.avatarAccent }}>{employee.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</div>
+          {teams.map((team) => (
+            <button className="employee-card" key={team.id} onClick={() => setSelectedTeamId(team.id)} type="button">
+              <div className="employee-card__avatar" style={{ background: "var(--avatar-2)" }}>
+                {team.name.slice(0, 2).toUpperCase()}
+              </div>
               <div className="employee-details">
-                <strong>{employee.name}</strong>
-                <span className="card__description">{employee.title}</span>
+                <strong>{team.name}</strong>
+                <span className="card__description">{team.purpose || "No team brief yet."}</span>
                 <div className="actions-row">
-                  <Badge tone={employee.status === "ready" ? "success" : employee.status === "busy" ? "info" : "neutral"}>
-                    {employee.status}
-                  </Badge>
-                  {employee.activeTasks ? <Badge tone="neutral">{employee.activeTasks} active</Badge> : null}
-                </div>
-                <div className="skill-chip-grid">
-                  {employee.skills.slice(0, 3).map((skill) => (
-                    <Badge key={skill} tone="neutral">
-                      {skill}
-                    </Badge>
-                  ))}
+                  <Badge tone="success">{team.memberCount} members</Badge>
                 </div>
                 <div className="actions-row" style={{ color: "var(--primary)" }}>
-                  <MessageSquare size={14} />
-                  <span>Chat & Assign Tasks</span>
+                  <Users size={14} />
+                  <span>Manage roster</span>
                   <ArrowRight size={14} />
                 </div>
               </div>
             </button>
           ))}
+          {teams.length === 0 ? (
+            <EmptyState
+              title="No AI teams yet"
+              description="Create a team to organize members and route work to a specific specialist."
+              actionLabel="Create AI Team"
+              onAction={() => setDialogOpen(true)}
+            />
+          ) : null}
         </div>
 
         <Card>
           <CardContent className="panel-stack">
-            <div className="actions-row" style={{ justifyContent: "space-between" }}>
-              <div>
-                <strong>{selectedEmployee?.name}</strong>
-                <p className="card__description">{selectedEmployee?.title}</p>
-              </div>
-              <div className="actions-row">
-                <Button onClick={() => setActiveTab("chat")} variant={activeTab === "chat" ? "primary" : "outline"}>
-                  {copy.chat}
-                </Button>
-                <Button onClick={() => setActiveTab("tasks")} variant={activeTab === "tasks" ? "primary" : "outline"}>
-                  {copy.tasks}
-                </Button>
-              </div>
-            </div>
+            {selectedTeam ? (
+              <>
+                <div className="actions-row" style={{ justifyContent: "space-between" }}>
+                  <div>
+                    <strong>{selectedTeam.name}</strong>
+                    <p className="card__description">{selectedTeam.purpose || "No team brief yet."}</p>
+                  </div>
+                  <div className="actions-row">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingTeam(selectedTeam);
+                        setDialogOpen(true);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button variant="outline" onClick={() => void handleDeleteTeam(selectedTeam)}>
+                      <Trash2 size={14} />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
 
-            {activeTab === "chat" ? (
-              <div className="panel-stack">
-                <div className="message-list">
-                  {messages.length ? (
-                    messages.map((message, index) => (
-                      <div className={`message-bubble message-bubble--${message.role === "user" ? "user" : "assistant"}`} key={`${message.role}-${index}`}>
-                        {message.content}
+                <Card>
+                  <CardContent className="panel-stack">
+                    <strong>Assigned members</strong>
+                    <div className="employee-grid">
+                      {teamMembers.map((member) => (
+                        <button
+                          className="employee-card"
+                          key={member.id}
+                          onClick={() => setSelectedMemberId(member.id)}
+                          type="button"
+                        >
+                          <div className="employee-card__avatar" style={{ background: member.avatar.accent }}>
+                            {member.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div className="employee-details">
+                            <strong>{member.name}</strong>
+                            <span className="card__description">{member.jobTitle}</span>
+                            {member.brain ? <Badge tone="neutral">{member.brain.label}</Badge> : null}
+                          </div>
+                        </button>
+                      ))}
+                      {teamMembers.length === 0 ? <p className="card__description">Add members to this team from Edit.</p> : null}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="panel-stack">
+                    <div className="actions-row" style={{ justifyContent: "space-between" }}>
+                      <div>
+                        <strong>{selectedMember?.name ?? "Select a team member"}</strong>
+                        <p className="card__description">{selectedMember?.jobTitle ?? "Choose a team member to route work."}</p>
                       </div>
-                    ))
-                  ) : (
-                    <p className="card__description">Start the conversation with a quick assignment.</p>
-                  )}
-                </div>
-                <div className="actions-row">
-                  <Input onChange={(event) => setDraft(event.target.value)} placeholder={`Message ${selectedEmployee?.name ?? "employee"}...`} value={draft} />
-                  <Button onClick={sendMessage}>Send</Button>
-                </div>
-              </div>
+                      {selectedMember ? (
+                        <Badge tone="info">{selectedMember.brain?.label ?? "Brain pending"}</Badge>
+                      ) : null}
+                    </div>
+                    <div className="message-list">
+                      {messages.length > 0 ? messages.map((message, index) => (
+                        <div
+                          className={`message-bubble message-bubble--${message.role === "user" ? "user" : "assistant"}`}
+                          key={`${message.role}-${index}`}
+                        >
+                          {message.content}
+                        </div>
+                      )) : (
+                        <p className="card__description">Send a task to a selected team member. SlackClaw will route it through that member’s OpenClaw agent.</p>
+                      )}
+                    </div>
+                    <div className="actions-row">
+                      <Input
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        placeholder={selectedMember ? `Ask ${selectedMember.name} to handle something...` : "Select a team member first"}
+                      />
+                      <Button onClick={() => void handleSend()} disabled={busy || !selectedMember}>
+                        <MessageSquare size={14} />
+                        {busy ? "Sending..." : copy.chat}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
             ) : (
-              <div className="panel-stack">
-                <div className="check-row">
-                  <div className="check-row__meta">
-                    <strong>Current tasks</strong>
-                    <p>{selectedEmployee?.activeTasks ?? 0} tasks in progress</p>
-                  </div>
-                  <Badge tone="info">{selectedEmployee?.activeTasks ?? 0}</Badge>
-                </div>
-                <div className="check-row">
-                  <div className="check-row__meta">
-                    <strong>Assigned model</strong>
-                    <p>{selectedEmployee?.model}</p>
-                  </div>
-                  <Badge tone="neutral">Brain</Badge>
-                </div>
-              </div>
+              <p className="card__description">Select a team to manage its roster and route work to a specific AI member.</p>
             )}
           </CardContent>
         </Card>
       </div>
+
+      <TeamDialog open={dialogOpen} team={editingTeam} onClose={() => setDialogOpen(false)} />
     </div>
   );
 }

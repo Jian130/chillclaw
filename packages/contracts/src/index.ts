@@ -70,6 +70,8 @@ export interface EngineTaskRequest {
   prompt: string;
   profileId: string;
   templateId?: string;
+  memberId?: string;
+  memberAgentId?: string;
 }
 
 export interface EngineTaskStep {
@@ -197,6 +199,8 @@ export interface DeploymentTargetStatus {
   updateAvailable: boolean;
   summary: string;
   updateSummary?: string;
+  requirements?: string[];
+  requirementsSourceUrl?: string;
 }
 
 export interface DeploymentTargetsResponse {
@@ -244,6 +248,384 @@ export interface ChannelSetupOverview {
   gatewayStarted: boolean;
   gatewaySummary: string;
 }
+
+export type ChannelFieldKind = "text" | "password" | "textarea" | "select";
+
+export interface ChannelFieldOption {
+  value: string;
+  label: string;
+}
+
+export interface ChannelFieldDefinition {
+  id: string;
+  label: string;
+  required: boolean;
+  kind?: ChannelFieldKind;
+  secret?: boolean;
+  placeholder?: string;
+  helpText?: string;
+  options?: ChannelFieldOption[];
+}
+
+export interface ChannelCapability {
+  id: SupportedChannelId;
+  label: string;
+  description: string;
+  officialSupport: boolean;
+  iconKey: string;
+  docsUrl?: string;
+  fieldDefs: ChannelFieldDefinition[];
+  supportsEdit: boolean;
+  supportsRemove: boolean;
+  supportsPairing: boolean;
+  supportsLogin: boolean;
+  guidedSetupKind?: "feishu" | "wechat";
+}
+
+export interface ChannelFieldSummary {
+  label: string;
+  value: string;
+}
+
+export interface ConfiguredChannelEntry {
+  id: string;
+  channelId: SupportedChannelId;
+  label: string;
+  status: ChannelSetupState["status"];
+  summary: string;
+  detail: string;
+  maskedConfigSummary: ChannelFieldSummary[];
+  editableValues: Record<string, string>;
+  pairingRequired: boolean;
+  lastUpdatedAt?: string;
+}
+
+export interface ChannelSession {
+  id: string;
+  channelId: SupportedChannelId;
+  entryId?: string;
+  status: "running" | "awaiting-input" | "completed" | "failed";
+  message: string;
+  logs: string[];
+  launchUrl?: string;
+  inputPrompt?: string;
+}
+
+export interface ChannelConfigOverview {
+  baseOnboardingCompleted: boolean;
+  capabilities: ChannelCapability[];
+  entries: ConfiguredChannelEntry[];
+  activeSession?: ChannelSession;
+  gatewaySummary: string;
+}
+
+export interface BrainAssignment {
+  entryId: string;
+  label: string;
+  providerId: string;
+  modelKey: string;
+}
+
+export interface MemberAvatar {
+  presetId: string;
+  accent: string;
+  emoji: string;
+  theme?: string;
+}
+
+export interface MemberCapabilitySettings {
+  memoryEnabled: boolean;
+  contextWindow: number;
+}
+
+export interface KnowledgePack {
+  id: string;
+  label: string;
+  description: string;
+  content: string;
+}
+
+export interface SkillOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface SkillRequirementSummary {
+  bins: string[];
+  anyBins: string[];
+  env: string[];
+  config: string[];
+  os: string[];
+}
+
+export type InstalledSkillSource = "bundled" | "workspace" | "extra" | "clawhub" | "custom";
+export type SkillManagerKind = "openclaw" | "clawhub" | "slackclaw-custom";
+
+export interface InstalledSkillEntry {
+  id: string;
+  slug?: string;
+  name: string;
+  description: string;
+  source: InstalledSkillSource;
+  bundled: boolean;
+  eligible: boolean;
+  disabled: boolean;
+  blockedByAllowlist: boolean;
+  readiness: "ready" | "missing" | "disabled" | "blocked";
+  missing: SkillRequirementSummary;
+  homepage?: string;
+  version?: string;
+  managedBy: SkillManagerKind;
+  editable: boolean;
+  removable: boolean;
+  updatable: boolean;
+}
+
+export interface InstalledSkillDetail extends InstalledSkillEntry {
+  filePath?: string;
+  baseDir?: string;
+  contentPreview?: string;
+}
+
+export interface SkillMarketplaceEntry {
+  slug: string;
+  name: string;
+  summary: string;
+  latestVersion?: string;
+  updatedLabel?: string;
+  ownerHandle?: string;
+  downloads?: number;
+  stars?: number;
+  installed: boolean;
+  curated: boolean;
+}
+
+export interface SkillMarketplaceDetail extends SkillMarketplaceEntry {
+  ownerDisplayName?: string;
+  ownerImageUrl?: string;
+  changelog?: string;
+  license?: string;
+  installsCurrent?: number;
+  installsAllTime?: number;
+  versions?: number;
+  filePreview?: string;
+  homepage?: string;
+}
+
+export interface SkillReadinessSummary {
+  total: number;
+  eligible: number;
+  disabled: number;
+  blocked: number;
+  missing: number;
+  warnings: string[];
+  summary: string;
+}
+
+export interface SkillCatalogOverview {
+  managedSkillsDir?: string;
+  workspaceDir?: string;
+  marketplaceAvailable: boolean;
+  marketplaceSummary: string;
+  installedSkills: InstalledSkillEntry[];
+  readiness: SkillReadinessSummary;
+  marketplacePreview: SkillMarketplaceEntry[];
+}
+
+export interface MemberBindingSummary {
+  id: string;
+  target: string;
+}
+
+export interface AIMemberSummary {
+  id: string;
+  agentId: string;
+  source: "slackclaw" | "detected";
+  hasManagedMetadata: boolean;
+  name: string;
+  jobTitle: string;
+  status: "ready" | "busy" | "idle";
+  currentStatus: string;
+  activeTaskCount: number;
+  avatar: MemberAvatar;
+  brain?: BrainAssignment;
+  teamIds: string[];
+  bindingCount: number;
+  bindings: MemberBindingSummary[];
+  lastUpdatedAt: string;
+}
+
+export interface AIMemberDetail extends AIMemberSummary {
+  personality: string;
+  soul: string;
+  workStyles: string[];
+  skillIds: string[];
+  knowledgePackIds: string[];
+  capabilitySettings: MemberCapabilitySettings;
+  agentDir?: string;
+  workspaceDir?: string;
+}
+
+export interface TeamSummary {
+  id: string;
+  name: string;
+  purpose: string;
+  memberIds: string[];
+  memberCount: number;
+  displayOrder?: number;
+  updatedAt: string;
+}
+
+export interface TeamDetail extends TeamSummary {}
+
+export interface AITeamActivityItem {
+  id: string;
+  memberId?: string;
+  memberName?: string;
+  action: string;
+  description: string;
+  timestamp: string;
+  tone: "completed" | "started" | "generated" | "updated" | "assigned";
+}
+
+export interface AITeamOverview {
+  teamVision: string;
+  members: AIMemberDetail[];
+  teams: TeamDetail[];
+  activity: AITeamActivityItem[];
+  availableBrains: SavedModelEntry[];
+  knowledgePacks: KnowledgePack[];
+  skillOptions: SkillOption[];
+}
+
+export interface MemberBindingsResponse {
+  memberId: string;
+  bindings: MemberBindingSummary[];
+}
+
+export type ChatThreadStatus = "idle" | "sending" | "thinking" | "streaming" | "aborting" | "error";
+export type ChatHistoryStatus = "ready" | "unavailable";
+export type ChatMessageStatus = "pending" | "sent" | "streaming" | "failed";
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+  timestamp?: string;
+  provider?: string;
+  model?: string;
+  clientMessageId?: string;
+  status?: ChatMessageStatus;
+  interrupted?: boolean;
+  pending?: boolean;
+  error?: string;
+}
+
+export interface ChatComposerState {
+  status: ChatThreadStatus;
+  canSend: boolean;
+  canAbort: boolean;
+  activityLabel?: string;
+  error?: string;
+}
+
+export interface ChatThreadSummary {
+  id: string;
+  memberId: string;
+  agentId: string;
+  sessionKey: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  lastPreview?: string;
+  lastMessageAt?: string;
+  unreadCount: number;
+  activeRunState?: Exclude<ChatThreadStatus, "idle">;
+  historyStatus: ChatHistoryStatus;
+  composerState: ChatComposerState;
+}
+
+export interface ChatThreadDetail extends ChatThreadSummary {
+  messages: ChatMessage[];
+  historyError?: string;
+}
+
+export interface ChatOverview {
+  threads: ChatThreadSummary[];
+}
+
+export interface CreateChatThreadRequest {
+  memberId: string;
+  mode?: "new" | "reuse-recent";
+}
+
+export interface SendChatMessageRequest {
+  message: string;
+  clientMessageId?: string;
+}
+
+export interface AbortChatRequest {}
+
+export type ChatStreamEvent =
+  | {
+      type: "thread-created";
+      thread: ChatThreadSummary;
+    }
+  | {
+      type: "history-loaded";
+      threadId: string;
+      detail: ChatThreadDetail;
+    }
+  | {
+      type: "message-created";
+      threadId: string;
+      message: ChatMessage;
+    }
+  | {
+      type: "run-started";
+      threadId: string;
+      message: ChatMessage;
+      activityLabel?: string;
+    }
+  | {
+      type: "assistant-thinking";
+      threadId: string;
+      activityLabel?: string;
+    }
+  | {
+      type: "assistant-tool-status";
+      threadId: string;
+      activityLabel: string;
+    }
+  | {
+      type: "assistant-delta";
+      threadId: string;
+      message: ChatMessage;
+      activityLabel?: string;
+    }
+  | {
+      type: "assistant-completed";
+      threadId: string;
+      detail: ChatThreadDetail;
+    }
+  | {
+      type: "assistant-aborted";
+      threadId: string;
+      detail: ChatThreadDetail;
+      activityLabel?: string;
+    }
+  | {
+      type: "assistant-failed";
+      threadId: string;
+      error: string;
+      detail?: ChatThreadDetail;
+      activityLabel?: string;
+    }
+  | {
+      type: "thread-updated";
+      thread: ChatThreadSummary;
+    };
 
 export interface ProductOverview {
   appName: string;
@@ -375,6 +757,13 @@ export interface EngineActionResponse {
   engineStatus: EngineStatus;
 }
 
+export interface GatewayActionResponse {
+  action: "restart-gateway";
+  status: "completed" | "failed";
+  message: string;
+  engineStatus: EngineStatus;
+}
+
 export interface TelegramSetupRequest {
   token: string;
   accountName?: string;
@@ -398,6 +787,106 @@ export interface FeishuSetupRequest {
   appSecret: string;
   domain?: string;
   botName?: string;
+}
+
+export interface SaveChannelEntryRequest {
+  channelId: SupportedChannelId;
+  entryId?: string;
+  values: Record<string, string>;
+  action?: "save" | "prepare" | "login" | "approve-pairing";
+}
+
+export interface RemoveChannelEntryRequest {
+  entryId: string;
+  channelId?: SupportedChannelId;
+  values?: Record<string, string>;
+}
+
+export interface ChannelSessionInputRequest {
+  value: string;
+}
+
+export interface ChannelConfigActionResponse {
+  status: "completed" | "failed" | "interactive";
+  message: string;
+  channelConfig: ChannelConfigOverview;
+  session?: ChannelSession;
+}
+
+export interface ChannelSessionResponse {
+  session: ChannelSession;
+  channelConfig: ChannelConfigOverview;
+}
+
+export interface SaveAIMemberRequest {
+  name: string;
+  jobTitle: string;
+  avatar: MemberAvatar;
+  brainEntryId: string;
+  personality: string;
+  soul: string;
+  workStyles: string[];
+  skillIds: string[];
+  knowledgePackIds: string[];
+  capabilitySettings: MemberCapabilitySettings;
+}
+
+export interface SaveTeamRequest {
+  name: string;
+  purpose: string;
+  memberIds: string[];
+  displayOrder?: number;
+}
+
+export interface BindAIMemberChannelRequest {
+  binding: string;
+}
+
+export interface DeleteAIMemberRequest {
+  deleteMode: "full" | "keep-workspace";
+}
+
+export interface SaveCustomSkillRequest {
+  name: string;
+  slug?: string;
+  description: string;
+  instructions: string;
+  homepage?: string;
+}
+
+export interface InstallSkillRequest {
+  slug: string;
+  version?: string;
+}
+
+export interface UpdateSkillRequest {
+  action: "update" | "reinstall" | "edit-custom";
+  version?: string;
+  name?: string;
+  description?: string;
+  instructions?: string;
+  homepage?: string;
+}
+
+export interface RemoveSkillRequest {}
+
+export interface AITeamActionResponse {
+  status: "completed" | "failed";
+  message: string;
+  overview: AITeamOverview;
+}
+
+export interface ChatActionResponse {
+  status: "completed" | "failed";
+  message: string;
+  overview: ChatOverview;
+  thread?: ChatThreadDetail;
+}
+
+export interface SkillCatalogActionResponse {
+  status: "completed" | "failed";
+  message: string;
+  skillConfig: SkillCatalogOverview;
 }
 
 export interface ChannelActionResponse {
@@ -509,9 +998,9 @@ export function createDefaultProductOverview(): ProductOverview {
       desiredVersion: "2026.3.7",
       installSource: "npm-local",
       prerequisites: [
-        "macOS 14 or newer",
-        "Permission to access local documents you choose",
-        "Roughly 2 GB of free disk space",
+        "macOS",
+        "Node.js 22 or newer",
+        "pnpm only if you build OpenClaw from source",
         "Ability to install or reuse the pinned OpenClaw CLI"
       ]
     },

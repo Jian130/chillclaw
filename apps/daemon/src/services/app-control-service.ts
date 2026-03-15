@@ -10,6 +10,7 @@ import {
   getLaunchAgentLabel,
   getLaunchAgentPlistPath
 } from "../runtime-paths.js";
+import { errorToLogDetails, writeErrorLog } from "./logger.js";
 
 function scheduleExit(serverClose: () => void, delayMs = 400): void {
   setTimeout(() => {
@@ -19,16 +20,31 @@ function scheduleExit(serverClose: () => void, delayMs = 400): void {
 }
 
 async function spawnDetachedShell(scriptPath: string): Promise<void> {
-  const child = spawn("/bin/sh", [scriptPath], {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      NO_COLOR: "1"
-    }
-  });
+  try {
+    const child = spawn("/bin/sh", [scriptPath], {
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        NO_COLOR: "1"
+      }
+    });
 
-  child.unref();
+    child.on("error", (error) => {
+      void writeErrorLog("SlackClaw could not start a detached app control script.", {
+        scriptPath,
+        error: errorToLogDetails(error)
+      });
+    });
+
+    child.unref();
+  } catch (error) {
+    await writeErrorLog("SlackClaw could not spawn a detached app control script.", {
+      scriptPath,
+      error: errorToLogDetails(error)
+    });
+    throw error;
+  }
 }
 
 export class AppControlService {

@@ -64,4 +64,6 @@ test("every compatibility capability maps to a source area and file list", () =>
   assert.equal(Object.keys(openClawCompatibilitySources).length > 10, true);
   assert.equal(openClawCompatibilitySources["remove-model"].area, "Config / Models");
   assert.equal(openClawCompatibilitySources["remove-channel"].filePaths.includes("apps/daemon/src/server.ts"), true);
+  assert.equal(openClawCompatibilitySources["create-chat-thread"].area, "Chat");
+  assert.equal(openClawCompatibilitySources["send-chat-message"].filePaths.includes("apps/daemon/src/services/chat-service.ts"), true);
 });

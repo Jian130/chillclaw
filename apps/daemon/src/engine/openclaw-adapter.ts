@@ -2,14 +2,32 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, delimiter, dirname, resolve } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 
 import type {
+  ChatMessage,
+  ChatThreadDetail,
+  BindAIMemberChannelRequest,
+  BrainAssignment,
+  SendChatMessageRequest,
+  AbortChatRequest,
+  DeleteAIMemberRequest,
+  MemberBindingSummary,
+  ChannelSession,
+  ChannelSessionInputRequest,
+  ConfiguredChannelEntry,
   DeploymentTargetActionResponse,
   DeploymentTargetStatus,
   DeploymentTargetsResponse,
   EngineActionResponse,
+  GatewayActionResponse,
+  InstalledSkillDetail,
+  InstallSkillRequest,
+  RemoveChannelEntryRequest,
+  RemoveSkillRequest,
+  SaveChannelEntryRequest,
+  SaveCustomSkillRequest,
   ChannelSetupState,
   EngineCapabilities,
   EngineInstallSpec,
@@ -26,6 +44,9 @@ import type {
   SaveModelEntryRequest,
   SavedModelEntry,
   SetDefaultModelEntryRequest,
+  SkillMarketplaceDetail,
+  SkillMarketplaceEntry,
+  SkillReadinessSummary,
   EngineStatus,
   EngineTaskRequest,
   EngineTaskResult,
@@ -36,10 +57,20 @@ import type {
   RecoveryRunResponse,
   FeishuSetupRequest,
   TelegramSetupRequest,
+  UpdateSkillRequest,
   WechatSetupRequest
 } from "@slackclaw/contracts";
+import { writeMemberWorkspaceFiles } from "./member-workspace.js";
+import { resolveReadableMemberAgentId } from "./member-agent-id.js";
 
-import type { EngineAdapter } from "./adapter.js";
+import type { EngineAdapter, EngineChatLiveEvent } from "./adapter.js";
+import type {
+  AIMemberRuntimeCandidate,
+  AIMemberRuntimeRequest,
+  AIMemberRuntimeState,
+  SkillRuntimeCatalog,
+  SkillRuntimeEntry
+} from "./adapter.js";
 import { getAppRootDir, getDataDir, getManagedOpenClawBinPath, getManagedOpenClawDir } from "../runtime-paths.js";
 import { errorToLogDetails, writeErrorLog, writeInfoLog } from "../services/logger.js";
 
@@ -118,6 +149,38 @@ interface OpenClawGatewayStatusJson {
   };
 }
 
+interface OpenClawGatewaySocketEnvelope {
+  type?: string;
+  event?: string;
+  id?: string;
+  ok?: boolean;
+  payload?: Record<string, unknown>;
+  error?: string | { message?: string };
+}
+
+interface OpenClawGatewayConnectChallengePayload {
+  nonce?: string;
+}
+
+interface OpenClawGatewayChatEventPayload {
+  sessionKey?: string;
+  runId?: string;
+  state?: "delta" | "final" | "aborted" | "error";
+  message?: OpenClawChatMessageJson | string;
+  errorMessage?: string;
+}
+
+interface OpenClawGatewayAgentEventPayload {
+  runId?: string;
+  stream?: string;
+  data?: {
+    phase?: string;
+    name?: string;
+    isError?: boolean;
+    error?: string;
+  };
+}
+
 interface OpenClawUpdateStatusJson {
   update?: {
     root?: string;
@@ -151,9 +214,70 @@ interface OpenClawAgentJson {
   message?: string;
 }
 
+interface OpenClawChatHistoryJson {
+  sessionKey?: string;
+  sessionId?: string;
+  messages?: OpenClawChatMessageJson[];
+}
+
+interface OpenClawChatMessageJson {
+  role?: string;
+  content?: Array<{
+    type?: string;
+    text?: string;
+    thinking?: string;
+  }>;
+  timestamp?: number;
+  provider?: string;
+  model?: string;
+  error?: string;
+  errorMessage?: string;
+  stopReason?: string;
+}
+
 interface OpenClawModelListJson {
   count?: number;
   models?: ModelCatalogEntry[];
+}
+
+interface OpenClawSkillsListJson {
+  workspaceDir?: string;
+  managedSkillsDir?: string;
+  skills?: Array<{
+    name?: string;
+    description?: string;
+    emoji?: string;
+    eligible?: boolean;
+    disabled?: boolean;
+    blockedByAllowlist?: boolean;
+    source?: string;
+    bundled?: boolean;
+    homepage?: string;
+    missing?: OpenClawSkillMissing;
+  }>;
+}
+
+interface OpenClawSkillMissing {
+  bins?: string[];
+  anyBins?: string[];
+  env?: string[];
+  config?: string[];
+  os?: string[];
+}
+
+interface OpenClawSkillInfoJson {
+  name?: string;
+  description?: string;
+  source?: string;
+  bundled?: boolean;
+  filePath?: string;
+  baseDir?: string;
+  skillKey?: string;
+  homepage?: string;
+  disabled?: boolean;
+  blockedByAllowlist?: boolean;
+  eligible?: boolean;
+  missing?: OpenClawSkillMissing;
 }
 
 interface OpenClawModelStatusJson {
@@ -203,6 +327,90 @@ interface OpenClawPluginListJson {
   }>;
 }
 
+interface OpenClawChannelsListJson {
+  chat?: Record<string, string[]>;
+}
+
+interface OpenClawChannelsStatusJson {
+  channelOrder?: string[];
+  channelLabels?: Record<string, string>;
+  channels?: Record<
+    string,
+    {
+      configured?: boolean;
+      running?: boolean;
+      linked?: boolean;
+      connected?: boolean;
+      mode?: string;
+      probe?: {
+        ok?: boolean;
+        bot?: {
+          username?: string;
+        };
+      };
+      self?: {
+        e164?: string;
+      };
+      lastError?: string | null;
+    }
+  >;
+  channelAccounts?: Record<
+    string,
+    Array<{
+      accountId?: string;
+      configured?: boolean;
+      enabled?: boolean;
+      running?: boolean;
+      linked?: boolean;
+      connected?: boolean;
+      mode?: string;
+      tokenSource?: string;
+      probe?: {
+        ok?: boolean;
+        bot?: {
+          username?: string;
+        };
+      };
+      self?: {
+        e164?: string;
+      };
+      lastError?: string | null;
+    }>
+  >;
+}
+
+interface OpenClawAgentListEntry {
+  id?: string;
+  name?: string;
+  identityName?: string;
+  identityEmoji?: string;
+  workspace?: string;
+  agentDir?: string;
+  model?: string;
+  bindings?: number;
+  isDefault?: boolean;
+}
+
+export function isVisibleAIMemberAgentId(agentId: string | undefined): boolean {
+  const trimmed = agentId?.trim();
+
+  return Boolean(trimmed);
+}
+
+function isManagedModelAgentId(agentId: string | undefined): boolean {
+  const trimmed = agentId?.trim();
+  return Boolean(trimmed && trimmed.startsWith("slackclaw-model-"));
+}
+
+interface OpenClawAgentBindingJsonEntry {
+  id?: string;
+  bind?: string;
+  target?: string;
+  channel?: string;
+  account?: string;
+  route?: string;
+}
+
 interface OpenClawAdapterState {
   configuredProfileId?: string;
   installedAt?: string;
@@ -213,6 +421,11 @@ interface OpenClawAdapterState {
 }
 
 interface OpenClawConfigFileJson {
+  gateway?: {
+    auth?: {
+      token?: string;
+    };
+  };
   auth?: {
     profiles?: Record<string, { provider?: string; mode?: string; email?: string }>;
     order?: Record<string, string[]>;
@@ -246,6 +459,19 @@ const OPENCLAW_STATE_PATH = resolve(getDataDir(), "openclaw-state.json");
 const OPENCLAW_VERSION_PIN = "2026.3.7";
 const FEISHU_BUNDLED_SINCE = "2026.3.7";
 const OPENCLAW_MAIN_AGENT_ID = "main";
+const OPENCLAW_INSTALL_DOCS_URL = "https://docs.openclaw.ai/install";
+const OPENCLAW_MAC_DOCS_URL = "https://docs.openclaw.ai/mac/bun";
+const STANDARD_OPENCLAW_REQUIREMENTS = [
+  "macOS",
+  "Node.js 22 or newer",
+  "A global openclaw CLI install for local mode",
+  "pnpm only if you build OpenClaw from source"
+];
+const MANAGED_OPENCLAW_REQUIREMENTS = [
+  "macOS",
+  "Node.js 22 or newer",
+  "pnpm only if you build OpenClaw from source"
+];
 
 interface BootstrapResult {
   status: "reused-existing" | "would-install" | "would-reinstall" | "installed" | "reinstalled" | "failed";
@@ -311,6 +537,206 @@ interface PendingSavedModelEntryOperation {
 
 let whatsappLoginSession: LoginSessionState | undefined;
 const modelAuthSessions = new Map<string, RuntimeModelAuthSession>();
+
+const READ_CACHE_TTL_MS = {
+  engine: 1000,
+  models: 1000,
+  channels: 1000,
+  skills: 1000,
+  agents: 1000,
+  bindings: 1000
+} as const;
+
+type GatewayBridgeListener = (event: EngineChatLiveEvent) => void;
+
+interface GatewaySocketBridgeState {
+  listeners: Set<GatewayBridgeListener>;
+  socket?: {
+    close: () => void;
+    send: (value: string) => void;
+    readyState: number;
+    addEventListener?: (type: string, listener: (event: unknown) => void) => void;
+    removeEventListener?: (type: string, listener: (event: unknown) => void) => void;
+    onopen?: (event: unknown) => void;
+    onmessage?: (event: { data?: unknown }) => void;
+    onclose?: (event: { code?: number; reason?: string }) => void;
+    onerror?: (event: unknown) => void;
+  };
+  connectPromise?: Promise<void>;
+  reconnectTimer?: NodeJS.Timeout;
+  connectRequestId?: string;
+  intentionalClose?: boolean;
+  connected: boolean;
+}
+
+type ReadCacheEntry = {
+  expiresAt: number;
+  promise: Promise<unknown>;
+};
+
+type CommandResolutionCacheEntry = {
+  promise: Promise<string | undefined>;
+  value?: string | undefined;
+};
+
+type EngineReadSnapshot = {
+  installed: boolean;
+  command?: string;
+  cliVersion?: string;
+  statusJson?: OpenClawStatusJson;
+  gatewayJson?: OpenClawGatewayStatusJson;
+  updateJson?: OpenClawUpdateStatusJson;
+};
+
+const gatewaySocketBridgeState: GatewaySocketBridgeState = {
+  listeners: new Set(),
+  connected: false
+};
+
+export function buildGatewaySocketConnectParams(params: {
+  token: string;
+  platform?: string;
+  clientVersion?: string;
+}): Record<string, unknown> {
+  return {
+    minProtocol: 3,
+    maxProtocol: 3,
+    client: {
+      id: "gateway-client",
+      displayName: "SlackClaw daemon",
+      version: params.clientVersion ?? process.env.npm_package_version ?? "0.1.2",
+      platform: params.platform ?? process.platform,
+      mode: "backend"
+    },
+    caps: ["tool-events"],
+    auth: {
+      token: params.token
+    },
+    role: "operator",
+    scopes: ["operator.admin"]
+  };
+}
+
+type ModelReadSnapshot = {
+  allModels: ModelCatalogEntry[];
+  configuredModels: ModelCatalogEntry[];
+  status?: OpenClawModelStatusJson;
+  activeConfig?: OpenClawConfigFileJson;
+  configuredAuthProviders: Set<string>;
+  supplemental: ReturnType<typeof collectSupplementalModelRefs>;
+};
+
+type ChannelReadSnapshot = {
+  list?: OpenClawChannelsListJson;
+  status?: OpenClawChannelsStatusJson;
+};
+
+type SkillReadSnapshot = {
+  list?: OpenClawSkillsListJson;
+  warnings: string[];
+};
+
+const readCache = new Map<string, ReadCacheEntry>();
+const commandResolutionCache = new Map<string, CommandResolutionCacheEntry>();
+
+function invalidateReadCache(...prefixes: string[]): void {
+  if (prefixes.length === 0) {
+    readCache.clear();
+    return;
+  }
+
+  for (const key of [...readCache.keys()]) {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) {
+      readCache.delete(key);
+    }
+  }
+}
+
+function invalidateCommandResolutionCache(...keys: string[]): void {
+  if (keys.length === 0) {
+    commandResolutionCache.clear();
+    return;
+  }
+
+  for (const key of keys) {
+    commandResolutionCache.delete(key);
+  }
+}
+
+function invalidateResolvedCommandByPath(command: string): void {
+  for (const [key, entry] of commandResolutionCache.entries()) {
+    if (entry.value === command) {
+      commandResolutionCache.delete(key);
+    }
+  }
+}
+
+async function readThroughCache<T>(
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<T>,
+  options?: { fresh?: boolean }
+): Promise<T> {
+  const now = Date.now();
+  const existing = readCache.get(key);
+
+  if (!options?.fresh && existing && existing.expiresAt > now) {
+    return existing.promise as Promise<T>;
+  }
+
+  let promise: Promise<T>;
+  promise = Promise.resolve()
+    .then(loader)
+    .catch((error) => {
+      if (readCache.get(key)?.promise === promise) {
+        readCache.delete(key);
+      }
+      throw error;
+    });
+
+  readCache.set(key, {
+    expiresAt: now + ttlMs,
+    promise
+  });
+
+  return promise;
+}
+
+async function resolveStickyCommand(
+  key: string,
+  resolver: () => Promise<string | undefined>,
+  options?: { fresh?: boolean }
+): Promise<string | undefined> {
+  if (options?.fresh) {
+    commandResolutionCache.delete(key);
+  }
+
+  const existing = commandResolutionCache.get(key);
+  if (existing) {
+    return existing.promise;
+  }
+
+  const entry: CommandResolutionCacheEntry = {
+    promise: Promise.resolve()
+      .then(resolver)
+      .then((resolved) => {
+        const current = commandResolutionCache.get(key);
+        if (current) {
+          current.value = resolved;
+        }
+        return resolved;
+      })
+      .catch((error) => {
+        if (commandResolutionCache.get(key)?.promise === entry.promise) {
+          commandResolutionCache.delete(key);
+        }
+        throw error;
+      })
+  };
+
+  commandResolutionCache.set(key, entry);
+  return entry.promise;
+}
 
 const PROVIDER_DOCS_BASE = "https://docs.openclaw.ai/providers/docs";
 const MODEL_PROVIDER_CONCEPTS_URL = "https://docs.openclaw.ai/concepts/model-providers";
@@ -1143,11 +1569,57 @@ function createChannelState(
   };
 }
 
+function activeWhatsappSession(): ChannelSession | undefined {
+  if (!whatsappLoginSession) {
+    return undefined;
+  }
+
+  return {
+    id: "whatsapp:default:login",
+    channelId: "whatsapp",
+    entryId: "whatsapp:default",
+    status:
+      whatsappLoginSession.status === "in-progress"
+        ? "running"
+        : whatsappLoginSession.status === "awaiting-pairing"
+          ? "awaiting-input"
+          : whatsappLoginSession.status,
+    message:
+      whatsappLoginSession.status === "failed"
+        ? "WhatsApp login failed."
+        : whatsappLoginSession.status === "completed"
+          ? "WhatsApp login completed."
+          : whatsappLoginSession.status === "awaiting-pairing"
+            ? "WhatsApp login is waiting for pairing approval."
+            : "WhatsApp login is running.",
+    logs: whatsappLoginSession.logs.slice(-40),
+    inputPrompt:
+      whatsappLoginSession.status === "awaiting-pairing"
+        ? "Paste the WhatsApp pairing code to finish setup."
+        : undefined
+  };
+}
+
+function channelIdFromEntryId(entryId: string): "telegram" | "whatsapp" | "feishu" | "wechat" {
+  const [channelId] = entryId.split(":");
+
+  if (channelId === "telegram" || channelId === "whatsapp" || channelId === "feishu" || channelId === "wechat") {
+    return channelId;
+  }
+
+  throw new Error(`Unsupported channel entry id: ${entryId}`);
+}
+
 async function runOpenClaw(
   args: string[],
-  options?: { allowFailure?: boolean; envOverrides?: Record<string, string | undefined>; input?: string }
+  options?: {
+    allowFailure?: boolean;
+    envOverrides?: Record<string, string | undefined>;
+    input?: string;
+    freshCommandResolution?: boolean;
+  }
 ): Promise<CommandResult> {
-  const command = await resolveOpenClawCommand();
+  const command = await resolveOpenClawCommand({ fresh: options?.freshCommandResolution });
 
   if (!command) {
     if (options?.allowFailure) {
@@ -1162,6 +1634,30 @@ async function runOpenClaw(
   }
 
   return runCommand(command, args, options);
+}
+
+async function runGatewayCall<T>(
+  method: string,
+  params: Record<string, unknown>,
+  options?: { allowFailure?: boolean; expectFinal?: boolean; timeoutMs?: number }
+): Promise<{ result: CommandResult; payload?: T }> {
+  const args = ["gateway", "call", method, "--json", "--params", JSON.stringify(params)];
+
+  if (options?.expectFinal) {
+    args.push("--expect-final");
+  }
+
+  if (options?.timeoutMs) {
+    args.push("--timeout", String(options.timeoutMs));
+  }
+
+  const result = await runOpenClaw(args, { allowFailure: options?.allowFailure });
+  const payload = safeJsonPayloadParse<T>(result.stdout) ?? safeJsonPayloadParse<T>(result.stderr);
+
+  return {
+    result,
+    payload
+  };
 }
 
 async function runCommand(
@@ -1189,6 +1685,11 @@ async function runCommand(
     child.stdin.end(options?.input);
 
     child.on("error", (error) => {
+      const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code ?? "") : "";
+      if (errorCode === "ENOENT") {
+        invalidateResolvedCommandByPath(command);
+        invalidateReadCache(`command:version:${command}`, `command:update:${command}`, `command:status:${command}`);
+      }
       void writeErrorLog("Failed to spawn system command for SlackClaw.", {
         command,
         args,
@@ -1270,28 +1771,65 @@ async function probeCommand(command: string, args: string[] = ["--version"]): Pr
   }
 }
 
-async function resolveOpenClawCommand(): Promise<string | undefined> {
-  return (await resolveManagedOpenClawCommand()) ?? (await resolveSystemOpenClawCommand());
+async function resolveOpenClawCommand(options?: { fresh?: boolean }): Promise<string | undefined> {
+  return (await resolveManagedOpenClawCommand(options)) ?? (await resolveSystemOpenClawCommand(options));
 }
 
-async function resolveManagedOpenClawCommand(): Promise<string | undefined> {
-  const managedBinary = getManagedOpenClawBinPath();
-
-  if ((await fileExists(managedBinary)) && (await probeCommand(managedBinary))) {
-    return managedBinary;
-  }
-
-  return undefined;
+async function resolveClawHubCommand(options?: { fresh?: boolean }): Promise<string | undefined> {
+  return resolveStickyCommand(
+    "clawhub",
+    async () => {
+      return resolveCommand("clawhub", ["/opt/homebrew/bin/clawhub", "/usr/local/bin/clawhub"]);
+    },
+    options
+  );
 }
 
-async function resolveSystemOpenClawCommand(): Promise<string | undefined> {
-  const systemBinary = await resolveCommand("openclaw", ["/opt/homebrew/bin/openclaw", "/usr/local/bin/openclaw"]);
+async function resolveManagedOpenClawCommand(options?: { fresh?: boolean }): Promise<string | undefined> {
+  return resolveStickyCommand(
+    "openclaw:managed",
+    async () => {
+      const managedBinary = getManagedOpenClawBinPath();
 
-  if (systemBinary && (await probeCommand(systemBinary))) {
-    return systemBinary;
+      if (await fileExists(managedBinary)) {
+        return managedBinary;
+      }
+
+      return undefined;
+    },
+    options
+  );
+}
+
+async function resolveSystemOpenClawCommand(options?: { fresh?: boolean }): Promise<string | undefined> {
+  return resolveStickyCommand(
+    "openclaw:system",
+    async () => {
+      return resolveCommand("openclaw", ["/opt/homebrew/bin/openclaw", "/usr/local/bin/openclaw"]);
+    },
+    options
+  );
+}
+
+async function runClawHub(
+  args: string[],
+  options?: { allowFailure?: boolean; envOverrides?: Record<string, string | undefined> }
+): Promise<CommandResult> {
+  const command = await resolveClawHubCommand();
+
+  if (!command) {
+    if (options?.allowFailure) {
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "ClawHub CLI is not installed."
+      };
+    }
+
+    throw new Error("ClawHub CLI is not installed.");
   }
 
-  return undefined;
+  return runCommand(command, args, options);
 }
 
 async function resolveNodeCommand(): Promise<string | undefined> {
@@ -1390,97 +1928,172 @@ async function resolveBrewCommand(): Promise<string | undefined> {
 }
 
 async function readInstalledOpenClawVersion(): Promise<string | undefined> {
-  const result = await runOpenClaw(["--version"], { allowFailure: true }).catch(() => ({
-    code: 1,
-    stdout: "",
-    stderr: ""
-  }));
-
-  if (result.code !== 0 || !result.stdout) {
-    return undefined;
-  }
-
-  return result.stdout;
+  return readEngineSnapshot().then((snapshot) => snapshot.cliVersion);
 }
 
-async function readVersionFromCommand(command: string | undefined): Promise<string | undefined> {
+async function readVersionFromCommand(command: string | undefined, options?: { fresh?: boolean }): Promise<string | undefined> {
   if (!command) {
     return undefined;
   }
 
-  const result = await runCommand(command, ["--version"], { allowFailure: true }).catch(() => ({
-    code: 1,
-    stdout: "",
-    stderr: ""
-  }));
+  return readThroughCache(
+    `command:version:${command}`,
+    READ_CACHE_TTL_MS.engine,
+    async () => {
+      const result = await runCommand(command, ["--version"], { allowFailure: true }).catch(() => ({
+        code: 1,
+        stdout: "",
+        stderr: ""
+      }));
 
-  if (result.code !== 0 || !result.stdout) {
-    return undefined;
-  }
+      if (result.code !== 0 || !result.stdout) {
+        return undefined;
+      }
 
-  return result.stdout;
+      return result.stdout;
+    },
+    options
+  );
 }
 
 async function readManagedOpenClawVersion(): Promise<string | undefined> {
-  const managedBinary = getManagedOpenClawBinPath();
-
-  if (!(await fileExists(managedBinary)) || !(await probeCommand(managedBinary))) {
-    return undefined;
-  }
-
-  return readVersionFromCommand(managedBinary);
+  return readVersionFromCommand(await resolveManagedOpenClawCommand());
 }
 
 async function readSystemOpenClawVersion(): Promise<string | undefined> {
-  const systemCommand = await resolveSystemOpenClawCommand();
-
-  if (!systemCommand) {
-    return undefined;
-  }
-
-  return readVersionFromCommand(systemCommand);
+  return readVersionFromCommand(await resolveSystemOpenClawCommand());
 }
 
-async function readUpdateStatusFromCommand(command: string | undefined): Promise<OpenClawTargetUpdateStatus | undefined> {
-  if (!command) {
+function compareOpenClawVersions(left: string | undefined, right: string | undefined): number | undefined {
+  if (!left || !right) {
     return undefined;
   }
 
-  const result = await runCommand(command, ["update", "status", "--json"], { allowFailure: true }).catch(() => ({
-    code: 1,
-    stdout: "",
-    stderr: ""
-  }));
+  const leftParts = left
+    .replace(/^v/i, "")
+    .split(/[^\d]+/u)
+    .filter(Boolean)
+    .map((part) => Number(part));
+  const rightParts = right
+    .replace(/^v/i, "")
+    .split(/[^\d]+/u)
+    .filter(Boolean)
+    .map((part) => Number(part));
 
-  const parsed = safeJsonPayloadParse<OpenClawUpdateStatusJson>(result.stdout) ?? safeJsonPayloadParse<OpenClawUpdateStatusJson>(result.stderr);
+  if (leftParts.length === 0 || rightParts.length === 0) {
+    return undefined;
+  }
+
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftValue = leftParts[index] ?? 0;
+    const rightValue = rightParts[index] ?? 0;
+
+    if (leftValue > rightValue) {
+      return 1;
+    }
+
+    if (leftValue < rightValue) {
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
+function isOpenClawVersionCompatible(version: string | undefined, minimumVersion = OPENCLAW_VERSION_PIN): boolean {
+  const comparison = compareOpenClawVersions(version, minimumVersion);
+  if (comparison === undefined) {
+    return false;
+  }
+
+  return comparison >= 0;
+}
+
+export function summarizeTargetUpdateStatus(
+  parsed: OpenClawUpdateStatusJson | undefined,
+  fallbackMessage: string
+): OpenClawTargetUpdateStatus {
+  const latestVersion =
+    parsed?.availability?.latestVersion?.trim() ||
+    parsed?.update?.registry?.latestVersion?.trim() ||
+    undefined;
 
   if (parsed?.availability?.available) {
     return {
       updateAvailable: true,
-      latestVersion: parsed.availability.latestVersion ?? undefined,
-      summary: `Version ${parsed.availability.latestVersion ?? "unknown"} is available on ${parsed.channel?.label ?? "the current channel"}.`
+      latestVersion,
+      summary: `Version ${latestVersion ?? "unknown"} is available on ${parsed.channel?.label ?? "the current channel"}.`
     };
   }
 
   if (parsed?.update?.registry?.error) {
     return {
       updateAvailable: false,
-      summary: `SlackClaw could not check for updates: ${parsed.update.registry.error}.`
+      latestVersion,
+      summary: latestVersion
+        ? `SlackClaw could not fully confirm update availability, but the latest registry version appears to be ${latestVersion}.`
+        : `SlackClaw could not check for updates: ${parsed.update.registry.error}.`
     };
   }
 
-  if (result.code !== 0) {
+  if (latestVersion) {
     return {
       updateAvailable: false,
-      summary: result.stderr || result.stdout || "SlackClaw could not check for updates."
+      latestVersion,
+      summary: "No newer version detected."
     };
   }
 
   return {
     updateAvailable: false,
-    latestVersion: parsed?.availability?.latestVersion ?? undefined,
-    summary: "No newer version detected."
+    summary: fallbackMessage
   };
+}
+
+async function readUpdateStatusFromCommand(
+  command: string | undefined,
+  options?: { fresh?: boolean }
+): Promise<OpenClawTargetUpdateStatus | undefined> {
+  if (!command) {
+    return undefined;
+  }
+
+  return readThroughCache(
+    `command:update:${command}`,
+    READ_CACHE_TTL_MS.engine,
+    async () => {
+      for (const attempt of [0, 1]) {
+        const result = await runCommand(command, ["update", "status", "--json"], { allowFailure: true }).catch(() => ({
+          code: 1,
+          stdout: "",
+          stderr: ""
+        }));
+
+        const parsed =
+          safeJsonPayloadParse<OpenClawUpdateStatusJson>(result.stdout) ??
+          safeJsonPayloadParse<OpenClawUpdateStatusJson>(result.stderr);
+        const hasTransientRegistryAbort =
+          Boolean(parsed?.update?.registry?.error?.includes("AbortError")) &&
+          !parsed?.update?.registry?.latestVersion &&
+          !parsed?.availability?.latestVersion;
+
+        if (hasTransientRegistryAbort && attempt === 0) {
+          await wait(200);
+          continue;
+        }
+
+        return summarizeTargetUpdateStatus(parsed, result.stderr || result.stdout || "SlackClaw could not check for updates.");
+      }
+
+      return {
+        updateAvailable: false,
+        summary: "SlackClaw could not check for updates."
+      };
+    },
+    options
+  );
 }
 
 function safeJsonParse<T>(value: string | undefined): T | undefined {
@@ -1495,6 +2108,56 @@ function safeJsonParse<T>(value: string | undefined): T | undefined {
   }
 }
 
+function extractBalancedJsonPayload(value: string, startIndex: number): string | undefined {
+  const opening = value[startIndex];
+  if (opening !== "{" && opening !== "[") {
+    return undefined;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex; index < value.length; index += 1) {
+    const character = value[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (character === "{" || character === "[") {
+      depth += 1;
+      continue;
+    }
+
+    if (character === "}" || character === "]") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return value.slice(startIndex, index + 1);
+      }
+
+      if (depth < 0) {
+        return undefined;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function safeJsonPayloadParse<T>(value: string | undefined): T | undefined {
   if (!value) {
     return undefined;
@@ -1502,24 +2165,622 @@ function safeJsonPayloadParse<T>(value: string | undefined): T | undefined {
 
   const trimmed = value.trim();
   const direct = safeJsonParse<T>(trimmed);
-  if (direct) {
+  if (direct !== undefined) {
     return direct;
   }
 
-  const objectStart = trimmed.indexOf("{");
-  const arrayStart = trimmed.indexOf("[");
-  const jsonStart =
-    objectStart === -1
-      ? arrayStart
-      : arrayStart === -1
-        ? objectStart
-        : Math.min(objectStart, arrayStart);
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const character = trimmed[index];
+    if (character !== "{" && character !== "[") {
+      continue;
+    }
 
-  if (jsonStart === -1) {
+    const payload = extractBalancedJsonPayload(trimmed, index);
+    if (!payload) {
+      continue;
+    }
+
+    const parsed = safeJsonParse<T>(payload);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function readChatTextFromUnknown(message: OpenClawChatMessageJson | string | undefined): string {
+  if (!message) {
+    return "";
+  }
+
+  if (typeof message === "string") {
+    return message.trim();
+  }
+
+  return (message.content ?? [])
+    .filter((part) => part?.type === "text")
+    .map((part) => part.text ?? "")
+    .join("")
+    .trim();
+}
+
+function formatGatewayToolActivity(payload: OpenClawGatewayAgentEventPayload | undefined): string | undefined {
+  const name = payload?.data?.name?.trim();
+  const phase = payload?.data?.phase?.trim();
+
+  if (!name) {
     return undefined;
   }
 
-  return safeJsonParse<T>(trimmed.slice(jsonStart));
+  if (payload?.data?.isError || phase === "error") {
+    return `Tool issue: ${name}`;
+  }
+
+  if (phase === "result" || phase === "end") {
+    return `Tool finished: ${name}`;
+  }
+
+  if (phase === "start" || phase === "update") {
+    return `Using tools: ${name}`;
+  }
+
+  return `Using tools: ${name}`;
+}
+
+function emitGatewaySocketEvent(event: EngineChatLiveEvent): void {
+  for (const listener of gatewaySocketBridgeState.listeners) {
+    try {
+      listener(event);
+    } catch {
+      // Listener failures should not break the shared bridge.
+    }
+  }
+}
+
+function normalizeGatewaySocketUrl(url: string): string {
+  if (url.startsWith("http://")) {
+    return `ws://${url.slice("http://".length)}`;
+  }
+
+  if (url.startsWith("https://")) {
+    return `wss://${url.slice("https://".length)}`;
+  }
+
+  return url;
+}
+
+async function readGatewaySocketConnectionInfo(): Promise<{ url: string; token: string } | undefined> {
+  const snapshot = await readEngineSnapshot();
+  const url = snapshot.gatewayJson?.rpc?.url?.trim();
+
+  if (!url) {
+    return undefined;
+  }
+
+  const config = (await readOpenClawConfigFile(defaultOpenClawConfigPath())) ?? {};
+  const token = config.gateway?.auth?.token?.trim();
+
+  if (!token || token.startsWith("__OPENCLAW_")) {
+    return undefined;
+  }
+
+  return {
+    url: normalizeGatewaySocketUrl(url),
+    token
+  };
+}
+
+function closeGatewaySocketBridge(): void {
+  gatewaySocketBridgeState.intentionalClose = true;
+
+  if (gatewaySocketBridgeState.reconnectTimer) {
+    clearTimeout(gatewaySocketBridgeState.reconnectTimer);
+    gatewaySocketBridgeState.reconnectTimer = undefined;
+  }
+
+  gatewaySocketBridgeState.connectPromise = undefined;
+  gatewaySocketBridgeState.connected = false;
+
+  try {
+    gatewaySocketBridgeState.socket?.close();
+  } catch {
+    // Best-effort close.
+  }
+
+  gatewaySocketBridgeState.socket = undefined;
+}
+
+function scheduleGatewaySocketReconnect(reason?: string): void {
+  if (gatewaySocketBridgeState.intentionalClose || gatewaySocketBridgeState.listeners.size === 0) {
+    return;
+  }
+
+  if (gatewaySocketBridgeState.reconnectTimer) {
+    return;
+  }
+
+  emitGatewaySocketEvent({
+    type: "disconnected",
+    error: reason
+  });
+
+  gatewaySocketBridgeState.reconnectTimer = setTimeout(() => {
+    gatewaySocketBridgeState.reconnectTimer = undefined;
+    void ensureGatewaySocketBridgeConnected().catch(async (error) => {
+      await writeErrorLog("SlackClaw lost the live OpenClaw chat event bridge.", {
+        error: errorToLogDetails(error)
+      });
+      scheduleGatewaySocketReconnect(error instanceof Error ? error.message : "OpenClaw chat bridge reconnect failed.");
+    });
+  }, 1500);
+}
+
+function readGatewaySocketChallengeNonce(envelope: OpenClawGatewaySocketEnvelope): string | undefined {
+  if (envelope.event !== "connect.challenge") {
+    return undefined;
+  }
+
+  const payload = (envelope.payload ?? {}) as OpenClawGatewayConnectChallengePayload;
+  const nonce = payload.nonce?.trim();
+  return nonce ? nonce : undefined;
+}
+
+async function ensureGatewaySocketBridgeConnected(): Promise<void> {
+  if (gatewaySocketBridgeState.connected && gatewaySocketBridgeState.socket) {
+    return;
+  }
+
+  if (gatewaySocketBridgeState.connectPromise) {
+    return gatewaySocketBridgeState.connectPromise;
+  }
+
+  gatewaySocketBridgeState.connectPromise = (async () => {
+    const connection = await readGatewaySocketConnectionInfo();
+    const GatewaySocketCtor = globalThis.WebSocket as unknown as
+      | (new (url: string) => {
+          close: () => void;
+          send: (value: string) => void;
+          readyState: number;
+          onopen?: (event: unknown) => void;
+          onmessage?: (event: { data?: unknown }) => void;
+          onclose?: (event: { code?: number; reason?: string }) => void;
+          onerror?: (event: unknown) => void;
+        })
+      | undefined;
+
+    if (!GatewaySocketCtor) {
+      throw new Error("This SlackClaw runtime does not provide WebSocket support.");
+    }
+
+    if (!connection) {
+      throw new Error("SlackClaw could not resolve the OpenClaw gateway socket URL or auth token.");
+    }
+
+    gatewaySocketBridgeState.intentionalClose = false;
+    const socket = new GatewaySocketCtor(connection.url);
+    gatewaySocketBridgeState.socket = socket;
+    gatewaySocketBridgeState.connectRequestId = randomUUID();
+
+    await new Promise<void>((resolve, reject) => {
+      let authenticated = false;
+      let settled = false;
+
+      const fail = (error: Error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        gatewaySocketBridgeState.socket = undefined;
+        gatewaySocketBridgeState.connected = false;
+        reject(error);
+      };
+
+      const succeed = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        gatewaySocketBridgeState.connected = true;
+        emitGatewaySocketEvent({ type: "connected" });
+        resolve();
+      };
+
+      socket.onmessage = (event) => {
+        const raw = typeof event.data === "string" ? event.data : String(event.data ?? "");
+        const envelope = safeJsonPayloadParse<OpenClawGatewaySocketEnvelope>(raw);
+
+        if (!envelope) {
+          return;
+        }
+
+        if (envelope.type === "event" && envelope.event === "connect.challenge") {
+          const nonce = readGatewaySocketChallengeNonce(envelope);
+
+          if (!nonce) {
+            fail(new Error("OpenClaw gateway connect challenge did not include a nonce."));
+            try {
+              socket.close();
+            } catch {
+              // Best-effort shutdown.
+            }
+            return;
+          }
+
+          socket.send(
+            JSON.stringify({
+              type: "req",
+              id: gatewaySocketBridgeState.connectRequestId,
+              method: "connect",
+              params: buildGatewaySocketConnectParams({
+                token: connection.token
+              })
+            })
+          );
+          return;
+        }
+
+        if (envelope.id === gatewaySocketBridgeState.connectRequestId) {
+          if (envelope.ok === false) {
+            const detail =
+              (typeof envelope.error === "string" ? envelope.error : envelope.error?.message) ??
+              "OpenClaw rejected the SlackClaw chat bridge connection.";
+            fail(new Error(detail));
+            return;
+          }
+
+          authenticated = true;
+          succeed();
+          return;
+        }
+
+        if (!authenticated || envelope.type !== "event") {
+          return;
+        }
+
+        if (envelope.event === "chat") {
+          const payload = (envelope.payload ?? {}) as OpenClawGatewayChatEventPayload;
+          const sessionKey = payload.sessionKey?.trim();
+
+          if (!sessionKey) {
+            return;
+          }
+
+          switch (payload.state) {
+            case "delta":
+              emitGatewaySocketEvent({
+                type: "assistant-delta",
+                sessionKey,
+                runId: payload.runId,
+                message: {
+                  id: `${sessionKey}:assistant:stream`,
+                  role: "assistant",
+                  text: readChatTextFromUnknown(payload.message),
+                  status: "streaming"
+                }
+              });
+              return;
+            case "final":
+              emitGatewaySocketEvent({
+                type: "assistant-completed",
+                sessionKey,
+                runId: payload.runId
+              });
+              return;
+            case "aborted":
+              emitGatewaySocketEvent({
+                type: "assistant-aborted",
+                sessionKey,
+                runId: payload.runId
+              });
+              return;
+            case "error":
+              emitGatewaySocketEvent({
+                type: "assistant-failed",
+                sessionKey,
+                runId: payload.runId,
+                error: payload.errorMessage ?? "OpenClaw reported a chat error."
+              });
+              return;
+            default:
+              return;
+          }
+        }
+
+        if (envelope.event === "agent") {
+          const payload = (envelope.payload ?? {}) as OpenClawGatewayAgentEventPayload;
+          const activityLabel = formatGatewayToolActivity(payload);
+
+          if (!activityLabel) {
+            return;
+          }
+
+          emitGatewaySocketEvent({
+            type: "assistant-tool-status",
+            runId: payload.runId,
+            activityLabel
+          });
+        }
+      };
+
+      socket.onerror = () => {
+        if (!authenticated) {
+          fail(new Error("SlackClaw could not open the OpenClaw chat event bridge."));
+        }
+      };
+
+      socket.onclose = (event) => {
+        gatewaySocketBridgeState.connected = false;
+        gatewaySocketBridgeState.socket = undefined;
+        gatewaySocketBridgeState.connectPromise = undefined;
+
+        if (!authenticated) {
+          fail(new Error(event.reason || "OpenClaw closed the chat bridge before SlackClaw connected."));
+          return;
+        }
+
+        scheduleGatewaySocketReconnect(event.reason);
+      };
+
+      socket.onopen = () => {
+        // Wait for the connect challenge before authenticating.
+      };
+    });
+  })().finally(() => {
+    gatewaySocketBridgeState.connectPromise = undefined;
+  });
+
+  return gatewaySocketBridgeState.connectPromise;
+}
+
+async function subscribeToGatewaySocketBridge(listener: GatewayBridgeListener): Promise<() => void> {
+  gatewaySocketBridgeState.listeners.add(listener);
+
+  try {
+    await ensureGatewaySocketBridgeConnected();
+  } catch (error) {
+    gatewaySocketBridgeState.listeners.delete(listener);
+    throw error;
+  }
+
+  return () => {
+    gatewaySocketBridgeState.listeners.delete(listener);
+
+    if (gatewaySocketBridgeState.listeners.size === 0) {
+      closeGatewaySocketBridge();
+    }
+  };
+}
+
+function readChatText(message: OpenClawChatMessageJson): string {
+  return readChatTextFromUnknown(message);
+}
+
+function toVisibleChatRole(role: string | undefined): ChatMessage["role"] | undefined {
+  if (role === "user" || role === "assistant") {
+    return role;
+  }
+
+  return undefined;
+}
+
+function toChatMessageId(message: OpenClawChatMessageJson, index: number): string {
+  const timestamp = typeof message.timestamp === "number" ? message.timestamp : index;
+  return `${message.role ?? "message"}-${timestamp}-${index}`;
+}
+
+function toChatMessage(message: OpenClawChatMessageJson, index: number): ChatMessage | undefined {
+  const role = toVisibleChatRole(message.role);
+  if (!role) {
+    return undefined;
+  }
+
+  const error = message.errorMessage?.trim() || message.error?.trim();
+  const text = readChatText(message) || (error && message.role === "assistant" ? error : "");
+  if (!text) {
+    return undefined;
+  }
+
+  return {
+    id: toChatMessageId(message, index),
+    role,
+    text,
+    timestamp: typeof message.timestamp === "number" ? new Date(message.timestamp).toISOString() : undefined,
+    provider: message.provider,
+    model: message.model,
+    status: error || message.stopReason === "error" ? "failed" : "sent",
+    error
+  };
+}
+
+function collapseVisibleChatMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.reduce<ChatMessage[]>((collapsed, message) => {
+    const previous = collapsed[collapsed.length - 1];
+    if (!previous || previous.role !== "assistant" || message.role !== "assistant") {
+      collapsed.push(message);
+      return collapsed;
+    }
+
+    const previousText = previous.text.trim();
+    const nextText = message.text.trim();
+    const mergedText =
+      previousText && nextText && previousText !== nextText
+        ? `${previous.text}\n\n${message.text}`
+        : previousText
+          ? previous.text
+          : message.text;
+
+    collapsed[collapsed.length - 1] = {
+      ...previous,
+      ...message,
+      id: previous.id,
+      text: mergedText
+    };
+    return collapsed;
+  }, []);
+}
+
+function normalizeSkillMissing(missing?: OpenClawSkillMissing): SkillRuntimeEntry["missing"] {
+  return {
+    bins: missing?.bins ?? [],
+    anyBins: missing?.anyBins ?? [],
+    env: missing?.env ?? [],
+    config: missing?.config ?? [],
+    os: missing?.os ?? []
+  };
+}
+
+function parseSkillFrontmatter(content: string): Record<string, string> {
+  const lines = content.split("\n");
+
+  if (lines[0]?.trim() !== "---") {
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (line.trim() === "---") {
+      break;
+    }
+
+    const separator = line.indexOf(":");
+    if (separator <= 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separator).trim();
+    const rawValue = line.slice(separator + 1).trim();
+    result[key] = rawValue.replace(/^"(.*)"$/, "$1");
+  }
+
+  return result;
+}
+
+function stripSkillFrontmatter(content: string): string {
+  if (!content.startsWith("---")) {
+    return content.trim();
+  }
+
+  const end = content.indexOf("\n---", 3);
+  if (end === -1) {
+    return content.trim();
+  }
+
+  return content.slice(end + 4).trim();
+}
+
+function slugifySkillName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildCustomSkillMarkdown(
+  request: SaveCustomSkillRequest,
+  slug: string,
+  version = "0.1.0"
+): string {
+  const lines = [
+    "---",
+    `name: "${request.name.replace(/"/g, '\\"')}"`,
+    `slug: ${slug}`,
+    `version: "${version}"`,
+    ...(request.homepage?.trim() ? [`homepage: ${request.homepage.trim()}`] : []),
+    `description: "${request.description.replace(/"/g, '\\"')}"`,
+    "---",
+    "",
+    "## When to Use",
+    "",
+    request.description.trim() || "Use this skill when the user needs the workflow described here.",
+    "",
+    "## Instructions",
+    "",
+    request.instructions.trim() || "Add the skill-specific instructions here."
+  ];
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+export function parseClawHubSearchOutput(output: string): SkillMarketplaceEntry[] {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("- Searching"))
+    .flatMap((line): SkillMarketplaceEntry[] => {
+      const parts = line.split(/\s{2,}/).filter(Boolean);
+      if (parts.length < 2) {
+        return [];
+      }
+
+      return [{
+        slug: parts[0],
+        name: parts[1],
+        summary: "",
+        latestVersion: undefined,
+        updatedLabel: undefined,
+        ownerHandle: undefined,
+        downloads: undefined,
+        stars: undefined,
+        installed: false,
+        curated: false
+      }];
+    });
+}
+
+export function parseClawHubExploreOutput(output: string): SkillMarketplaceEntry[] {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("- Fetching latest skills"))
+    .flatMap((line): SkillMarketplaceEntry[] => {
+      const parts = line.split(/\s{2,}/).filter(Boolean);
+      if (parts.length < 4) {
+        return [];
+      }
+
+      return [{
+        slug: parts[0],
+        name: parts[0],
+        summary: parts.slice(3).join(" "),
+        latestVersion: parts[1].replace(/^v/i, ""),
+        updatedLabel: parts[2],
+        ownerHandle: undefined,
+        downloads: undefined,
+        stars: undefined,
+        installed: false,
+        curated: true
+      }];
+    });
+}
+
+function toSkillReadinessSummary(
+  skills: SkillRuntimeEntry[],
+  warnings: string[]
+): SkillReadinessSummary {
+  const disabled = skills.filter((skill) => skill.disabled).length;
+  const blocked = skills.filter((skill) => skill.blockedByAllowlist).length;
+  const missing = skills.filter((skill) => !skill.eligible && !skill.disabled && !skill.blockedByAllowlist).length;
+  const eligible = skills.filter((skill) => skill.eligible && !skill.disabled && !skill.blockedByAllowlist).length;
+
+  return {
+    total: skills.length,
+    eligible,
+    disabled,
+    blocked,
+    missing,
+    warnings,
+    summary: `${eligible} ready · ${missing} missing requirements${warnings.length > 0 ? ` · ${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : ""}`
+  };
+}
+
+async function logSoftFailure(message: string, details?: unknown): Promise<void> {
+  await writeErrorLog(message, details);
 }
 
 function compareVersionStrings(left: string, right: string): number {
@@ -1729,6 +2990,18 @@ function summarizeGateway(gatewayStatus?: OpenClawGatewayStatusJson): string | u
   return undefined;
 }
 
+function isGatewayReachable(snapshot: EngineReadSnapshot): boolean {
+  return Boolean(snapshot.gatewayJson?.rpc?.ok || snapshot.statusJson?.gateway?.reachable);
+}
+
+function gatewayReachabilitySummary(snapshot: EngineReadSnapshot): string {
+  return (
+    summarizeGateway(snapshot.gatewayJson) ??
+    snapshot.statusJson?.gateway?.error ??
+    "SlackClaw could not determine gateway reachability."
+  );
+}
+
 async function readAdapterState(): Promise<OpenClawAdapterState> {
   try {
     const raw = await readFile(OPENCLAW_STATE_PATH, "utf8");
@@ -1743,20 +3016,41 @@ async function writeAdapterState(nextState: OpenClawAdapterState): Promise<void>
   await writeFile(OPENCLAW_STATE_PATH, JSON.stringify(nextState, null, 2));
 }
 
-async function readModelCatalog(all = true): Promise<ModelCatalogEntry[]> {
-  const args = ["models", "list", "--json"];
-  if (all) {
-    args.splice(2, 0, "--all");
-  }
+async function readModelCatalog(all = false, options?: { fresh?: boolean }): Promise<ModelCatalogEntry[]> {
+  const cacheKey = all ? "models:list:all" : "models:list:configured";
 
-  const result = await runOpenClaw(args, { allowFailure: true });
-  const payload = safeJsonPayloadParse<OpenClawModelListJson>(result.stdout) ?? safeJsonPayloadParse<OpenClawModelListJson>(result.stderr);
-  return payload?.models ?? [];
+  return readThroughCache(
+    cacheKey,
+    READ_CACHE_TTL_MS.models,
+    async () => {
+      const args = ["models", "list", "--json"];
+      if (all) {
+        args.splice(2, 0, "--all");
+      }
+
+      const result = await runOpenClaw(args, { allowFailure: true });
+      const payload =
+        safeJsonPayloadParse<OpenClawModelListJson>(result.stdout) ??
+        safeJsonPayloadParse<OpenClawModelListJson>(result.stderr);
+      return payload?.models ?? [];
+    },
+    options
+  );
 }
 
-async function readModelStatus(): Promise<OpenClawModelStatusJson | undefined> {
-  const result = await runOpenClaw(["models", "status", "--json"], { allowFailure: true });
-  return safeJsonPayloadParse<OpenClawModelStatusJson>(result.stdout) ?? safeJsonPayloadParse<OpenClawModelStatusJson>(result.stderr);
+async function readModelStatus(options?: { fresh?: boolean }): Promise<OpenClawModelStatusJson | undefined> {
+  return readThroughCache(
+    "models:status",
+    READ_CACHE_TTL_MS.models,
+    async () => {
+      const result = await runOpenClaw(["models", "status", "--json"], { allowFailure: true });
+      return (
+        safeJsonPayloadParse<OpenClawModelStatusJson>(result.stdout) ??
+        safeJsonPayloadParse<OpenClawModelStatusJson>(result.stderr)
+      );
+    },
+    options
+  );
 }
 
 async function readConfiguredAuthProviders(status?: OpenClawModelStatusJson): Promise<Set<string>> {
@@ -1802,6 +3096,152 @@ async function readOpenClawConfigFile(configPath?: string): Promise<OpenClawConf
   }
 }
 
+function deriveConfiguredModels(
+  allModels: ModelCatalogEntry[],
+  supplemental: ReturnType<typeof collectSupplementalModelRefs>
+): ModelCatalogEntry[] {
+  const configuredRefs = new Set<string>(supplemental.refs);
+
+  if (supplemental.defaultModel) {
+    configuredRefs.add(supplemental.defaultModel);
+  }
+
+  for (const model of allModels) {
+    const tags = model.tags ?? [];
+    if (tags.includes("configured") || tags.includes("default") || tags.some((tag) => tag.startsWith("fallback#"))) {
+      configuredRefs.add(model.key);
+    }
+  }
+
+  return mergeModelCatalogEntries(allModels, configuredRefs, {
+    available: true,
+    defaultModel: supplemental.defaultModel
+  });
+}
+
+async function readEngineSnapshot(options?: { fresh?: boolean; includeUpdate?: boolean }): Promise<EngineReadSnapshot> {
+  return readThroughCache(
+    `engine:snapshot:${options?.includeUpdate ? "with-update" : "base"}`,
+    READ_CACHE_TTL_MS.engine,
+    async () => {
+      const command = await resolveOpenClawCommand({ fresh: options?.fresh });
+
+      if (!command) {
+        return {
+          installed: false
+        };
+      }
+
+      const [cliVersion, statusResult, gatewayResult, updateResult] = await Promise.all([
+        readVersionFromCommand(command, options),
+        runCommand(command, ["status", "--json"], { allowFailure: true }).catch(() => ({ code: 1, stdout: "", stderr: "" })),
+        runCommand(command, ["gateway", "status", "--json"], { allowFailure: true }).catch(() => ({
+          code: 1,
+          stdout: "",
+          stderr: ""
+        })),
+        options?.includeUpdate
+          ? runCommand(command, ["update", "status", "--json"], { allowFailure: true }).catch(() => ({
+              code: 1,
+              stdout: "",
+              stderr: ""
+            }))
+          : Promise.resolve(undefined)
+      ]);
+
+      return {
+        installed: true,
+        command,
+        cliVersion,
+        statusJson:
+          safeJsonPayloadParse<OpenClawStatusJson>(statusResult.stdout) ??
+          safeJsonPayloadParse<OpenClawStatusJson>(statusResult.stderr),
+        gatewayJson:
+          safeJsonPayloadParse<OpenClawGatewayStatusJson>(gatewayResult.stdout) ??
+          safeJsonPayloadParse<OpenClawGatewayStatusJson>(gatewayResult.stderr),
+        updateJson: updateResult
+          ? safeJsonPayloadParse<OpenClawUpdateStatusJson>(updateResult.stdout) ??
+            safeJsonPayloadParse<OpenClawUpdateStatusJson>(updateResult.stderr)
+          : undefined
+      };
+    },
+    options
+  );
+}
+
+async function readModelSnapshot(options?: { fresh?: boolean }): Promise<ModelReadSnapshot> {
+  return readThroughCache(
+    "models:snapshot",
+    READ_CACHE_TTL_MS.models,
+    async () => {
+      const [allModels, status] = await Promise.all([
+        readModelCatalog(false, options),
+        readModelStatus(options)
+      ]);
+      const activeConfig = await readOpenClawConfigFile(status?.configPath);
+      const configuredAuthProviders = await readConfiguredAuthProviders(status);
+      const supplemental = collectSupplementalModelRefs(status, activeConfig);
+
+      return {
+        allModels,
+        configuredModels: deriveConfiguredModels(allModels, supplemental),
+        status,
+        activeConfig,
+        configuredAuthProviders,
+        supplemental
+      };
+    },
+    options
+  );
+}
+
+async function readChannelSnapshot(options?: { fresh?: boolean }): Promise<ChannelReadSnapshot> {
+  return readThroughCache(
+    "channels:snapshot",
+    READ_CACHE_TTL_MS.channels,
+    async () => {
+      const [list, status] = await Promise.all([
+        readChannelsList(options),
+        readChannelsStatus(options)
+      ]);
+
+      return { list, status };
+    },
+    options
+  );
+}
+
+async function readSkillSnapshot(options?: { fresh?: boolean }): Promise<SkillReadSnapshot> {
+  return readThroughCache(
+    "skills:snapshot",
+    READ_CACHE_TTL_MS.skills,
+    async () => {
+      const [list, warnings] = await Promise.all([
+        readOpenClawSkillsList(options),
+        readOpenClawSkillCheckWarnings(options)
+      ]);
+
+      return {
+        list,
+        warnings
+      };
+    },
+    options
+  );
+}
+
+async function readAgentListSnapshot(options?: { fresh?: boolean }): Promise<OpenClawAgentListEntry[]> {
+  return readThroughCache(
+    "agents:list",
+    READ_CACHE_TTL_MS.agents,
+    async () => {
+      const result = await runOpenClaw(["agents", "list", "--json", "--bindings"], { allowFailure: true });
+      return safeJsonPayloadParse<OpenClawAgentListEntry[]>(result.stdout) ?? safeJsonPayloadParse<OpenClawAgentListEntry[]>(result.stderr) ?? [];
+    },
+    options
+  );
+}
+
 async function writeOpenClawConfigFile(configPath: string, config: OpenClawConfigFileJson): Promise<void> {
   const normalizedPath = configPath.startsWith("~/") && process.env.HOME ? resolve(process.env.HOME, configPath.slice(2)) : configPath;
   await mkdir(dirname(normalizedPath), { recursive: true });
@@ -1818,6 +3258,16 @@ function getMainOpenClawAgentDir(): string {
 
 function getManagedModelAgentPaths(entryId: string): { rootDir: string; agentDir: string; workspaceDir: string } {
   const rootDir = resolve(getDataDir(), "model-agents", entryId);
+
+  return {
+    rootDir,
+    agentDir: resolve(rootDir, "agent"),
+    workspaceDir: resolve(rootDir, "workspace")
+  };
+}
+
+function getManagedMemberAgentPaths(memberId: string): { rootDir: string; agentDir: string; workspaceDir: string } {
+  const rootDir = resolve(getDataDir(), "ai-members", memberId);
 
   return {
     rootDir,
@@ -1848,6 +3298,62 @@ async function readAuthStore(agentDir: string): Promise<OpenClawAuthProfileStore
 async function writeAuthStore(agentDir: string, store: OpenClawAuthProfileStoreJson): Promise<void> {
   await mkdir(agentDir, { recursive: true });
   await writeFile(getAuthStorePath(agentDir), JSON.stringify(store, null, 2));
+}
+
+function removeProfileIdsFromConfig(config: OpenClawConfigFileJson, profileIds: string[]): void {
+  if (profileIds.length === 0) {
+    return;
+  }
+
+  const profileIdSet = new Set(profileIds);
+
+  for (const profileId of profileIdSet) {
+    delete config.auth?.profiles?.[profileId];
+  }
+
+  if (config.auth?.order) {
+    config.auth.order = Object.fromEntries(
+      Object.entries(config.auth.order)
+        .map(([providerId, orderedProfileIds]) => [
+          providerId,
+          orderedProfileIds.filter((profileId) => !profileIdSet.has(profileId))
+        ])
+        .filter(([, orderedProfileIds]) => orderedProfileIds.length > 0)
+    );
+  }
+}
+
+async function removeProfileIdsFromAuthStore(agentDir: string | undefined, profileIds: string[]): Promise<void> {
+  if (!agentDir || profileIds.length === 0) {
+    return;
+  }
+
+  const store = await readAuthStore(agentDir);
+  const profileIdSet = new Set(profileIds);
+
+  for (const profileId of profileIdSet) {
+    delete store.profiles?.[profileId];
+    delete store.usageStats?.[profileId];
+  }
+
+  if (store.order) {
+    store.order = Object.fromEntries(
+      Object.entries(store.order)
+        .map(([providerId, orderedProfileIds]) => [
+          providerId,
+          orderedProfileIds.filter((profileId) => !profileIdSet.has(profileId))
+        ])
+        .filter(([, orderedProfileIds]) => orderedProfileIds.length > 0)
+    );
+  }
+
+  if (store.lastGood) {
+    store.lastGood = Object.fromEntries(
+      Object.entries(store.lastGood).filter(([, profileId]) => !profileIdSet.has(profileId))
+    );
+  }
+
+  await writeAuthStore(agentDir, store);
 }
 
 function providerDefinitionById(providerId: string): InternalModelProviderConfig | undefined {
@@ -2052,6 +3558,40 @@ function describeProfileLabel(profileId: string, profile: Record<string, unknown
   return suffixIndex >= 0 ? profileId.slice(suffixIndex + 1) : profileId;
 }
 
+function authModeForCredentialType(type: unknown): "api_key" | "token" | "oauth" {
+  if (type === "api_key") {
+    return "api_key";
+  }
+
+  if (type === "token") {
+    return "token";
+  }
+
+  return "oauth";
+}
+
+function normalizeBindingTarget(entry: string | OpenClawAgentBindingJsonEntry): MemberBindingSummary | undefined {
+  if (typeof entry === "string") {
+    const trimmed = entry.trim();
+    return trimmed ? { id: trimmed, target: trimmed } : undefined;
+  }
+
+  const target =
+    entry.target?.trim() ||
+    entry.bind?.trim() ||
+    [entry.channel?.trim(), entry.account?.trim()].filter(Boolean).join(":") ||
+    entry.route?.trim();
+
+  if (!target) {
+    return undefined;
+  }
+
+  return {
+    id: entry.id?.trim() || target,
+    target
+  };
+}
+
 function toSavedModelEntry(entry: SavedModelEntryState): SavedModelEntry {
   return {
     id: entry.id,
@@ -2203,6 +3743,193 @@ async function readPluginInventory(): Promise<OpenClawPluginListJson | undefined
   return safeJsonPayloadParse<OpenClawPluginListJson>(result.stdout) ?? safeJsonPayloadParse<OpenClawPluginListJson>(result.stderr);
 }
 
+async function readChannelsList(options?: { fresh?: boolean }): Promise<OpenClawChannelsListJson | undefined> {
+  return readThroughCache(
+    "channels:list",
+    READ_CACHE_TTL_MS.channels,
+    async () => {
+      const result = await runOpenClaw(["channels", "list", "--json"], { allowFailure: true });
+      return (
+        safeJsonPayloadParse<OpenClawChannelsListJson>(result.stdout) ??
+        safeJsonPayloadParse<OpenClawChannelsListJson>(result.stderr)
+      );
+    },
+    options
+  );
+}
+
+async function readChannelsStatus(options?: { fresh?: boolean }): Promise<OpenClawChannelsStatusJson | undefined> {
+  return readThroughCache(
+    "channels:status",
+    READ_CACHE_TTL_MS.channels,
+    async () => {
+      const result = await runOpenClaw(["channels", "status", "--json", "--probe"], { allowFailure: true });
+      return (
+        safeJsonPayloadParse<OpenClawChannelsStatusJson>(result.stdout) ??
+        safeJsonPayloadParse<OpenClawChannelsStatusJson>(result.stderr)
+      );
+    },
+    options
+  );
+}
+
+async function readOpenClawSkillsList(options?: { fresh?: boolean }): Promise<OpenClawSkillsListJson | undefined> {
+  return readThroughCache(
+    "skills:list",
+    READ_CACHE_TTL_MS.skills,
+    async () => {
+      const result = await runOpenClaw(["skills", "list", "--json"], { allowFailure: true });
+      return (
+        safeJsonPayloadParse<OpenClawSkillsListJson>(result.stdout) ??
+        safeJsonPayloadParse<OpenClawSkillsListJson>(result.stderr)
+      );
+    },
+    options
+  );
+}
+
+async function readOpenClawSkillCheckWarnings(options?: { fresh?: boolean }): Promise<string[]> {
+  return readThroughCache(
+    "skills:check",
+    READ_CACHE_TTL_MS.skills,
+    async () => {
+      const result = await runOpenClaw(["skills", "check"], { allowFailure: true });
+
+      return (result.stdout || result.stderr)
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("- "))
+        .map((line) => line.slice(2).trim())
+        .filter(Boolean);
+    },
+    options
+  );
+}
+
+function deriveLiveChannelState(
+  channelId: "telegram" | "whatsapp" | "feishu" | "wechat",
+  list?: OpenClawChannelsListJson,
+  status?: OpenClawChannelsStatusJson
+): ChannelSetupState {
+  const configuredAccounts = list?.chat?.[channelId] ?? [];
+  const channel = status?.channels?.[channelId];
+  const accounts = status?.channelAccounts?.[channelId] ?? [];
+  const anyConfigured = configuredAccounts.length > 0 || Boolean(channel?.configured) || accounts.some((account) => account.configured);
+
+  if (!anyConfigured) {
+    return createChannelState(channelId, {});
+  }
+
+  if (channelId === "telegram") {
+    const account = accounts[0];
+    const username = account?.probe?.bot?.username ?? channel?.probe?.bot?.username;
+    const healthy = account?.probe?.ok ?? channel?.probe?.ok ?? false;
+    return createChannelState("telegram", {
+      status: healthy ? "completed" : "ready",
+      summary: username ? `Telegram bot @${username} is configured.` : "Telegram is configured in OpenClaw.",
+      detail: healthy
+        ? "OpenClaw can reach the Telegram bot successfully."
+        : channel?.lastError
+          ? `Telegram is configured, but OpenClaw reported: ${channel.lastError}`
+          : "Telegram is configured. If messages are not flowing yet, send the bot a DM and approve pairing if prompted."
+    });
+  }
+
+  if (channelId === "whatsapp") {
+    const account = accounts[0];
+    const linked = account?.linked ?? channel?.linked ?? false;
+    const connected = account?.connected ?? channel?.connected ?? false;
+    const number = account?.self?.e164 ?? channel?.self?.e164;
+    return createChannelState("whatsapp", {
+      status: connected ? "completed" : linked ? "ready" : "awaiting-pairing",
+      summary: number ? `WhatsApp ${number} is linked.` : linked ? "WhatsApp is linked in OpenClaw." : "WhatsApp is configured and waiting for pairing.",
+      detail: connected
+        ? "WhatsApp is connected and running through OpenClaw."
+        : channel?.lastError
+          ? `WhatsApp is configured, but OpenClaw reported: ${channel.lastError}`
+          : linked
+            ? "WhatsApp is linked. If it is not fully connected yet, restart the gateway or refresh status."
+            : "WhatsApp setup is in progress. Finish pairing to bring the account online."
+    });
+  }
+
+  return createChannelState(channelId, {
+    status: "completed",
+    summary: `${channelId === "feishu" ? "Feishu" : "WeChat"} is configured in OpenClaw.`,
+    detail: "SlackClaw detected an existing configuration from the installed OpenClaw runtime."
+  });
+}
+
+function buildLiveChannelEntries(
+  list?: OpenClawChannelsListJson,
+  status?: OpenClawChannelsStatusJson
+): ConfiguredChannelEntry[] {
+  const channelIds = new Set<string>([
+    ...Object.keys(list?.chat ?? {}),
+    ...Object.keys(status?.channelAccounts ?? {})
+  ]);
+
+  const entries: ConfiguredChannelEntry[] = [];
+
+  for (const channelId of channelIds) {
+    if (channelId !== "telegram" && channelId !== "whatsapp" && channelId !== "feishu" && channelId !== "wechat") {
+      continue;
+    }
+
+    const accountIds = new Set<string>([
+      ...(list?.chat?.[channelId] ?? []),
+      ...((status?.channelAccounts?.[channelId] ?? []).map((account) => account.accountId).filter(Boolean) as string[])
+    ]);
+    const accounts = status?.channelAccounts?.[channelId] ?? [];
+    const liveState = deriveLiveChannelState(channelId, list, status);
+
+    for (const accountId of accountIds) {
+      const account = accounts.find((item) => (item.accountId ?? "default") === accountId);
+      const label =
+        channelId === "telegram"
+          ? account?.probe?.bot?.username
+            ? `Telegram @${account.probe.bot.username}`
+            : "Telegram"
+          : channelId === "whatsapp"
+            ? account?.self?.e164
+              ? `WhatsApp ${account.self.e164}`
+              : "WhatsApp"
+            : channelId === "feishu"
+              ? "Feishu"
+              : "WeChat workaround";
+
+      const maskedConfigSummary =
+        channelId === "telegram"
+          ? [
+              ...(account?.probe?.bot?.username ? [{ label: "Bot", value: `@${account.probe.bot.username}` }] : []),
+              ...(account?.mode ? [{ label: "Mode", value: account.mode }] : []),
+              ...(account?.tokenSource ? [{ label: "Token source", value: account.tokenSource }] : [])
+            ]
+          : channelId === "whatsapp"
+            ? [
+                ...(account?.self?.e164 ? [{ label: "Linked number", value: account.self.e164 }] : []),
+                ...(account?.connected ? [{ label: "Connection", value: "Connected" }] : [{ label: "Connection", value: "Linked" }])
+              ]
+            : [];
+
+      entries.push({
+        id: `${channelId}:${accountId}`,
+        channelId,
+        label,
+        status: liveState.status,
+        summary: liveState.summary,
+        detail: liveState.detail,
+        maskedConfigSummary,
+        editableValues: {},
+        pairingRequired: liveState.status === "awaiting-pairing",
+        lastUpdatedAt: liveState.lastUpdatedAt
+      });
+    }
+  }
+
+  return entries;
+}
+
 async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -2277,7 +4004,7 @@ function buildModelConfigOverview(
     providers: MODEL_PROVIDER_DEFINITIONS.map((provider) => {
       const matches = allModels.filter((model) => provider.providerRefs.some((prefix) => model.key.startsWith(prefix)));
       const configuredByAuth = [...configuredAuthProviders].some((authProvider) => providerMatchesAuthProvider(provider, authProvider));
-      const configured = configuredByAuth || matches.some((model) => configuredKeys.has(model.key) || model.available);
+      const configured = configuredByAuth || matches.some((model) => configuredKeys.has(model.key));
 
       return {
         id: provider.id,
@@ -2314,8 +4041,9 @@ export class OpenClawAdapter implements EngineAdapter {
     desiredVersion: OPENCLAW_VERSION_PIN,
     installSource: "npm-local",
     prerequisites: [
-      "macOS 14 or newer",
-      "Either npm already available on the Mac, or Homebrew available so SlackClaw can install Node/npm and Git",
+      "macOS",
+      "Node.js 22 or newer",
+      "pnpm only if you build OpenClaw from source",
       "Permission to install or reuse the pinned OpenClaw CLI"
     ],
     installPath: getManagedOpenClawDir()
@@ -2326,12 +4054,17 @@ export class OpenClawAdapter implements EngineAdapter {
     supportsInstall: true,
     supportsUpdate: true,
     supportsRecovery: true,
-    supportsStreaming: false,
+    supportsStreaming: true,
     runtimeModes: ["gateway", "embedded", "local-llm"],
     supportedChannels: ["local-ui"],
     starterSkillCategories: ["communication", "research", "docs", "operations"],
     futureLocalModelFamilies: ["qwen", "minimax", "llama", "mistral", "custom-openai-compatible"]
   };
+
+  invalidateReadCaches(): void {
+    invalidateReadCache();
+    invalidateCommandResolutionCache();
+  }
 
   private async readOpenClawConfigSnapshot(): Promise<{
     status?: OpenClawModelStatusJson;
@@ -2351,6 +4084,86 @@ export class OpenClawAdapter implements EngineAdapter {
 
   private async writeOpenClawConfigSnapshot(configPath: string, config: OpenClawConfigFileJson): Promise<void> {
     await writeOpenClawConfigFile(configPath, config);
+    invalidateReadCache("models:", "engine:");
+  }
+
+  private async readOpenClawSkillsList(options?: { fresh?: boolean }): Promise<OpenClawSkillsListJson | undefined> {
+    return readOpenClawSkillsList(options);
+  }
+
+  private async resolveSharedSkillsDir(list?: OpenClawSkillsListJson): Promise<string | undefined> {
+    const workspaceDir = list?.workspaceDir?.trim();
+    const workspaceSkillsDir = workspaceDir ? resolve(workspaceDir, "skills") : undefined;
+    const managedSkillsDir = list?.managedSkillsDir?.trim();
+
+    if (workspaceSkillsDir && (await fileExists(workspaceSkillsDir))) {
+      return workspaceSkillsDir;
+    }
+
+    if (managedSkillsDir && (await fileExists(managedSkillsDir))) {
+      return managedSkillsDir;
+    }
+
+    return workspaceSkillsDir ?? managedSkillsDir;
+  }
+
+  private async readWorkspaceSkillMetadata(
+    skillsDir: string | undefined
+  ): Promise<Map<string, { slug: string; version?: string; filePath: string; baseDir: string; name?: string; description?: string; homepage?: string; content?: string }>> {
+    const metadata = new Map<string, { slug: string; version?: string; filePath: string; baseDir: string; name?: string; description?: string; homepage?: string; content?: string }>();
+
+    if (!skillsDir || !(await fileExists(skillsDir))) {
+      return metadata;
+    }
+
+    const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const baseDir = join(skillsDir, entry.name);
+      const filePath = join(baseDir, "SKILL.md");
+      if (!(await fileExists(filePath))) {
+        continue;
+      }
+
+      const content = await readFile(filePath, "utf8").catch(() => "");
+      const frontmatter = parseSkillFrontmatter(content);
+      const slug = frontmatter.slug?.trim() || entry.name;
+      const name = frontmatter.name?.trim() || entry.name;
+      const item = {
+        slug,
+        version: frontmatter.version?.trim() || undefined,
+        filePath,
+        baseDir,
+        name,
+        description: frontmatter.description?.trim() || undefined,
+        homepage: frontmatter.homepage?.trim() || undefined,
+        content: stripSkillFrontmatter(content)
+      };
+
+      metadata.set(name, item);
+      metadata.set(slug, item);
+      metadata.set(entry.name, item);
+    }
+
+    return metadata;
+  }
+
+  private async resolveClawHubContext(): Promise<{ workdir: string; dir: string } | undefined> {
+    const skills = await this.readOpenClawSkillsList();
+    const skillsDir = await this.resolveSharedSkillsDir(skills);
+
+    if (!skillsDir) {
+      return undefined;
+    }
+
+    return {
+      workdir: dirname(skillsDir),
+      dir: basename(skillsDir)
+    };
   }
 
   private normalizeStateFlags(state: OpenClawAdapterState): OpenClawAdapterState {
@@ -2483,9 +4296,161 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  private async listOpenClawAgents(): Promise<Array<{ id: string; agentDir?: string; workspace?: string }>> {
-    const result = await runOpenClaw(["agents", "list", "--json"], { allowFailure: true });
-    return safeJsonPayloadParse<Array<{ id: string; agentDir?: string; workspace?: string }>>(result.stdout) ?? [];
+  private isVisibleAIMemberAgent(agent: OpenClawAgentListEntry): agent is OpenClawAgentListEntry & { id: string } {
+    return isVisibleAIMemberAgentId(agent.id);
+  }
+
+  private async listOpenClawAgents(): Promise<OpenClawAgentListEntry[]> {
+    return readAgentListSnapshot();
+  }
+
+  async listAIMemberRuntimeCandidates(): Promise<AIMemberRuntimeCandidate[]> {
+    const agents = await this.listOpenClawAgents();
+    const visibleAgents = agents.filter((agent) => this.isVisibleAIMemberAgent(agent));
+
+    return visibleAgents.map((agent) => ({
+        agentId: agent.id,
+        name: agent.identityName?.trim() || agent.name?.trim() || agent.id,
+        emoji: agent.identityEmoji?.trim() || undefined,
+        modelKey: agent.model?.trim() || undefined,
+        agentDir: agent.agentDir,
+        workspaceDir: agent.workspace,
+        bindingCount: typeof agent.bindings === "number" ? agent.bindings : 0,
+        bindings: []
+      }));
+  }
+
+  private async ensureMemberAgent(
+    memberId: string,
+    agentId: string,
+    brain: BrainAssignment
+  ): Promise<{ agentDir: string; workspaceDir: string; created: boolean }> {
+    const paths = getManagedMemberAgentPaths(memberId);
+    const agents = await this.listOpenClawAgents();
+    const existingAgent = agents.find((agent) => agent.id === agentId);
+    let created = false;
+
+    if (!existingAgent) {
+      const add = await runOpenClaw(
+        [
+          "agents",
+          "add",
+          agentId,
+          "--agent-dir",
+          paths.agentDir,
+          "--workspace",
+          paths.workspaceDir,
+          "--model",
+          brain.modelKey,
+          "--non-interactive",
+          "--json"
+        ],
+        { allowFailure: true }
+      );
+
+      if (add.code !== 0) {
+        throw new Error(add.stderr || add.stdout || `SlackClaw could not create the AI member agent ${agentId}.`);
+      }
+
+      created = true;
+    }
+
+    return {
+      agentDir: existingAgent?.agentDir || paths.agentDir,
+      workspaceDir: existingAgent?.workspace || paths.workspaceDir,
+      created
+    };
+  }
+
+  private async setMemberIdentity(agentId: string, request: AIMemberRuntimeRequest): Promise<void> {
+    await runOpenClaw(
+      [
+        "agents",
+        "set-identity",
+        "--agent",
+        agentId,
+        "--name",
+        request.name,
+        "--emoji",
+        request.avatar.emoji,
+        ...(request.avatar.theme ? ["--theme", request.avatar.theme] : []),
+        ...(request.avatar.presetId ? ["--avatar", request.avatar.presetId] : []),
+        "--json"
+      ],
+      { allowFailure: true }
+    );
+  }
+
+  private async syncMemberBrain(
+    request: AIMemberRuntimeRequest,
+    agentId: string,
+    agentDir: string,
+    workspaceDir: string
+  ): Promise<void> {
+    const modelState = await this.ensureSavedModelState();
+    const sourceEntry = modelState.modelEntries?.find((entry) => entry.id === request.brain.entryId);
+
+    if (!sourceEntry) {
+      throw new Error("Saved model entry for this AI member was not found.");
+    }
+
+    const snapshot = await this.readOpenClawConfigSnapshot();
+    await this.upsertAgentConfigEntry(
+      snapshot.configPath,
+      snapshot.config,
+      {
+        ...sourceEntry,
+        label: request.name,
+        agentId,
+        agentDir,
+        workspaceDir
+      },
+      request.brain.modelKey
+    );
+
+    const sourceStore = sourceEntry.agentDir ? await readAuthStore(sourceEntry.agentDir) : undefined;
+    if (!sourceStore?.profiles || Object.keys(sourceStore.profiles).length === 0) {
+      return;
+    }
+
+    await writeAuthStore(agentDir, {
+      version: sourceStore.version ?? 1,
+      profiles: { ...(sourceStore.profiles ?? {}) },
+      usageStats: { ...(sourceStore.usageStats ?? {}) },
+      order: { ...(sourceStore.order ?? {}) },
+      lastGood: { ...(sourceStore.lastGood ?? {}) }
+    });
+
+    snapshot.config.auth = snapshot.config.auth ?? {};
+    snapshot.config.auth.profiles = snapshot.config.auth.profiles ?? {};
+
+    for (const [profileId, profile] of Object.entries(sourceStore.profiles ?? {})) {
+      snapshot.config.auth.profiles[profileId] = {
+        provider: String(profile.provider ?? sourceEntry.providerId),
+        mode: authModeForCredentialType(profile.type),
+        ...(typeof profile.email === "string" && profile.email.trim() ? { email: profile.email.trim() } : {})
+      };
+    }
+
+    await this.writeOpenClawConfigSnapshot(snapshot.configPath, snapshot.config);
+  }
+
+  private async readMemberBindings(agentId: string): Promise<MemberBindingSummary[]> {
+    return readThroughCache(
+      `agents:bindings:${agentId}`,
+      READ_CACHE_TTL_MS.bindings,
+      async () => {
+        const result = await runOpenClaw(["agents", "bindings", "--agent", agentId, "--json"], { allowFailure: true });
+        const payload =
+          safeJsonPayloadParse<Array<string | OpenClawAgentBindingJsonEntry>>(result.stdout) ??
+          safeJsonPayloadParse<Array<string | OpenClawAgentBindingJsonEntry>>(result.stderr) ??
+          [];
+
+        return payload
+          .map((entry) => normalizeBindingTarget(entry))
+          .filter((entry): entry is MemberBindingSummary => Boolean(entry));
+      }
+    );
   }
 
   private async ensureManagedAgent(entryId: string, agentId: string, modelKey: string, label: string): Promise<{
@@ -2908,6 +4873,48 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
+  private async deleteManagedModelAgent(entry: SavedModelEntryState): Promise<void> {
+    if (!isManagedModelAgentId(entry.agentId)) {
+      return;
+    }
+
+    const result = await runOpenClaw(["agents", "delete", entry.agentId, "--force", "--json"], { allowFailure: true });
+
+    if (result.code !== 0) {
+      const output = `${result.stderr}\n${result.stdout}`.toLowerCase();
+      if (!output.includes("not found")) {
+        throw new Error(result.stderr || result.stdout || `SlackClaw could not delete the hidden model agent ${entry.agentId}.`);
+      }
+    }
+
+    const managedPaths = getManagedModelAgentPaths(entry.id);
+    await rm(managedPaths.rootDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  private async cleanupRemovedSavedModelEntry(
+    entry: SavedModelEntryState,
+    nextState: OpenClawAdapterState
+  ): Promise<void> {
+    const snapshot = await this.readOpenClawConfigSnapshot();
+
+    if (isManagedModelAgentId(entry.agentId)) {
+      snapshot.config.agents = {
+        ...snapshot.config.agents,
+        list: (snapshot.config.agents?.list ?? []).filter((item) => item.id !== entry.agentId)
+      };
+    }
+
+    removeProfileIdsFromConfig(snapshot.config, entry.profileIds);
+    await this.writeOpenClawConfigSnapshot(snapshot.configPath, snapshot.config);
+
+    const nextDefaultEntry = (nextState.modelEntries ?? []).find((item) => item.id === nextState.defaultModelEntryId);
+    await removeProfileIdsFromAuthStore(nextDefaultEntry?.agentDir, entry.profileIds);
+
+    if (isManagedModelAgentId(entry.agentId)) {
+      await this.deleteManagedModelAgent(entry);
+    }
+  }
+
   private async startEntryAuthentication(
     provider: InternalModelProviderConfig,
     method: InternalModelAuthMethod,
@@ -3076,6 +5083,7 @@ export class OpenClawAdapter implements EngineAdapter {
       lastInstallMode: mode
     });
 
+    this.invalidateReadCaches();
     const engineStatus = await this.status();
 
     return {
@@ -3114,6 +5122,7 @@ export class OpenClawAdapter implements EngineAdapter {
     }
 
     await writeAdapterState({});
+    this.invalidateReadCaches();
     const engineStatus = await this.status();
 
     if (engineStatus.installed && command && command !== managedBinary) {
@@ -3128,36 +5137,379 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
+  async restartGateway(): Promise<GatewayActionResponse> {
+    try {
+      const engineStatus = await this.restartGatewayAndRequireHealthy("manual restart");
+
+      return {
+        action: "restart-gateway",
+        status: "completed",
+        message: "OpenClaw gateway restarted and is reachable.",
+        engineStatus
+      };
+    } catch (error) {
+      await logSoftFailure("SlackClaw could not restart the OpenClaw gateway on demand.", {
+        error: errorToLogDetails(error)
+      });
+
+      return {
+        action: "restart-gateway",
+        status: "failed",
+        message: error instanceof Error ? error.message : "SlackClaw could not restart the OpenClaw gateway.",
+        engineStatus: await this.status()
+      };
+    }
+  }
+
+  async getSkillRuntimeCatalog(): Promise<SkillRuntimeCatalog> {
+    const snapshot = await readSkillSnapshot();
+    const list = snapshot.list;
+    const skillsDir = await this.resolveSharedSkillsDir(list);
+    const workspaceMetadata = await this.readWorkspaceSkillMetadata(skillsDir);
+    const marketplaceAvailable = Boolean(await resolveClawHubCommand());
+    const skills = (list?.skills ?? []).flatMap((skill): SkillRuntimeEntry[] => {
+        const skillName = skill.name?.trim();
+
+        if (!skillName) {
+          return [];
+        }
+
+        const metadata = workspaceMetadata.get(skillName);
+        return [{
+          id: skillName,
+          slug: metadata?.slug,
+          name: skillName,
+          description: skill.description?.trim() || metadata?.description || "",
+          source: skill.source?.trim() || "openclaw-workspace",
+          bundled: Boolean(skill.bundled),
+          eligible: Boolean(skill.eligible),
+          disabled: Boolean(skill.disabled),
+          blockedByAllowlist: Boolean(skill.blockedByAllowlist),
+          missing: normalizeSkillMissing(skill.missing),
+          homepage: skill.homepage?.trim() || metadata?.homepage,
+          version: metadata?.version,
+          filePath: metadata?.filePath,
+          baseDir: metadata?.baseDir
+        } satisfies SkillRuntimeEntry];
+      });
+    const warnings = snapshot.warnings;
+
+    return {
+      workspaceDir: list?.workspaceDir?.trim() || undefined,
+      managedSkillsDir: skillsDir ?? (list?.managedSkillsDir?.trim() || undefined),
+      readiness: toSkillReadinessSummary(skills, warnings),
+      marketplaceAvailable,
+      marketplaceSummary: marketplaceAvailable
+        ? "ClawHub search and install are available."
+        : "ClawHub CLI is not installed on this Mac.",
+      skills
+    };
+  }
+
+  async getInstalledSkillDetail(skillId: string): Promise<InstalledSkillDetail> {
+    const result = await runOpenClaw(["skills", "info", skillId, "--json"], { allowFailure: true });
+    const parsed = safeJsonPayloadParse<OpenClawSkillInfoJson>(result.stdout) ?? safeJsonPayloadParse<OpenClawSkillInfoJson>(result.stderr);
+
+    if (!parsed) {
+      throw new Error(`SlackClaw could not read details for ${skillId}.`);
+    }
+
+    const content = parsed.filePath ? await readFile(parsed.filePath, "utf8").catch(() => "") : "";
+    const frontmatter = parseSkillFrontmatter(content);
+
+    return {
+      id: parsed.skillKey?.trim() || skillId,
+      slug: frontmatter.slug?.trim() || (parsed.baseDir ? basename(parsed.baseDir) : undefined),
+      name: parsed.name?.trim() || skillId,
+      description: parsed.description?.trim() || frontmatter.description?.trim() || "",
+      source: parsed.source === "openclaw-bundled" ? "bundled" : parsed.source === "openclaw-extra" ? "extra" : "workspace",
+      bundled: Boolean(parsed.bundled),
+      eligible: Boolean(parsed.eligible),
+      disabled: Boolean(parsed.disabled),
+      blockedByAllowlist: Boolean(parsed.blockedByAllowlist),
+      readiness: parsed.disabled ? "disabled" : parsed.blockedByAllowlist ? "blocked" : parsed.eligible ? "ready" : "missing",
+      missing: normalizeSkillMissing(parsed.missing),
+      homepage: parsed.homepage?.trim() || frontmatter.homepage?.trim() || undefined,
+      version: frontmatter.version?.trim() || undefined,
+      managedBy: "openclaw",
+      editable: false,
+      removable: false,
+      updatable: false,
+      filePath: parsed.filePath?.trim() || undefined,
+      baseDir: parsed.baseDir?.trim() || undefined,
+      contentPreview: content ? stripSkillFrontmatter(content).slice(0, 6000) : undefined
+    };
+  }
+
+  async listMarketplaceInstalledSkills(): Promise<Array<{ slug: string; version?: string }>> {
+    const context = await this.resolveClawHubContext();
+
+    if (!context) {
+      return [];
+    }
+
+    const result = await runClawHub(["--workdir", context.workdir, "--dir", context.dir, "list"], { allowFailure: true });
+    if (result.code !== 0) {
+      return [];
+    }
+
+    return result.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.split(/\s{2,}/).filter(Boolean))
+      .map((parts) => ({
+        slug: parts[0],
+        version: parts[1]
+      }))
+      .filter((entry) => Boolean(entry.slug));
+  }
+
+  async getSkillMarketplaceDetail(slug: string): Promise<SkillMarketplaceDetail> {
+    const context = await this.resolveClawHubContext();
+    const argsPrefix = context ? ["--workdir", context.workdir, "--dir", context.dir] : [];
+    const [metadataResult, fileResult, installed] = await Promise.all([
+      runClawHub([...argsPrefix, "inspect", slug, "--json"], { allowFailure: true }),
+      runClawHub([...argsPrefix, "inspect", slug, "--file", "SKILL.md"], { allowFailure: true }),
+      this.listMarketplaceInstalledSkills()
+    ]);
+
+    const parsed = safeJsonPayloadParse<{
+      skill?: {
+        slug?: string;
+        displayName?: string;
+        summary?: string;
+        tags?: { latest?: string };
+        stats?: {
+          downloads?: number;
+          installsCurrent?: number;
+          installsAllTime?: number;
+          stars?: number;
+          versions?: number;
+        };
+      };
+      latestVersion?: {
+        version?: string;
+        changelog?: string;
+        license?: string;
+      };
+      owner?: {
+        handle?: string;
+        displayName?: string;
+        image?: string;
+      };
+    }>(metadataResult.stdout) ?? safeJsonPayloadParse(metadataResult.stderr);
+
+    if (!parsed?.skill?.slug) {
+      throw new Error(`SlackClaw could not inspect ${slug} from ClawHub.`);
+    }
+
+    const installsCurrent = parsed.skill.stats?.installsCurrent;
+    const downloads = parsed.skill.stats?.downloads;
+    const stars = parsed.skill.stats?.stars;
+
+    return {
+      slug: parsed.skill.slug,
+      name: parsed.skill.displayName?.trim() || parsed.skill.slug,
+      summary: parsed.skill.summary?.trim() || "",
+      latestVersion: parsed.latestVersion?.version?.trim() || parsed.skill.tags?.latest?.trim() || undefined,
+      updatedLabel: undefined,
+      ownerHandle: parsed.owner?.handle?.trim() || undefined,
+      downloads,
+      stars,
+      installed: installed.some((entry) => entry.slug === parsed.skill?.slug),
+      curated: Boolean((downloads ?? 0) >= 500 || (stars ?? 0) >= 5 || (installsCurrent ?? 0) >= 10),
+      ownerDisplayName: parsed.owner?.displayName?.trim() || undefined,
+      ownerImageUrl: parsed.owner?.image?.trim() || undefined,
+      changelog: parsed.latestVersion?.changelog?.trim() || undefined,
+      license: parsed.latestVersion?.license?.trim() || undefined,
+      installsCurrent,
+      installsAllTime: parsed.skill.stats?.installsAllTime,
+      versions: parsed.skill.stats?.versions,
+      filePreview: fileResult.code === 0 ? fileResult.stdout : undefined,
+      homepage: undefined
+    };
+  }
+
+  async exploreSkillMarketplace(limit = 8): Promise<SkillMarketplaceEntry[]> {
+    const context = await this.resolveClawHubContext();
+
+    if (!context) {
+      return [];
+    }
+
+    const result = await runClawHub(["--workdir", context.workdir, "--dir", context.dir, "explore"], { allowFailure: true });
+    if (result.code !== 0) {
+      return [];
+    }
+
+    const parsed = parseClawHubExploreOutput(result.stdout).slice(0, limit);
+    const installedSet = new Set((await this.listMarketplaceInstalledSkills()).map((entry) => entry.slug));
+    const details = await Promise.all(parsed.map(async (entry) => this.getSkillMarketplaceDetail(entry.slug).catch(() => undefined)));
+
+    return parsed.map((entry, index) => {
+      const detail = details[index];
+      return {
+        ...entry,
+        name: detail?.name ?? entry.name,
+        summary: detail?.summary || entry.summary,
+        latestVersion: detail?.latestVersion ?? entry.latestVersion,
+        ownerHandle: detail?.ownerHandle,
+        downloads: detail?.downloads,
+        stars: detail?.stars,
+        installed: installedSet.has(entry.slug),
+        curated: detail?.curated ?? entry.curated
+      };
+    });
+  }
+
+  async searchSkillMarketplace(query: string, limit = 10): Promise<SkillMarketplaceEntry[]> {
+    const trimmed = query.trim();
+    const context = await this.resolveClawHubContext();
+
+    if (!trimmed || !context) {
+      return [];
+    }
+
+    const result = await runClawHub(["--workdir", context.workdir, "--dir", context.dir, "search", trimmed, "--limit", String(limit)], { allowFailure: true });
+    if (result.code !== 0) {
+      return [];
+    }
+
+    const parsed = parseClawHubSearchOutput(result.stdout).slice(0, limit);
+    const installedSet = new Set((await this.listMarketplaceInstalledSkills()).map((entry) => entry.slug));
+    const details = await Promise.all(parsed.map(async (entry) => this.getSkillMarketplaceDetail(entry.slug).catch(() => undefined)));
+
+    return parsed.map((entry, index) => {
+      const detail = details[index];
+      return {
+        ...entry,
+        name: detail?.name ?? entry.name,
+        summary: detail?.summary ?? entry.summary,
+        latestVersion: detail?.latestVersion,
+        ownerHandle: detail?.ownerHandle,
+        downloads: detail?.downloads,
+        stars: detail?.stars,
+        installed: installedSet.has(entry.slug),
+        curated: detail?.curated ?? false
+      };
+    });
+  }
+
+  async installMarketplaceSkill(request: InstallSkillRequest): Promise<void> {
+    const context = await this.resolveClawHubContext();
+
+    if (!context) {
+      throw new Error("SlackClaw could not resolve the shared OpenClaw skills directory.");
+    }
+
+    const result = await runClawHub(
+      ["--workdir", context.workdir, "--dir", context.dir, "--no-input", "install", request.slug, ...(request.version ? ["--version", request.version] : [])],
+      { allowFailure: true }
+    );
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not install ${request.slug} from ClawHub.`);
+    }
+
+    await this.restartGatewayAndRequireHealthy("skill installation");
+  }
+
+  async updateMarketplaceSkill(slug: string, request: UpdateSkillRequest): Promise<void> {
+    const context = await this.resolveClawHubContext();
+
+    if (!context) {
+      throw new Error("SlackClaw could not resolve the shared OpenClaw skills directory.");
+    }
+
+    const args =
+      request.action === "reinstall"
+        ? ["--workdir", context.workdir, "--dir", context.dir, "--no-input", "install", slug, "--force", ...(request.version ? ["--version", request.version] : [])]
+        : ["--workdir", context.workdir, "--dir", context.dir, "update", slug, ...(request.version ? ["--version", request.version] : [])];
+
+    const result = await runClawHub(args, { allowFailure: true });
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not ${request.action} ${slug}.`);
+    }
+
+    await this.restartGatewayAndRequireHealthy("skill update");
+  }
+
+  async saveCustomSkill(skillId: string | undefined, request: SaveCustomSkillRequest): Promise<{ slug: string }> {
+    const list = await this.readOpenClawSkillsList();
+    const skillsDir = await this.resolveSharedSkillsDir(list);
+
+    if (!skillsDir) {
+      throw new Error("SlackClaw could not resolve the shared OpenClaw skills directory.");
+    }
+
+    const existing = skillId ? await this.getInstalledSkillDetail(skillId).catch(() => undefined) : undefined;
+    const slug = slugifySkillName(request.slug?.trim() || existing?.slug || request.name);
+
+    if (!slug) {
+      throw new Error("Enter a skill name first.");
+    }
+
+    const baseDir = join(skillsDir, slug);
+    await mkdir(baseDir, { recursive: true });
+    await writeFile(join(baseDir, "SKILL.md"), buildCustomSkillMarkdown(request, slug, existing?.version));
+
+    await this.restartGatewayAndRequireHealthy("custom skill update");
+
+    return { slug };
+  }
+
+  async removeInstalledSkill(slug: string, request: RemoveSkillRequest & { managedBy: "clawhub" | "slackclaw-custom" }): Promise<void> {
+    if (request.managedBy === "clawhub") {
+      const context = await this.resolveClawHubContext();
+
+      if (!context) {
+        throw new Error("SlackClaw could not resolve the shared OpenClaw skills directory.");
+      }
+
+      const result = await runClawHub(["--workdir", context.workdir, "--dir", context.dir, "uninstall", slug, "--yes"], { allowFailure: true });
+      if (result.code !== 0) {
+        throw new Error(result.stderr || result.stdout || `SlackClaw could not remove ${slug}.`);
+      }
+    } else {
+      const list = await this.readOpenClawSkillsList();
+      const skillsDir = await this.resolveSharedSkillsDir(list);
+
+      if (!skillsDir) {
+        throw new Error("SlackClaw could not resolve the shared OpenClaw skills directory.");
+      }
+
+      await rm(join(skillsDir, slug), { recursive: true, force: true });
+    }
+
+    await this.restartGatewayAndRequireHealthy("skill removal");
+  }
+
   async getModelConfig(): Promise<ModelConfigOverview> {
     const adapterState = await this.ensureSavedModelState();
-    const [allModels, configuredModels, status] = await Promise.all([
-      readModelCatalog(true),
-      readModelCatalog(false),
-      readModelStatus()
-    ]);
-    const [configuredAuthProviders, activeConfig] = await Promise.all([
-      readConfiguredAuthProviders(status),
-      readOpenClawConfigFile(status?.configPath)
-    ]);
-    const supplemental = collectSupplementalModelRefs(status, activeConfig);
-    const completeAllModels = mergeModelCatalogEntries(allModels, supplemental.refs, {
+    const snapshot = await readModelSnapshot();
+    const completeAllModels = mergeModelCatalogEntries(snapshot.allModels, snapshot.supplemental.refs, {
       available: true,
-      defaultModel: supplemental.defaultModel
+      defaultModel: snapshot.supplemental.defaultModel
     });
-    const completeConfiguredModels = mergeModelCatalogEntries(configuredModels, supplemental.refs, {
+    const completeConfiguredModels = mergeModelCatalogEntries(snapshot.configuredModels, snapshot.supplemental.refs, {
       available: true,
-      defaultModel: supplemental.defaultModel
+      defaultModel: snapshot.supplemental.defaultModel
     });
-    const reconciledState = await this.reconcileSavedModelState(adapterState, completeConfiguredModels, supplemental.defaultModel);
+    const reconciledState = await this.reconcileSavedModelState(
+      adapterState,
+      completeConfiguredModels,
+      snapshot.supplemental.defaultModel
+    );
 
     return buildModelConfigOverview(
       completeAllModels,
       completeConfiguredModels,
-      configuredAuthProviders,
+      snapshot.configuredAuthProviders,
       reconciledState.modelEntries ?? [],
       reconciledState.defaultModelEntryId,
       reconciledState.fallbackModelEntryIds ?? [],
-      supplemental.defaultModel
+      snapshot.supplemental.defaultModel
     );
   }
 
@@ -3344,6 +5696,61 @@ export class OpenClawAdapter implements EngineAdapter {
 
   async updateSavedModelEntry(entryId: string, request: SaveModelEntryRequest): Promise<ModelConfigActionResponse> {
     return this.createOrUpdateSavedModelEntry("update", entryId, request);
+  }
+
+  async removeSavedModelEntry(entryId: string): Promise<ModelConfigActionResponse> {
+    await this.getModelConfig();
+    const state = this.normalizeStateFlags(await readAdapterState());
+    const entry = state.modelEntries?.find((item) => item.id === entryId);
+
+    if (!entry) {
+      throw new Error("Saved model entry not found.");
+    }
+
+    const remainingEntries = (state.modelEntries ?? []).filter((item) => item.id !== entryId);
+    const removingDefault = state.defaultModelEntryId === entryId;
+    const remainingFallbackIds = (state.fallbackModelEntryIds ?? []).filter((id) => id !== entryId);
+    let nextDefaultEntryId = state.defaultModelEntryId;
+    let nextFallbackEntryIds = remainingFallbackIds;
+
+    if (removingDefault) {
+      const promotedFallbackId = remainingFallbackIds[0];
+
+      if (!promotedFallbackId) {
+        throw new Error("Set another default AI model before removing the current default model.");
+      }
+
+      nextDefaultEntryId = promotedFallbackId;
+      nextFallbackEntryIds = remainingFallbackIds.filter((id) => id !== promotedFallbackId);
+    }
+
+    const nextState = this.normalizeStateFlags({
+      ...state,
+      modelEntries: remainingEntries,
+      defaultModelEntryId: nextDefaultEntryId,
+      fallbackModelEntryIds: nextFallbackEntryIds
+    });
+    const touchedRuntime = entry.isDefault || entry.isFallback;
+
+    await this.cleanupRemovedSavedModelEntry(entry, nextState);
+
+    if (touchedRuntime) {
+      await this.syncRuntimeModelChain(nextState);
+      await this.restartGatewayAndRequireHealthy("model removal");
+
+      return {
+        status: "completed",
+        message: `${entry.label} was removed. OpenClaw gateway restarted and is reachable.`,
+        modelConfig: await this.getModelConfig()
+      };
+    }
+
+    await writeAdapterState(nextState);
+    return {
+      status: "completed",
+      message: `${entry.label} was removed from SlackClaw.`,
+      modelConfig: await this.getModelConfig()
+    };
   }
 
   async setDefaultModelEntry(request: SetDefaultModelEntryRequest): Promise<ModelConfigActionResponse> {
@@ -3602,6 +6009,8 @@ export class OpenClawAdapter implements EngineAdapter {
       readUpdateStatusFromCommand(managedCommand),
       readUpdateStatusFromCommand(systemCommand)
     ]);
+    const systemCompatible = isOpenClawVersionCompatible(systemVersion);
+    const managedCompatible = isOpenClawVersionCompatible(managedVersion);
 
     const targets: DeploymentTargetStatus[] = [
       {
@@ -3618,10 +6027,12 @@ export class OpenClawAdapter implements EngineAdapter {
         desiredVersion: OPENCLAW_VERSION_PIN,
         latestVersion: systemUpdate?.latestVersion ?? systemVersion,
         updateAvailable: systemUpdate?.updateAvailable ?? false,
+        requirements: STANDARD_OPENCLAW_REQUIREMENTS,
+        requirementsSourceUrl: OPENCLAW_MAC_DOCS_URL,
         summary: systemVersion
-          ? systemVersion === OPENCLAW_VERSION_PIN
-            ? `System OpenClaw ${systemVersion} matches SlackClaw's pinned version.`
-            : `System OpenClaw ${systemVersion} is installed. SlackClaw targets ${OPENCLAW_VERSION_PIN}.`
+          ? systemCompatible
+            ? `System OpenClaw ${systemVersion} meets SlackClaw's minimum supported version ${OPENCLAW_VERSION_PIN}.`
+            : `System OpenClaw ${systemVersion} is installed, but SlackClaw expects at least ${OPENCLAW_VERSION_PIN}.`
           : "No compatible system OpenClaw install was detected.",
         updateSummary: systemVersion ? systemUpdate?.summary : undefined
       },
@@ -3639,10 +6050,12 @@ export class OpenClawAdapter implements EngineAdapter {
         desiredVersion: OPENCLAW_VERSION_PIN,
         latestVersion: managedUpdate?.latestVersion ?? managedVersion,
         updateAvailable: managedUpdate?.updateAvailable ?? false,
+        requirements: MANAGED_OPENCLAW_REQUIREMENTS,
+        requirementsSourceUrl: OPENCLAW_INSTALL_DOCS_URL,
         summary: managedVersion
-          ? managedVersion === OPENCLAW_VERSION_PIN
-            ? `Managed local OpenClaw ${managedVersion} is installed in SlackClaw's runtime folder.`
-            : `Managed local OpenClaw ${managedVersion} is installed. SlackClaw targets ${OPENCLAW_VERSION_PIN}.`
+          ? managedCompatible
+            ? `Managed local OpenClaw ${managedVersion} meets SlackClaw's minimum supported version ${OPENCLAW_VERSION_PIN}.`
+            : `Managed local OpenClaw ${managedVersion} is installed, but SlackClaw expects at least ${OPENCLAW_VERSION_PIN}.`
           : "SlackClaw's managed local OpenClaw runtime is not installed yet.",
         updateSummary: managedVersion ? managedUpdate?.summary : undefined
       },
@@ -3657,6 +6070,7 @@ export class OpenClawAdapter implements EngineAdapter {
         recommended: false,
         active: false,
         updateAvailable: false,
+        requirements: [],
         summary: "Planned future adapter."
       },
       {
@@ -3670,6 +6084,7 @@ export class OpenClawAdapter implements EngineAdapter {
         recommended: false,
         active: false,
         updateAvailable: false,
+        requirements: [],
         summary: "Planned future adapter."
       }
     ];
@@ -3688,6 +6103,10 @@ export class OpenClawAdapter implements EngineAdapter {
         : await resolveManagedOpenClawCommand();
 
     if (!command) {
+      await logSoftFailure("SlackClaw could not update an OpenClaw deployment target because the runtime is missing.", {
+        targetId,
+        targetLabel
+      });
       return {
         targetId,
         status: "failed",
@@ -3698,11 +6117,39 @@ export class OpenClawAdapter implements EngineAdapter {
 
     const beforeVersion = await readVersionFromCommand(command);
     const beforeStatus = await readUpdateStatusFromCommand(command);
-    const updateResult = await runCommand(command, ["update", "--json", "--yes", "--tag", "latest"], { allowFailure: true });
-    const afterVersion = await readVersionFromCommand(command);
-    const afterStatus = await readUpdateStatusFromCommand(command);
+    const updateResult = await runCommand(command, ["update", "--json", "--yes", "--no-restart", "--tag", "latest"], {
+      allowFailure: true
+    });
+    invalidateResolvedCommandByPath(command);
+    invalidateCommandResolutionCache(targetId === "standard" ? "openclaw:system" : "openclaw:managed");
+    invalidateReadCache("engine:", "command:version:", "command:update:");
+    const refreshedCommand =
+      targetId === "standard"
+        ? await resolveSystemOpenClawCommand({ fresh: true })
+        : await resolveManagedOpenClawCommand({ fresh: true });
+    const effectiveCommand = refreshedCommand ?? command;
+    const afterVersion = await readVersionFromCommand(effectiveCommand, { fresh: true });
+    const afterStatus = await readUpdateStatusFromCommand(effectiveCommand, { fresh: true });
+    const parsedUpdateResult =
+      safeJsonPayloadParse<{ targetVersion?: string; currentVersion?: string }>(updateResult.stdout) ??
+      safeJsonPayloadParse<{ targetVersion?: string; currentVersion?: string }>(updateResult.stderr);
+    const expectedVersion = parsedUpdateResult?.targetVersion?.trim() || beforeStatus?.latestVersion?.trim();
+    const versionAdvanced =
+      compareOpenClawVersions(afterVersion, beforeVersion) ??
+      (afterVersion && beforeVersion ? (afterVersion === beforeVersion ? 0 : 1) : undefined);
+    const stillBehindExpectedVersion =
+      compareOpenClawVersions(afterVersion, expectedVersion) ??
+      (afterVersion && expectedVersion ? (afterVersion === expectedVersion ? 0 : -1) : undefined);
 
     if (updateResult.code !== 0) {
+      await logSoftFailure("SlackClaw failed to update an installed OpenClaw deployment target.", {
+        targetId,
+        targetLabel,
+        command: effectiveCommand,
+        beforeVersion,
+        stderr: updateResult.stderr,
+        stdout: updateResult.stdout
+      });
       return {
         targetId,
         status: "failed",
@@ -3711,32 +6158,160 @@ export class OpenClawAdapter implements EngineAdapter {
       };
     }
 
-    if (
-      beforeStatus?.updateAvailable &&
-      beforeVersion &&
-      afterVersion === beforeVersion &&
-      afterStatus?.updateAvailable
-    ) {
+    if (beforeStatus?.updateAvailable && beforeVersion && (!afterVersion || (versionAdvanced ?? 0) <= 0)) {
+      await logSoftFailure("SlackClaw attempted an OpenClaw update but the installed version did not change.", {
+        targetId,
+        targetLabel,
+        command: effectiveCommand,
+        beforeVersion,
+        afterVersion,
+        expectedVersion,
+        stdout: updateResult.stdout,
+        stderr: updateResult.stderr
+      });
       return {
         targetId,
         status: "failed",
-        message: `${targetLabel} update did not change the installed version. It is still ${afterVersion}.`,
+        message: expectedVersion
+          ? `${targetLabel} update finished, but the active version is still ${afterVersion ?? beforeVersion} instead of ${expectedVersion}.`
+          : `${targetLabel} update did not change the installed version. It is still ${afterVersion ?? beforeVersion}.`,
+        engineStatus: await this.status()
+      };
+    }
+
+    if (
+      beforeStatus?.updateAvailable &&
+      expectedVersion &&
+      afterVersion &&
+      afterStatus?.updateAvailable &&
+      (stillBehindExpectedVersion ?? -1) < 0
+    ) {
+      await logSoftFailure("SlackClaw attempted an OpenClaw update but the active binary is still behind the expected version.", {
+        targetId,
+        targetLabel,
+        command: effectiveCommand,
+        beforeVersion,
+        afterVersion,
+        expectedVersion,
+        stdout: updateResult.stdout,
+        stderr: updateResult.stderr
+      });
+      return {
+        targetId,
+        status: "failed",
+        message: `${targetLabel} update finished, but the active version is still ${afterVersion} and SlackClaw expected at least ${expectedVersion}.`,
+        engineStatus: await this.status()
+      };
+    }
+
+    const restart = await runCommand(effectiveCommand, ["gateway", "restart"], { allowFailure: true });
+
+    if (restart.code !== 0) {
+      await logSoftFailure("SlackClaw updated OpenClaw but could not restart the gateway afterward.", {
+        targetId,
+        targetLabel,
+        command: effectiveCommand,
+        beforeVersion,
+        afterVersion,
+        stdout: restart.stdout,
+        stderr: restart.stderr
+      });
+      return {
+        targetId,
+        status: "failed",
+        message: restart.stderr || restart.stdout || `${targetLabel} updated, but SlackClaw could not restart the OpenClaw gateway.`,
+        engineStatus: await this.status()
+      };
+    }
+
+    invalidateReadCache("engine:", "command:version:", "command:update:");
+    const finalVersion = await readVersionFromCommand(effectiveCommand, { fresh: true });
+    const finalStatus = await readUpdateStatusFromCommand(effectiveCommand, { fresh: true });
+    const finalVersionAdvanced =
+      compareOpenClawVersions(finalVersion, beforeVersion) ??
+      (finalVersion && beforeVersion ? (finalVersion === beforeVersion ? 0 : 1) : undefined);
+    const finalStillBehindExpectedVersion =
+      compareOpenClawVersions(finalVersion, expectedVersion) ??
+      (finalVersion && expectedVersion ? (finalVersion === expectedVersion ? 0 : -1) : undefined);
+
+    if (beforeStatus?.updateAvailable && beforeVersion && (!finalVersion || (finalVersionAdvanced ?? 0) <= 0)) {
+      await logSoftFailure("SlackClaw updated and restarted OpenClaw, but the active version reverted afterward.", {
+        targetId,
+        targetLabel,
+        command: effectiveCommand,
+        beforeVersion,
+        afterVersion,
+        finalVersion,
+        expectedVersion
+      });
+      return {
+        targetId,
+        status: "failed",
+        message: expectedVersion
+          ? `${targetLabel} update ran, but after restart the active version is still ${finalVersion ?? beforeVersion} instead of ${expectedVersion}.`
+          : `${targetLabel} update ran, but after restart the active version is still ${finalVersion ?? beforeVersion}.`,
+        engineStatus: await this.status()
+      };
+    }
+
+    if (
+      beforeStatus?.updateAvailable &&
+      expectedVersion &&
+      finalVersion &&
+      finalStatus?.updateAvailable &&
+      (finalStillBehindExpectedVersion ?? -1) < 0
+    ) {
+      await logSoftFailure("SlackClaw updated and restarted OpenClaw, but the active version stayed behind the expected version.", {
+        targetId,
+        targetLabel,
+        command: effectiveCommand,
+        beforeVersion,
+        afterVersion,
+        finalVersion,
+        expectedVersion
+      });
+      return {
+        targetId,
+        status: "failed",
+        message: `${targetLabel} update ran, but after restart the active version is still ${finalVersion} and SlackClaw expected at least ${expectedVersion}.`,
         engineStatus: await this.status()
       };
     }
 
     const message =
       afterVersion && beforeVersion && afterVersion !== beforeVersion
-        ? `${targetLabel} updated from ${beforeVersion} to ${afterVersion}.`
-        : afterVersion
-          ? `${targetLabel} update completed. Current version: ${afterVersion}.`
+        ? `${targetLabel} updated from ${beforeVersion} to ${finalVersion ?? afterVersion}.`
+        : finalVersion
+          ? `${targetLabel} update completed. Current version: ${finalVersion}.`
           : `${targetLabel} update completed.`;
+    let engineStatus: EngineStatus;
+
+    try {
+      engineStatus = await this.waitForGatewayReachable(`${targetLabel} update`);
+    } catch (error) {
+      const fallbackStatus = await this.status();
+      await logSoftFailure("SlackClaw restarted the OpenClaw gateway after update, but it is still not reachable.", {
+        targetId,
+        targetLabel,
+        command: effectiveCommand,
+        finalVersion,
+        summary: error instanceof Error ? error.message : fallbackStatus.summary
+      });
+      return {
+        targetId,
+        status: "failed",
+        message:
+          (error instanceof Error ? error.message : fallbackStatus.summary) ||
+          `${targetLabel} updated, but the OpenClaw gateway is still not reachable after restart.`,
+        engineStatus: fallbackStatus
+      };
+    }
 
     return {
       targetId,
       status: "completed",
-      message,
-      engineStatus: await this.status()
+      message: `${message} OpenClaw gateway restarted and is reachable. SlackClaw verified the version again after restart.`,
+      engineStatus
     };
   }
 
@@ -3777,14 +6352,14 @@ export class OpenClawAdapter implements EngineAdapter {
     checks.push({
       id: "version-compatibility",
       title: "Version compatibility",
-      severity: data.cliVersion === OPENCLAW_VERSION_PIN ? "ok" : data.cliVersion ? "warning" : "info",
+      severity: isOpenClawVersionCompatible(data.cliVersion) ? "ok" : data.cliVersion ? "warning" : "info",
       summary: data.cliVersion
-        ? data.cliVersion === OPENCLAW_VERSION_PIN
-          ? "OpenClaw matches SlackClaw's pinned version."
-          : `OpenClaw ${data.cliVersion} differs from SlackClaw's pinned ${OPENCLAW_VERSION_PIN}.`
+        ? isOpenClawVersionCompatible(data.cliVersion)
+          ? `OpenClaw ${data.cliVersion} meets SlackClaw's minimum supported version ${OPENCLAW_VERSION_PIN}.`
+          : `OpenClaw ${data.cliVersion} is older than SlackClaw's minimum supported version ${OPENCLAW_VERSION_PIN}.`
         : "OpenClaw version is unknown.",
       detail: "SlackClaw currently targets a pinned-compatible OpenClaw release for reliability.",
-      remediationActionIds: data.cliVersion === OPENCLAW_VERSION_PIN ? [] : ["rollback-update"]
+      remediationActionIds: isOpenClawVersionCompatible(data.cliVersion) ? [] : ["rollback-update"]
     });
 
     checks.push({
@@ -3830,6 +6405,11 @@ export class OpenClawAdapter implements EngineAdapter {
     const title = createTaskTitle(request);
 
     if (!installed) {
+      await logSoftFailure("SlackClaw task execution failed because OpenClaw is not installed.", {
+        profileId: request.profileId,
+        memberId: request.memberId,
+        memberAgentId: request.memberAgentId
+      });
       return {
         taskId: randomUUID(),
         title,
@@ -3851,7 +6431,7 @@ export class OpenClawAdapter implements EngineAdapter {
         "agent",
         "--local",
         "--json",
-        ...(await this.resolveAgentArgs()),
+        ...(request.memberAgentId ? ["--agent", request.memberAgentId] : await this.resolveAgentArgs()),
         "--message",
         request.prompt
       ],
@@ -3868,12 +6448,23 @@ export class OpenClawAdapter implements EngineAdapter {
       result.stderr;
     const ok = result.code === 0 && Boolean(output);
 
+    if (!ok) {
+      await logSoftFailure("SlackClaw task execution returned a failed OpenClaw response.", {
+        profileId: request.profileId,
+        memberId: request.memberId,
+        memberAgentId: request.memberAgentId,
+        code: result.code,
+        stderr: result.stderr,
+        stdout: result.stdout
+      });
+    }
+
     return {
       taskId: randomUUID(),
       title,
       status: ok ? "completed" : "failed",
       summary: ok
-        ? `OpenClaw completed the task using profile ${request.profileId}.`
+        ? `OpenClaw completed the task using profile ${request.profileId}${request.memberId ? ` and AI member ${request.memberId}` : ""}.`
         : "OpenClaw did not return a successful local agent response.",
       output: ok
         ? output
@@ -3898,8 +6489,8 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   async update(): Promise<{ message: string; engineStatus: EngineStatus }> {
-    const updateResult = await runOpenClaw(["update", "status", "--json"], { allowFailure: true });
-    const parsed = safeJsonPayloadParse<OpenClawUpdateStatusJson>(updateResult.stdout) ?? safeJsonPayloadParse<OpenClawUpdateStatusJson>(updateResult.stderr);
+    const snapshot = await readEngineSnapshot({ includeUpdate: true });
+    const parsed = snapshot.updateJson;
     const engineStatus = await this.status();
 
     if (parsed?.availability?.available) {
@@ -3910,6 +6501,9 @@ export class OpenClawAdapter implements EngineAdapter {
     }
 
     if (parsed?.update?.registry?.error) {
+      await logSoftFailure("SlackClaw update check failed during OpenClaw registry lookup.", {
+        registryError: parsed.update.registry.error
+      });
       return {
         message: `SlackClaw checked for updates, but registry lookup failed: ${parsed.update.registry.error}.`,
         engineStatus
@@ -3924,6 +6518,9 @@ export class OpenClawAdapter implements EngineAdapter {
 
   async repair(action: RecoveryAction): Promise<RecoveryRunResponse> {
     if (!(await resolveOpenClawCommand())) {
+      await logSoftFailure("SlackClaw recovery failed because OpenClaw CLI is not installed.", {
+        actionId: action.id
+      });
       return {
         actionId: action.id,
         status: "failed",
@@ -3934,6 +6531,13 @@ export class OpenClawAdapter implements EngineAdapter {
     switch (action.id) {
       case "restart-engine": {
         const restart = await runOpenClaw(["gateway", "restart"], { allowFailure: true });
+        if (restart.code !== 0) {
+          await logSoftFailure("SlackClaw failed to restart the OpenClaw gateway during recovery.", {
+            actionId: action.id,
+            stderr: restart.stderr,
+            stdout: restart.stdout
+          });
+        }
         return {
           actionId: action.id,
           status: restart.code === 0 ? "completed" : "failed",
@@ -3945,6 +6549,13 @@ export class OpenClawAdapter implements EngineAdapter {
       case "repair-config": {
         await this.configure("email-admin");
         const doctor = await runOpenClaw(["doctor", "--repair", "--non-interactive", "--yes"], { allowFailure: true });
+        if (doctor.code !== 0) {
+          await logSoftFailure("SlackClaw failed to repair the OpenClaw configuration with doctor.", {
+            actionId: action.id,
+            stderr: doctor.stderr,
+            stdout: doctor.stdout
+          });
+        }
         return {
           actionId: action.id,
           status: doctor.code === 0 ? "completed" : "failed",
@@ -3968,6 +6579,14 @@ export class OpenClawAdapter implements EngineAdapter {
         const bootstrap = await this.ensurePinnedOpenClaw(false);
         const reinstall = await runOpenClaw(["gateway", "install", "--force"], { allowFailure: true });
         const installStatus = bootstrap.status !== "failed" && reinstall.code === 0 ? "completed" : "failed";
+        if (installStatus === "failed") {
+          await logSoftFailure("SlackClaw failed to reinstall the OpenClaw gateway during recovery.", {
+            actionId: action.id,
+            bootstrap,
+            stderr: reinstall.stderr,
+            stdout: reinstall.stdout
+          });
+        }
         return {
           actionId: action.id,
           status: installStatus,
@@ -3985,6 +6604,9 @@ export class OpenClawAdapter implements EngineAdapter {
           message: "Diagnostics are ready for export."
         };
       default:
+        await logSoftFailure("SlackClaw received an unsupported recovery action.", {
+          actionId: action.id
+        });
         return {
           actionId: action.id,
           status: "failed",
@@ -3994,11 +6616,10 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   async exportDiagnostics(): Promise<{ filename: string; content: string }> {
-    const [status, health, gateway, update] = await Promise.all([
+    const [status, health, snapshot] = await Promise.all([
       this.status(),
       this.healthCheck(),
-      runOpenClaw(["gateway", "status", "--json"], { allowFailure: true }),
-      runOpenClaw(["update", "status", "--json"], { allowFailure: true })
+      readEngineSnapshot({ includeUpdate: true })
     ]);
 
     return {
@@ -4010,11 +6631,8 @@ export class OpenClawAdapter implements EngineAdapter {
           status,
           health,
           raw: {
-            gatewayStatus: safeJsonParse<OpenClawGatewayStatusJson>(gateway.stdout) ?? gateway.stderr,
-            updateStatus:
-              safeJsonPayloadParse<OpenClawUpdateStatusJson>(update.stdout) ??
-              safeJsonPayloadParse<OpenClawUpdateStatusJson>(update.stderr) ??
-              update.stderr
+            gatewayStatus: snapshot.gatewayJson,
+            updateStatus: snapshot.updateJson
           }
         },
         null,
@@ -4042,7 +6660,328 @@ export class OpenClawAdapter implements EngineAdapter {
       });
     }
 
-    return createChannelState(channelId, {});
+    const snapshot = await readChannelSnapshot();
+    return deriveLiveChannelState(channelId, snapshot.list, snapshot.status);
+  }
+
+  async getConfiguredChannelEntries(): Promise<ConfiguredChannelEntry[]> {
+    const snapshot = await readChannelSnapshot();
+    return buildLiveChannelEntries(snapshot.list, snapshot.status);
+  }
+
+  async getActiveChannelSession(): Promise<ChannelSession | undefined> {
+    return activeWhatsappSession();
+  }
+
+  async getChannelSession(sessionId: string): Promise<ChannelSession> {
+    const session = activeWhatsappSession();
+
+    if (!session || session.id !== sessionId) {
+      throw new Error("Channel session not found.");
+    }
+
+    return session;
+  }
+
+  async submitChannelSessionInput(sessionId: string, request: ChannelSessionInputRequest): Promise<ChannelSession> {
+    const session = await this.getChannelSession(sessionId);
+
+    if (session.channelId !== "whatsapp") {
+      throw new Error("SlackClaw only supports direct channel session input for WhatsApp right now.");
+    }
+
+    await this.approvePairing("whatsapp", { code: request.value });
+    return (await this.getActiveChannelSession()) ?? {
+      ...session,
+      status: "completed",
+      message: "WhatsApp pairing approved.",
+      logs: [...session.logs, "WhatsApp pairing approved."]
+    };
+  }
+
+  async saveChannelEntry(
+    request: SaveChannelEntryRequest
+  ): Promise<{ message: string; channel: ChannelSetupState; session?: ChannelSession }> {
+    switch (request.channelId) {
+      case "telegram":
+        if (request.action === "approve-pairing") {
+          return this.approvePairing("telegram", { code: request.values.code ?? "" });
+        }
+
+        return this.configureTelegram({
+          token: request.values.token ?? "",
+          accountName: request.values.accountName
+        });
+      case "whatsapp":
+        if (request.action === "approve-pairing") {
+          return this.approvePairing("whatsapp", { code: request.values.code ?? "" });
+        }
+
+        {
+          const result = await this.startWhatsappLogin();
+          return {
+            ...result,
+            session: await this.getActiveChannelSession()
+          };
+        }
+      case "feishu":
+        if (request.action === "prepare") {
+          return this.prepareFeishu();
+        }
+
+        if (request.action === "approve-pairing") {
+          return this.approvePairing("feishu", { code: request.values.code ?? "" });
+        }
+
+        return this.configureFeishu({
+          appId: request.values.appId ?? "",
+          appSecret: request.values.appSecret ?? "",
+          domain: request.values.domain,
+          botName: request.values.botName
+        });
+      case "wechat":
+        return this.configureWechatWorkaround({
+          pluginSpec: request.values.pluginSpec,
+          corpId: request.values.corpId ?? "",
+          agentId: request.values.agentId ?? "",
+          secret: request.values.secret ?? "",
+          token: request.values.token ?? "",
+          encodingAesKey: request.values.encodingAesKey ?? ""
+        });
+      default:
+        throw new Error("Unsupported channel.");
+    }
+  }
+
+  async removeChannelEntry(
+    request: RemoveChannelEntryRequest
+  ): Promise<{ message: string; channelId: "telegram" | "whatsapp" | "feishu" | "wechat" }> {
+    const channelId = request.channelId ?? channelIdFromEntryId(request.entryId);
+
+    if (channelId === "whatsapp") {
+      await runOpenClaw(["channels", "logout", "--channel", "whatsapp", "--account", "default"], { allowFailure: true });
+      const remove = await runOpenClaw(["channels", "remove", "--channel", "whatsapp", "--account", "default", "--delete"], { allowFailure: true });
+
+      if (remove.code !== 0) {
+        throw new Error(remove.stderr || remove.stdout || "SlackClaw could not remove the WhatsApp configuration.");
+      }
+
+      whatsappLoginSession = undefined;
+    } else if (channelId === "telegram") {
+      const remove = await runOpenClaw(["channels", "remove", "--channel", "telegram", "--account", "default", "--delete"], { allowFailure: true });
+
+      if (remove.code !== 0) {
+        throw new Error(remove.stderr || remove.stdout || "SlackClaw could not remove the Telegram configuration.");
+      }
+    } else if (channelId === "feishu") {
+      const remove = await runOpenClaw(["config", "unset", "channels.feishu"], { allowFailure: true });
+
+      if (remove.code !== 0) {
+        throw new Error(remove.stderr || remove.stdout || "SlackClaw could not remove the Feishu configuration.");
+      }
+    } else {
+      const pluginSpec = request.values?.pluginSpec?.trim() || "@openclaw-china/wecom-app";
+      const pluginId = pluginSpec.split("/").pop() ?? pluginSpec;
+      const remove = await runOpenClaw(["config", "unset", `channels.${pluginId}`], { allowFailure: true });
+
+      if (remove.code !== 0) {
+        throw new Error(remove.stderr || remove.stdout || "SlackClaw could not remove the WeChat workaround configuration.");
+      }
+    }
+
+    await this.restartGatewayAndRequireHealthy(`${channelId} channel removal`);
+
+    return {
+      message: `${channelId === "wechat" ? "WeChat workaround" : channelId[0].toUpperCase() + channelId.slice(1)} configuration removed and the gateway is reachable.`,
+      channelId
+    };
+  }
+
+  async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState> {
+    const agentId =
+      request.existingAgentId ??
+      resolveReadableMemberAgentId(
+      request.name,
+        (await this.listOpenClawAgents()).map((agent) => agent.id).filter((agentId): agentId is string => Boolean(agentId))
+      );
+    const { agentDir, workspaceDir, created } = await this.ensureMemberAgent(request.memberId, agentId, request.brain);
+
+    await this.setMemberIdentity(agentId, request);
+    await rm(resolve(workspaceDir, "knowledge"), { recursive: true, force: true }).catch(() => undefined);
+    await writeMemberWorkspaceFiles(request, workspaceDir, { createBootstrap: created });
+    await this.syncMemberBrain(request, agentId, agentDir, workspaceDir);
+    await runOpenClaw(["memory", "index", "--agent", agentId, "--force"], { allowFailure: true });
+    await this.restartGatewayAndRequireHealthy("AI member configuration");
+    invalidateReadCache("agents:list", `agents:bindings:${agentId}`, "skills:");
+
+    const agents = await this.listOpenClawAgents();
+    if (!agents.some((agent) => agent.id === agentId)) {
+      throw new Error(`SlackClaw could not verify the AI member agent ${agentId}.`);
+    }
+
+    return {
+      agentId,
+      agentDir,
+      workspaceDir,
+      bindings: await this.readMemberBindings(agentId)
+    };
+  }
+
+  async getAIMemberBindings(agentId: string): Promise<MemberBindingSummary[]> {
+    if (!agentId) {
+      return [];
+    }
+
+    return this.readMemberBindings(agentId);
+  }
+
+  async bindAIMemberChannel(agentId: string, request: BindAIMemberChannelRequest): Promise<MemberBindingSummary[]> {
+    if (!agentId) {
+      throw new Error("AI member agent is missing.");
+    }
+
+    const result = await runOpenClaw(["agents", "bind", "--agent", agentId, "--bind", request.binding, "--json"], { allowFailure: true });
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not bind ${request.binding} to ${agentId}.`);
+    }
+
+    await this.restartGatewayAndRequireHealthy("AI member channel binding");
+    invalidateReadCache(`agents:bindings:${agentId}`);
+    return this.readMemberBindings(agentId);
+  }
+
+  async unbindAIMemberChannel(agentId: string, request: BindAIMemberChannelRequest): Promise<MemberBindingSummary[]> {
+    if (!agentId) {
+      throw new Error("AI member agent is missing.");
+    }
+
+    const result = await runOpenClaw(["agents", "unbind", "--agent", agentId, "--bind", request.binding, "--json"], { allowFailure: true });
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not unbind ${request.binding} from ${agentId}.`);
+    }
+
+    await this.restartGatewayAndRequireHealthy("AI member channel unbinding");
+    invalidateReadCache(`agents:bindings:${agentId}`);
+    return this.readMemberBindings(agentId);
+  }
+
+  async deleteAIMemberRuntime(agentId: string, request: DeleteAIMemberRequest): Promise<void> {
+    if (!agentId) {
+      return;
+    }
+
+    const agents = await this.listOpenClawAgents();
+    const existing = agents.find((agent) => agent.id === agentId);
+
+    if (!existing) {
+      return;
+    }
+
+    const result = await runOpenClaw(["agents", "delete", agentId, "--force", "--json"], { allowFailure: true });
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not delete the AI member agent ${agentId}.`);
+    }
+
+    if (request.deleteMode === "full" && existing.workspace) {
+      await rm(existing.workspace, { recursive: true, force: true }).catch(() => undefined);
+    }
+
+    if (request.deleteMode === "full" && existing.agentDir) {
+      await rm(dirname(existing.agentDir), { recursive: true, force: true }).catch(() => undefined);
+    }
+
+    await this.restartGatewayAndRequireHealthy("AI member removal");
+    invalidateReadCache("agents:list", `agents:bindings:${agentId}`);
+
+    const remaining = await this.listOpenClawAgents();
+    if (remaining.some((agent) => agent.id === agentId)) {
+      throw new Error(`SlackClaw could not verify deletion of AI member agent ${agentId}.`);
+    }
+  }
+
+  async getChatThreadDetail(request: { agentId: string; threadId: string; sessionKey: string }): Promise<ChatThreadDetail> {
+    const { result, payload } = await runGatewayCall<OpenClawChatHistoryJson>(
+      "chat.history",
+      {
+        sessionKey: request.sessionKey,
+        limit: 200
+      },
+      { allowFailure: true, timeoutMs: 20000 }
+    );
+
+    if (result.code !== 0 || !payload) {
+      throw new Error(result.stderr || result.stdout || "SlackClaw could not load chat history from OpenClaw.");
+    }
+
+    return {
+      id: request.threadId,
+      memberId: "",
+      agentId: request.agentId,
+      sessionKey: request.sessionKey,
+      title: "",
+      createdAt: "",
+      updatedAt: "",
+      unreadCount: 0,
+      historyStatus: "ready",
+      composerState: {
+        status: "idle",
+        canSend: true,
+        canAbort: false
+      },
+      messages: collapseVisibleChatMessages(
+        (payload.messages ?? []).flatMap((message, index) => {
+          const mapped = toChatMessage(message, index);
+          return mapped ? [mapped] : [];
+        })
+      )
+    };
+  }
+
+  async subscribeToLiveChatEvents(listener: GatewayBridgeListener): Promise<() => void> {
+    return subscribeToGatewaySocketBridge(listener);
+  }
+
+  async sendChatMessage(
+    request: SendChatMessageRequest & { agentId: string; threadId: string; sessionKey: string }
+  ): Promise<{ runId?: string }> {
+    const { result, payload } = await runGatewayCall<{ runId?: string }>(
+      "chat.send",
+      {
+        sessionKey: request.sessionKey,
+        message: request.message,
+        idempotencyKey: request.clientMessageId ?? randomUUID()
+      },
+      {
+        allowFailure: true,
+        timeoutMs: 30000
+      }
+    );
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not send the message for ${request.threadId}.`);
+    }
+
+    return {
+      runId: payload?.runId
+    };
+  }
+
+  async abortChatMessage(request: AbortChatRequest & { agentId: string; threadId: string; sessionKey: string }): Promise<void> {
+    const { result } = await runGatewayCall(
+      "chat.abort",
+      {
+        sessionKey: request.sessionKey
+      },
+      {
+        allowFailure: true,
+        timeoutMs: 15000
+      }
+    );
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not stop the active reply for ${request.threadId}.`);
+    }
   }
 
   async prepareFeishu(): Promise<{ message: string; channel: ChannelSetupState }> {
@@ -4350,16 +7289,34 @@ export class OpenClawAdapter implements EngineAdapter {
       throw new Error(restart.stderr || restart.stdout || `SlackClaw could not restart the OpenClaw gateway after ${reason}.`);
     }
 
+    invalidateReadCache("engine:", "models:", "channels:", "skills:", "agents:", "command:version:", "command:update:");
+
+    return this.waitForGatewayReachable(reason);
+  }
+
+  private async waitForGatewayReachable(reason: string): Promise<EngineStatus> {
     for (let attempt = 0; attempt < 12; attempt += 1) {
-      const engineStatus = await this.status();
-      if (engineStatus.running) {
-        return engineStatus;
+      const snapshot = await readEngineSnapshot({ fresh: true });
+
+      if (snapshot.installed && isGatewayReachable(snapshot)) {
+        return {
+          engine: "openclaw",
+          installed: true,
+          running: true,
+          version: snapshot.cliVersion,
+          summary: gatewayReachabilitySummary(snapshot),
+          lastCheckedAt: new Date().toISOString()
+        };
       }
+
       await wait(500);
     }
 
-    const engineStatus = await this.status();
-    throw new Error(engineStatus.summary || `SlackClaw restarted the OpenClaw gateway after ${reason}, but it is still not reachable.`);
+    const snapshot = await readEngineSnapshot({ fresh: true });
+    throw new Error(
+      gatewayReachabilitySummary(snapshot) ||
+        `SlackClaw restarted the OpenClaw gateway after ${reason}, but it is still not reachable.`
+    );
   }
 
   private async collectStatusData(): Promise<{
@@ -4374,9 +7331,9 @@ export class OpenClawAdapter implements EngineAdapter {
     summary: string;
     securityFindings: SecurityFinding[];
   }> {
-    const installed = Boolean(await resolveOpenClawCommand());
+    const snapshot = await readEngineSnapshot();
 
-    if (!installed) {
+    if (!snapshot.installed) {
       return {
         installed: false,
         cliVersion: undefined,
@@ -4391,17 +7348,11 @@ export class OpenClawAdapter implements EngineAdapter {
       };
     }
 
-    const [versionResult, statusResult, gatewayResult] = await Promise.all([
-      runOpenClaw(["--version"], { allowFailure: true }),
-      runOpenClaw(["status", "--json"], { allowFailure: true }),
-      runOpenClaw(["gateway", "status", "--json"], { allowFailure: true })
-    ]);
+    const cliVersion = snapshot.cliVersion;
+    const statusJson = snapshot.statusJson;
+    const gatewayJson = snapshot.gatewayJson;
 
-    const cliVersion = versionResult.stdout || undefined;
-    const statusJson = safeJsonParse<OpenClawStatusJson>(statusResult.stdout);
-    const gatewayJson = safeJsonParse<OpenClawGatewayStatusJson>(gatewayResult.stdout);
-
-    const gatewayReachable = Boolean(statusJson?.gateway?.reachable || gatewayJson?.rpc?.ok);
+    const gatewayReachable = isGatewayReachable(snapshot);
     const gatewayInstalled = Boolean(statusJson?.gatewayService?.installed || gatewayJson?.service?.installed);
     const setupRequired = Boolean(statusJson?.setup?.required);
     const providersMissingCount =
@@ -4414,26 +7365,22 @@ export class OpenClawAdapter implements EngineAdapter {
         ? `Missing provider profiles: ${statusJson.providers.missing.join(", ")}`
         : "Provider auth looks configured.");
 
-    const gatewayDetail =
-      summarizeGateway(gatewayJson) ??
-      statusJson?.gateway?.error ??
-      "SlackClaw could not determine gateway reachability.";
+    const gatewayDetail = gatewayReachabilitySummary(snapshot);
 
-    const versionSummary =
-      cliVersion === OPENCLAW_VERSION_PIN
-        ? `OpenClaw ${cliVersion} matches SlackClaw's pinned version.`
-        : cliVersion
-          ? `OpenClaw ${cliVersion} detected. SlackClaw targets ${OPENCLAW_VERSION_PIN}.`
-          : "OpenClaw version could not be determined.";
+    const versionSummary = cliVersion
+      ? isOpenClawVersionCompatible(cliVersion)
+        ? `OpenClaw ${cliVersion} meets SlackClaw's minimum supported version ${OPENCLAW_VERSION_PIN}.`
+        : `OpenClaw ${cliVersion} detected. SlackClaw expects at least ${OPENCLAW_VERSION_PIN}.`
+      : "OpenClaw version could not be determined.";
 
-    const summary = installed
+    const summary = snapshot.installed
       ? gatewayReachable
         ? `OpenClaw is installed and the local gateway is reachable. ${versionSummary}`
         : `OpenClaw is installed, but the local gateway is not reachable. ${versionSummary}`
       : "OpenClaw is not installed.";
 
     return {
-      installed,
+      installed: snapshot.installed,
       cliVersion,
       gatewayReachable,
       gatewayInstalled,
@@ -4453,7 +7400,7 @@ export class OpenClawAdapter implements EngineAdapter {
     const usesManagedLocalRuntime = forceLocal || Boolean(getAppRootDir());
     const brewCommand = await resolveBrewCommand();
 
-    if (existingVersion === OPENCLAW_VERSION_PIN) {
+    if (isOpenClawVersionCompatible(existingVersion)) {
       return {
         status: "reused-existing",
         changed: false,
@@ -4462,7 +7409,7 @@ export class OpenClawAdapter implements EngineAdapter {
         version: existingVersion,
         message: usesManagedLocalRuntime
           ? `OpenClaw ${existingVersion} is already available in SlackClaw's managed local runtime.`
-          : `OpenClaw ${existingVersion} is already installed and matches the pinned version.`
+          : `OpenClaw ${existingVersion} is already installed and meets SlackClaw's minimum supported version ${OPENCLAW_VERSION_PIN}.`
       };
     }
 

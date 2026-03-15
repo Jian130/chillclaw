@@ -1,7 +1,7 @@
 import { Activity, ArrowRight, Brain, CheckCircle2, Shield, Sparkles, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { useWorkspace } from "../../app/providers/WorkspaceProvider.js";
+import { useAITeam } from "../../app/providers/AITeamProvider.js";
 import { useOverview } from "../../app/providers/OverviewProvider.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
 import { t } from "../../shared/i18n/messages.js";
@@ -23,9 +23,9 @@ export default function DashboardPage() {
   const { locale } = useLocale();
   const copy = t(locale).dashboard;
   const { overview } = useOverview();
-  const { state } = useWorkspace();
-  const readyCount = state.employees.filter((employee) => employee.status === "ready").length;
-  const busyCount = state.employees.filter((employee) => employee.status === "busy").length;
+  const { overview: aiTeam } = useAITeam();
+  const readyCount = aiTeam?.members.filter((member) => member.status === "ready").length ?? 0;
+  const busyCount = aiTeam?.members.filter((member) => member.status === "busy").length ?? 0;
   const channelReady = overview?.channelSetup.channels.filter((channel) => channel.status === "completed" || channel.status === "ready").length ?? 0;
 
   return (
@@ -33,7 +33,7 @@ export default function DashboardPage() {
       <PageHeader
         actions={
           <>
-            <Link to="/chat">
+            <Link to="/members">
               <Button size="lg">
                 <Users size={16} />
                 {copy.createEmployee}
@@ -66,14 +66,14 @@ export default function DashboardPage() {
           </Badge>
         </div>
         <h2>Figma shell, backend-truthful state</h2>
-        <p>The layout follows the new main-file dashboard while the metrics come from the daemon and the digital employee roster stays local to SlackClaw.</p>
+        <p>The layout follows the new main-file dashboard while the metrics now come from the daemon-backed AI member and AI team catalog.</p>
       </div>
 
       <div className="grid--metrics">
         <MetricCard detail={overview?.engine.summary} label="Engine" value={overview?.engine.installed ? "Installed" : "Missing"} />
         <MetricCard detail={overview?.installSpec.desiredVersion} label="Connected Models" value={overview?.installChecks.length ?? 0} />
-        <MetricCard detail={`${readyCount} ready / ${busyCount} busy`} label="Digital Employees" value={state.employees.length} />
-        <MetricCard detail="In Progress" label="Active Tasks" value={state.employees.reduce((total, employee) => total + employee.activeTasks, 0)} />
+        <MetricCard detail={`${readyCount} ready / ${busyCount} busy`} label="AI Members" value={aiTeam?.members.length ?? 0} />
+        <MetricCard detail="In Progress" label="Active Tasks" value={aiTeam?.members.reduce((total, member) => total + member.activeTaskCount, 0) ?? 0} />
         <MetricCard detail={overview?.channelSetup.gatewaySummary} label="Channels Ready" value={channelReady} />
       </div>
 
@@ -90,26 +90,26 @@ export default function DashboardPage() {
               </Link>
             </div>
             <div className="employee-grid">
-              {state.employees.map((employee) => (
-                <div className="employee-card" key={employee.id}>
+              {aiTeam?.members.map((member) => (
+                <div className="employee-card" key={member.id}>
                   <div className="actions-row" style={{ gap: 16, alignItems: "center" }}>
-                    <div className="employee-card__avatar" style={{ background: employee.avatarAccent, width: 72, minWidth: 72, aspectRatio: "1" }}>
-                      {employee.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}
+                    <div className="employee-card__avatar" style={{ background: member.avatar.accent, width: 72, minWidth: 72, aspectRatio: "1" }}>
+                      {member.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}
                     </div>
                     <div className="employee-details">
-                      <strong>{employee.name}</strong>
-                      <span className="card__description">{employee.title}</span>
+                      <strong>{member.name}</strong>
+                      <span className="card__description">{member.jobTitle}</span>
                       <div className="actions-row">
-                        <Badge tone={employee.status === "ready" ? "success" : employee.status === "busy" ? "info" : "neutral"}>
-                          {employee.status}
+                        <Badge tone={member.status === "ready" ? "success" : member.status === "busy" ? "info" : "neutral"}>
+                          {member.status}
                         </Badge>
-                        {employee.activeTasks ? <Badge tone="neutral">{employee.activeTasks} active</Badge> : null}
+                        {member.activeTaskCount ? <Badge tone="neutral">{member.activeTaskCount} active</Badge> : null}
                       </div>
                     </div>
                   </div>
-                  <p className="card__description" style={{ marginTop: 12 }}>{employee.currentStatus}</p>
+                  <p className="card__description" style={{ marginTop: 12 }}>{member.currentStatus}</p>
                 </div>
-              ))}
+              )) ?? null}
             </div>
           </CardContent>
         </Card>
@@ -122,20 +122,20 @@ export default function DashboardPage() {
                 <strong>{copy.recentActivity}</strong>
               </div>
               <div className="activity-list">
-                {state.activity.map((item) => (
+                {aiTeam?.activity.map((item) => (
                   <div className="check-row" key={item.id}>
                     <div className="actions-row" style={{ alignItems: "start" }}>
                       <div className="channel-logo" style={{ background: toneColor(item.tone), color: "white" }}>
-                        {item.employeeName[0]}
+                        {(item.memberName ?? "S")[0]}
                       </div>
                       <div className="check-row__meta">
                         <strong>{item.action}</strong>
                         <p>{item.description}</p>
-                        <p>{item.employeeName} · {item.timestamp}</p>
+                        <p>{item.memberName ?? "SlackClaw"} · {item.timestamp}</p>
                       </div>
                     </div>
                   </div>
-                ))}
+                )) ?? null}
               </div>
             </CardContent>
           </Card>
@@ -151,7 +151,7 @@ export default function DashboardPage() {
                 <div className="check-row"><strong>Gateway reachable</strong><Badge tone={overview?.engine.running ? "success" : "warning"}>{overview?.engine.running ? "Running" : "Stopped"}</Badge></div>
                 <div className="check-row"><strong>Channels configured</strong><Badge tone={channelReady ? "success" : "warning"}>{channelReady ? `${channelReady} ready` : "Pending"}</Badge></div>
                 <div className="check-row"><strong>Health blockers</strong><Badge tone={overview?.healthChecks.some((check) => check.severity === "error") ? "warning" : "success"}>{overview?.healthChecks.some((check) => check.severity === "error") ? "Review" : "Clear"}</Badge></div>
-                <div className="check-row"><strong>Digital employee roster</strong><Badge tone="info">{state.employees.length} employees</Badge></div>
+                <div className="check-row"><strong>AI member roster</strong><Badge tone="info">{aiTeam?.members.length ?? 0} members</Badge></div>
               </div>
             </CardContent>
           </Card>

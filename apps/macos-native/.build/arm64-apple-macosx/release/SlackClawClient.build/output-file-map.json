@@ -1,0 +1,19 @@
+{
+  "": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/SlackClawClient.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/SlackClawClient.o",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/Sources/SlackClawClient/APIClient.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/APIClient.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/APIClient~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/APIClient.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/APIClient.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/Sources/SlackClawClient/SSEParser.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/SSEParser.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/SSEParser~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/SSEParser.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawClient.build/SSEParser.dia"
+  }
+}

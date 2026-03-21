@@ -1,0 +1,19 @@
+{
+  "": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/_Testing_UIKit.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/_Testing_UIKit.o",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_UIKit/Attachments/UIImage+AttachableAsImage.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/UIImage+AttachableAsImage.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/UIImage+AttachableAsImage~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/UIImage+AttachableAsImage.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/UIImage+AttachableAsImage.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_UIKit/ReexportTesting.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/ReexportTesting.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/ReexportTesting~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/ReexportTesting.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_UIKit.build/ReexportTesting.dia"
+  }
+}

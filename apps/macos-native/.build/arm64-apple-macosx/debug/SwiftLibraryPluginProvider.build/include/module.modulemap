@@ -1,0 +1,3 @@
+module SwiftLibraryPluginProvider {
+    header "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/SwiftLibraryPluginProvider.build/include/SwiftLibraryPluginProvider-Swift.h"
+}

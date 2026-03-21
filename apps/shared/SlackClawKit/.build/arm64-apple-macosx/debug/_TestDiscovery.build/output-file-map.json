@@ -1,0 +1,40 @@
+{
+  "": {
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/checkouts/swift-testing/Sources/_TestDiscovery/Additions/WinSDKAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/WinSDKAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/WinSDKAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/WinSDKAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/WinSDKAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/WinSDKAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/checkouts/swift-testing/Sources/_TestDiscovery/DiscoverableAsTestContent.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/DiscoverableAsTestContent.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/DiscoverableAsTestContent.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/DiscoverableAsTestContent~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/DiscoverableAsTestContent.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/DiscoverableAsTestContent.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/checkouts/swift-testing/Sources/_TestDiscovery/SectionBounds.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/SectionBounds.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/SectionBounds.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/SectionBounds~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/SectionBounds.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/SectionBounds.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/checkouts/swift-testing/Sources/_TestDiscovery/TestContentKind.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentKind.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentKind.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentKind~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentKind.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentKind.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/checkouts/swift-testing/Sources/_TestDiscovery/TestContentRecord.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentRecord.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentRecord.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentRecord~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentRecord.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_TestDiscovery.build/TestContentRecord.dia"
+  }
+}

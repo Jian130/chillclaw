@@ -1,0 +1,3 @@
+module SwiftLexicalLookup {
+    header "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SwiftLexicalLookup.build/include/SwiftLexicalLookup-Swift.h"
+}

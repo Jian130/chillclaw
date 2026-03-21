@@ -1,0 +1,13 @@
+{
+  "": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawChatUI.build/SlackClawChatUI.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawChatUI.build/SlackClawChatUI.o",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawChatUI.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/Sources/SlackClawChatUI/ChatViewModel.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawChatUI.build/ChatViewModel.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawChatUI.build/ChatViewModel~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawChatUI.build/ChatViewModel.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawChatUI.build/ChatViewModel.dia"
+  }
+}

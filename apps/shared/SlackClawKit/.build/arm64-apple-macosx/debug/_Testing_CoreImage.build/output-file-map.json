@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/checkouts/swift-testing/Sources/Overlays/_Testing_CoreImage/Attachments/CIImage+AttachableAsImage.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/CIImage+AttachableAsImage.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/CIImage+AttachableAsImage.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/CIImage+AttachableAsImage~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/CIImage+AttachableAsImage.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/CIImage+AttachableAsImage.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/checkouts/swift-testing/Sources/Overlays/_Testing_CoreImage/ReexportTesting.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/ReexportTesting.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/ReexportTesting.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/ReexportTesting~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/ReexportTesting.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/_Testing_CoreImage.build/ReexportTesting.dia"
+  }
+}

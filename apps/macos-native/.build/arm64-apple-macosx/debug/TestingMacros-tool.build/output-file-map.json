@@ -1,0 +1,222 @@
+{
+  "": {
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/ConditionMacro.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionMacro.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionMacro.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionMacro~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionMacro.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionMacro.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/ExitTestCapturedValueMacro.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ExitTestCapturedValueMacro.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ExitTestCapturedValueMacro.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ExitTestCapturedValueMacro~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ExitTestCapturedValueMacro.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ExitTestCapturedValueMacro.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/PragmaMacro.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/PragmaMacro.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/PragmaMacro.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/PragmaMacro~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/PragmaMacro.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/PragmaMacro.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/SourceLocationMacro.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationMacro.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationMacro.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationMacro~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationMacro.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationMacro.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/SuiteDeclarationMacro.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SuiteDeclarationMacro.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SuiteDeclarationMacro.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SuiteDeclarationMacro~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SuiteDeclarationMacro.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SuiteDeclarationMacro.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/DeclGroupSyntaxAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DeclGroupSyntaxAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DeclGroupSyntaxAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DeclGroupSyntaxAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DeclGroupSyntaxAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DeclGroupSyntaxAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/EditorPlaceholderExprSyntaxAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EditorPlaceholderExprSyntaxAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EditorPlaceholderExprSyntaxAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EditorPlaceholderExprSyntaxAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EditorPlaceholderExprSyntaxAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EditorPlaceholderExprSyntaxAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/FunctionDeclSyntaxAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/FunctionDeclSyntaxAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/FunctionDeclSyntaxAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/FunctionDeclSyntaxAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/FunctionDeclSyntaxAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/FunctionDeclSyntaxAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/IntegerLiteralExprSyntaxAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/IntegerLiteralExprSyntaxAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/IntegerLiteralExprSyntaxAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/IntegerLiteralExprSyntaxAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/IntegerLiteralExprSyntaxAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/IntegerLiteralExprSyntaxAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/MacroExpansionContextAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/MacroExpansionContextAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/MacroExpansionContextAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/MacroExpansionContextAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/MacroExpansionContextAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/MacroExpansionContextAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/TokenSyntaxAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TokenSyntaxAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TokenSyntaxAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TokenSyntaxAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TokenSyntaxAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TokenSyntaxAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/TriviaPieceAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TriviaPieceAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TriviaPieceAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TriviaPieceAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TriviaPieceAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TriviaPieceAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/TypeSyntaxProtocolAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TypeSyntaxProtocolAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TypeSyntaxProtocolAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TypeSyntaxProtocolAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TypeSyntaxProtocolAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TypeSyntaxProtocolAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/VersionTupleSyntaxAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/VersionTupleSyntaxAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/VersionTupleSyntaxAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/VersionTupleSyntaxAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/VersionTupleSyntaxAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/VersionTupleSyntaxAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Additions/WithAttributesSyntaxAdditions.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/WithAttributesSyntaxAdditions.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/WithAttributesSyntaxAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/WithAttributesSyntaxAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/WithAttributesSyntaxAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/WithAttributesSyntaxAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/Argument.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/Argument.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/Argument.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/Argument~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/Argument.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/Argument.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/AttributeDiscovery.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AttributeDiscovery.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AttributeDiscovery.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AttributeDiscovery~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AttributeDiscovery.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AttributeDiscovery.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/AvailabilityGuards.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AvailabilityGuards.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AvailabilityGuards.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AvailabilityGuards~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AvailabilityGuards.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/AvailabilityGuards.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/ClosureCaptureListParsing.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ClosureCaptureListParsing.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ClosureCaptureListParsing.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ClosureCaptureListParsing~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ClosureCaptureListParsing.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ClosureCaptureListParsing.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/CommentParsing.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/CommentParsing.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/CommentParsing.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/CommentParsing~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/CommentParsing.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/CommentParsing.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/ConditionArgumentParsing.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionArgumentParsing.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionArgumentParsing.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionArgumentParsing~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionArgumentParsing.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/ConditionArgumentParsing.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/DiagnosticMessage+Diagnosing.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage+Diagnosing.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage+Diagnosing.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage+Diagnosing~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage+Diagnosing.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage+Diagnosing.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/DiagnosticMessage.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/DiagnosticMessage.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/EffectfulExpressionHandling.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EffectfulExpressionHandling.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EffectfulExpressionHandling.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EffectfulExpressionHandling~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EffectfulExpressionHandling.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/EffectfulExpressionHandling.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/SHA256.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SHA256.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SHA256.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SHA256~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SHA256.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SHA256.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/SourceCodeCapturing.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceCodeCapturing.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceCodeCapturing.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceCodeCapturing~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceCodeCapturing.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceCodeCapturing.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/SourceLocationGeneration.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationGeneration.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationGeneration.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationGeneration~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationGeneration.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/SourceLocationGeneration.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/Support/TestContentGeneration.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestContentGeneration.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestContentGeneration.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestContentGeneration~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestContentGeneration.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestContentGeneration.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/TagMacro.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TagMacro.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TagMacro.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TagMacro~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TagMacro.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TagMacro.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/TestDeclarationMacro.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestDeclarationMacro.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestDeclarationMacro.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestDeclarationMacro~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestDeclarationMacro.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestDeclarationMacro.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/TestingMacros/TestingMacrosMain.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestingMacrosMain.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestingMacrosMain.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestingMacrosMain~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestingMacrosMain.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/TestingMacros-tool.build/TestingMacrosMain.dia"
+  }
+}

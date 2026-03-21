@@ -1,0 +1,3 @@
+module SlackClawNativePackageTests {
+    header "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativePackageTests.build/include/SlackClawNativePackageTests-Swift.h"
+}

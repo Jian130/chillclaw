@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/Tests/SlackClawKitTests/OnboardingClientTests.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/OnboardingClientTests.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/OnboardingClientTests.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/OnboardingClientTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/OnboardingClientTests.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/OnboardingClientTests.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/Tests/SlackClawKitTests/SlackClawProtocolTests.swift": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/SlackClawProtocolTests.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/SlackClawProtocolTests.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/SlackClawProtocolTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/SlackClawProtocolTests.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawKitTests.build/SlackClawProtocolTests.dia"
+  }
+}

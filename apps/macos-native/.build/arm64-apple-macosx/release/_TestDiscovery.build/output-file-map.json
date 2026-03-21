@@ -1,0 +1,37 @@
+{
+  "": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/_TestDiscovery.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/_TestDiscovery.o",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/_TestDiscovery/Additions/WinSDKAdditions.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/WinSDKAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/WinSDKAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/WinSDKAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/WinSDKAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/_TestDiscovery/DiscoverableAsTestContent.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/DiscoverableAsTestContent.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/DiscoverableAsTestContent~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/DiscoverableAsTestContent.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/DiscoverableAsTestContent.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/_TestDiscovery/SectionBounds.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/SectionBounds.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/SectionBounds~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/SectionBounds.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/SectionBounds.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/_TestDiscovery/TestContentKind.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentKind.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentKind~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentKind.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentKind.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/_TestDiscovery/TestContentRecord.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentRecord.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentRecord~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentRecord.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_TestDiscovery.build/TestContentRecord.dia"
+  }
+}

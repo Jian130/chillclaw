@@ -1,0 +1,3 @@
+module _TestDiscovery {
+    header "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/debug/_TestDiscovery.build/include/_TestDiscovery-Swift.h"
+}

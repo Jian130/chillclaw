@@ -1,0 +1,73 @@
+{
+  "": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/_Testing_WinSDK.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/_Testing_WinSDK.o",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Attachments/AttachableAsIWICBitmapSource.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableAsIWICBitmapSource.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableAsIWICBitmapSource~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableAsIWICBitmapSource.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableAsIWICBitmapSource.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Attachments/AttachableImageFormat+CLSID.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableImageFormat+CLSID.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableImageFormat+CLSID~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableImageFormat+CLSID.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/AttachableImageFormat+CLSID.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Attachments/HBITMAP+AttachableAsIWICBitmapSource.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HBITMAP+AttachableAsIWICBitmapSource.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HBITMAP+AttachableAsIWICBitmapSource~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HBITMAP+AttachableAsIWICBitmapSource.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HBITMAP+AttachableAsIWICBitmapSource.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Attachments/HICON+AttachableAsIWICBitmapSource.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HICON+AttachableAsIWICBitmapSource.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HICON+AttachableAsIWICBitmapSource~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HICON+AttachableAsIWICBitmapSource.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/HICON+AttachableAsIWICBitmapSource.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Attachments/IWICBitmapSource+AttachableAsIWICBitmapSource.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICBitmapSource+AttachableAsIWICBitmapSource.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICBitmapSource+AttachableAsIWICBitmapSource~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICBitmapSource+AttachableAsIWICBitmapSource.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICBitmapSource+AttachableAsIWICBitmapSource.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Attachments/UnsafeMutablePointer+AttachableAsIWICBitmapSource.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/UnsafeMutablePointer+AttachableAsIWICBitmapSource.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/UnsafeMutablePointer+AttachableAsIWICBitmapSource~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/UnsafeMutablePointer+AttachableAsIWICBitmapSource.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/UnsafeMutablePointer+AttachableAsIWICBitmapSource.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Attachments/_AttachableImageWrapper+AttachableWrapper.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/_AttachableImageWrapper+AttachableWrapper.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/_AttachableImageWrapper+AttachableWrapper~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/_AttachableImageWrapper+AttachableWrapper.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/_AttachableImageWrapper+AttachableWrapper.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/ReexportTesting.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/ReexportTesting.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/ReexportTesting~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/ReexportTesting.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/ReexportTesting.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Support/Additions/GUIDAdditions.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/GUIDAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/GUIDAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/GUIDAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/GUIDAdditions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Support/Additions/IPropertyBag2Additions.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IPropertyBag2Additions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IPropertyBag2Additions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IPropertyBag2Additions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IPropertyBag2Additions.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_WinSDK/Support/Additions/IWICImagingFactoryAdditions.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICImagingFactoryAdditions.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICImagingFactoryAdditions~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICImagingFactoryAdditions.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_WinSDK.build/IWICImagingFactoryAdditions.dia"
+  }
+}

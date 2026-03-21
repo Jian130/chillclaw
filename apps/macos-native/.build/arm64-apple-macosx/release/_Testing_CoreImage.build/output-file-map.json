@@ -1,0 +1,19 @@
+{
+  "": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/_Testing_CoreImage.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/_Testing_CoreImage.o",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_CoreImage/Attachments/CIImage+AttachableAsImage.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/CIImage+AttachableAsImage.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/CIImage+AttachableAsImage~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/CIImage+AttachableAsImage.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/CIImage+AttachableAsImage.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/checkouts/swift-testing/Sources/Overlays/_Testing_CoreImage/ReexportTesting.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/ReexportTesting.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/ReexportTesting~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/ReexportTesting.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/_Testing_CoreImage.build/ReexportTesting.dia"
+  }
+}

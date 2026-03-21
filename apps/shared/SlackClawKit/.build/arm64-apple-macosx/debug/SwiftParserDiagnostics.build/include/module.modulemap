@@ -1,0 +1,3 @@
+module SwiftParserDiagnostics {
+    header "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SwiftParserDiagnostics.build/include/SwiftParserDiagnostics-Swift.h"
+}

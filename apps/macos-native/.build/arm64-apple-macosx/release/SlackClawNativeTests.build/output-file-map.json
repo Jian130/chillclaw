@@ -1,0 +1,19 @@
+{
+  "": {
+    "dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/SlackClawNativeTests.d",
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/SlackClawNativeTests.o",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/master.swiftdeps"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/Tests/SlackClawNativeTests/DaemonManagersTests.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/DaemonManagersTests.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/DaemonManagersTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/DaemonManagersTests.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/DaemonManagersTests.dia"
+  },
+  "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/Tests/SlackClawNativeTests/OnboardingTests.swift": {
+    "object": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/OnboardingTests.swift.o",
+    "swiftmodule": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/OnboardingTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/OnboardingTests.swiftdeps",
+    "diagnostics": "/Users/home/Ryo/Projects/slackclaw/apps/macos-native/.build/arm64-apple-macosx/release/SlackClawNativeTests.build/OnboardingTests.dia"
+  }
+}

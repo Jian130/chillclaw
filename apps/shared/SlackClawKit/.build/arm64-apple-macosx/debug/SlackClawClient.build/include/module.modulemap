@@ -1,0 +1,3 @@
+module SlackClawClient {
+    header "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawClient.build/include/SlackClawClient-Swift.h"
+}

@@ -1,3 +1,0 @@
-module SlackClawProtocol {
-    header "/Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/.build/arm64-apple-macosx/debug/SlackClawProtocol.build/include/SlackClawProtocol-Swift.h"
-}

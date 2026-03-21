@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { ServerResponse } from "node:http";
 
 import type {
   AbortChatRequest,
@@ -16,6 +15,7 @@ import type {
 } from "@slackclaw/contracts";
 
 import type { EngineAdapter, EngineChatLiveEvent } from "../engine/adapter.js";
+import { EventPublisher } from "./event-publisher.js";
 import { errorToLogDetails, writeErrorLog } from "./logger.js";
 import type { StoredChatThreadState } from "./state-store.js";
 import { StateStore } from "./state-store.js";
@@ -117,7 +117,6 @@ async function wait(ms: number): Promise<void> {
 }
 
 export class ChatService {
-  private readonly subscribers = new Set<ServerResponse>();
   private readonly activeRuns = new Map<string, ActiveChatRun>();
   private readonly detailOverrides = new Map<string, ChatThreadDetail>();
   private liveBridgeReady = false;
@@ -127,7 +126,8 @@ export class ChatService {
   constructor(
     private readonly adapter: EngineAdapter,
     private readonly store: StateStore,
-    private readonly aiTeamService: AITeamService
+    private readonly aiTeamService: AITeamService,
+    private readonly eventPublisher?: EventPublisher
   ) {}
 
   async getOverview(): Promise<ChatOverview> {
@@ -366,33 +366,6 @@ export class ChatService {
       overview: await this.getOverview(),
       thread: this.withActiveRunState(await this.getThreadDetail(threadId), activeRun)
     };
-  }
-
-  subscribe(response: ServerResponse): () => void {
-    response.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*"
-    });
-    response.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
-
-    this.subscribers.add(response);
-    void this.ensureLiveBridge();
-
-    const keepAlive = setInterval(() => {
-      response.write(": keep-alive\n\n");
-    }, 20000);
-
-    const cleanup = () => {
-      clearInterval(keepAlive);
-      this.subscribers.delete(response);
-    };
-
-    response.on("close", cleanup);
-    response.on("error", cleanup);
-
-    return cleanup;
   }
 
   private async ensureLiveBridge(): Promise<boolean> {
@@ -1076,9 +1049,42 @@ export class ChatService {
   }
 
   private broadcast(event: ChatStreamEvent | { type: "connected" }): void {
-    const payload = `data: ${JSON.stringify(event)}\n\n`;
-    for (const subscriber of this.subscribers) {
-      subscriber.write(payload);
+    if (event.type === "connected") {
+      return;
     }
+
+    const daemonEvent = this.toDaemonChatEvent(event);
+    if (daemonEvent) {
+      this.eventPublisher?.publishChatStream(daemonEvent);
+    }
+  }
+
+  private toDaemonChatEvent(event: ChatStreamEvent): { threadId: string; sessionKey: string; payload: ChatStreamEvent } | undefined {
+    if ("thread" in event) {
+      return {
+        threadId: event.thread.id,
+        sessionKey: event.thread.sessionKey,
+        payload: event
+      };
+    }
+
+    if ("detail" in event && event.detail) {
+      return {
+        threadId: event.threadId,
+        sessionKey: event.detail.sessionKey,
+        payload: event
+      };
+    }
+
+    const activeRun = this.activeRuns.get(event.threadId);
+    if (!activeRun) {
+      return undefined;
+    }
+
+    return {
+      threadId: event.threadId,
+      sessionKey: activeRun.sessionKey,
+      payload: event
+    };
   }
 }

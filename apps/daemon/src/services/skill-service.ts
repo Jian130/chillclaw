@@ -13,6 +13,7 @@ import type {
 } from "@slackclaw/contracts";
 
 import type { EngineAdapter, SkillRuntimeEntry } from "../engine/adapter.js";
+import { EventPublisher } from "./event-publisher.js";
 import { StateStore } from "./state-store.js";
 
 function mapInstalledSkill(
@@ -75,7 +76,8 @@ function toSkillOptions(skills: InstalledSkillEntry[]): SkillOption[] {
 export class SkillService {
   constructor(
     private readonly adapter: EngineAdapter,
-    private readonly store: StateStore
+    private readonly store: StateStore,
+    private readonly eventPublisher?: EventPublisher
   ) {}
 
   async getConfigOverview(): Promise<SkillCatalogOverview> {
@@ -164,6 +166,10 @@ export class SkillService {
 
   async installMarketplaceSkill(request: InstallSkillRequest): Promise<SkillCatalogActionResponse> {
     const result = await this.adapter.config.installMarketplaceSkill(request);
+    this.eventPublisher?.publishConfigApplied({
+      resource: "skills",
+      summary: `${request.slug} was installed.`
+    });
     return {
       status: "completed",
       message: `${request.slug} was installed.`,
@@ -190,6 +196,11 @@ export class SkillService {
         }
       }
     }));
+
+    this.eventPublisher?.publishConfigApplied({
+      resource: "skills",
+      summary: skillId ? `${request.name} was updated.` : `${request.name} was created.`
+    });
 
     return {
       status: "completed",
@@ -226,6 +237,10 @@ export class SkillService {
     }
 
     const result = await this.adapter.config.updateMarketplaceSkill(skill.slug, request);
+    this.eventPublisher?.publishConfigApplied({
+      resource: "skills",
+      summary: request.action === "reinstall" ? `${skill.name} was reinstalled.` : `${skill.name} was updated.`
+    });
     return {
       status: "completed",
       message: request.action === "reinstall" ? `${skill.name} was reinstalled.` : `${skill.name} was updated.`,
@@ -261,6 +276,11 @@ export class SkillService {
         };
       });
     }
+
+    this.eventPublisher?.publishConfigApplied({
+      resource: "skills",
+      summary: `${skill.name} was removed.`
+    });
 
     return {
       status: "completed",

@@ -4,17 +4,25 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { MockAdapter } from "../engine/mock-adapter.js";
+import { InMemorySecretsAdapter, channelSecretName } from "../platform/secrets-adapter.js";
+import { EventBusService } from "./event-bus-service.js";
+import { EventPublisher } from "./event-publisher.js";
 import { ChannelSetupService } from "./channel-setup-service.js";
 import { StateStore } from "./state-store.js";
 
-function createServices(testName: string) {
+function createServices(
+  testName: string,
+  options?: { withEvents?: boolean; adapter?: MockAdapter; secrets?: InMemorySecretsAdapter }
+) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
-  const adapter = new MockAdapter();
+  const adapter = options?.adapter ?? new MockAdapter();
   const store = new StateStore(filePath);
+  const bus = options?.withEvents ? new EventBusService() : undefined;
 
   return {
-    service: new ChannelSetupService(adapter, store),
-    store
+    service: new ChannelSetupService(adapter, store, bus ? new EventPublisher(bus) : undefined, options?.secrets),
+    store,
+    bus
   };
 }
 
@@ -51,6 +59,28 @@ test("channel setup persists generic channel entries and configured channel stat
   assert.equal(state.channelOnboarding?.channels.telegram.status, "awaiting-pairing");
   assert.equal(state.channelOnboarding?.entries?.["telegram:default"]?.label, "Compatibility Test");
   assert.match(result.channelConfig.gatewaySummary, /staged engine change|gateway manager/i);
+});
+
+test("channel setup stores secret fields through the secrets adapter without exposing them in editable values", async () => {
+  const secrets = new InMemorySecretsAdapter();
+  const { service, store } = createServices("channel-setup-secret-storage", { secrets });
+
+  await service.saveEntry(undefined, {
+    channelId: "telegram",
+    action: "save",
+    values: {
+      token: "telegram-secret-token",
+      accountName: "Support Bot"
+    }
+  });
+
+  const state = await store.read();
+
+  assert.equal(await secrets.get(channelSecretName("telegram", "telegram:default", "token")), "telegram-secret-token");
+  assert.equal(state.channelOnboarding?.entries?.["telegram:default"]?.editableValues.token, undefined);
+  assert.deepEqual(state.channelOnboarding?.entries?.["telegram:default"]?.editableValues, {
+    accountName: "Support Bot"
+  });
 });
 
 test("channel config overview includes live configured entries even without stored metadata", async () => {
@@ -119,4 +149,46 @@ test("channel setup removes a configured entry through the generic path", async 
   assert.equal(result.channelConfig.entries.length, 0);
   assert.equal(state.channelOnboarding?.entries?.["telegram:default"], undefined);
   assert.equal(state.channelOnboarding?.channels.telegram.status, "not-started");
+});
+
+test("channel setup publishes config and session events for save and input flows", async () => {
+  class InteractiveMockAdapter extends MockAdapter {
+    override async submitChannelSessionInput(sessionId: string) {
+      return {
+        id: sessionId,
+        channelId: "whatsapp" as const,
+        status: "completed" as const,
+        message: "Pairing approved.",
+        logs: ["Pairing approved."]
+      };
+    }
+  }
+
+  const { service, bus } = createServices("channel-setup-events", {
+    withEvents: true,
+    adapter: new InteractiveMockAdapter()
+  });
+  const eventTypes: string[] = [];
+  bus?.subscribe((event) => {
+    eventTypes.push(event.type);
+  });
+
+  const save = await service.saveEntry(undefined, {
+    channelId: "whatsapp",
+    action: "save",
+    values: {}
+  });
+
+  assert.equal(save.status, "interactive");
+  assert.equal(eventTypes.includes("config.applied"), true);
+  assert.equal(eventTypes.includes("channel.session.updated"), true);
+
+  eventTypes.length = 0;
+
+  const sessionId = save.session?.id;
+  assert.ok(sessionId);
+
+  await service.submitSessionInput(sessionId!, { value: "123456" });
+
+  assert.equal(eventTypes.includes("channel.session.updated"), true);
 });

@@ -38,10 +38,11 @@ This file captures the important operating rules for agents working in this repo
   - reusable native client/chat packages in `apps/shared/SlackClawKit`
 - Keep the shared Swift packages split by responsibility:
   - `SlackClawProtocol` for daemon DTOs
-  - `SlackClawClient` for HTTP + SSE transport
+  - `SlackClawClient` for HTTP + WebSocket event transport
   - `SlackClawChatUI` for native chat transport, transcript, and view models
 - Do not embed browser views for core product flows when a native screen exists. Native chat should stay native, not a web wrapper.
 - Keep daemon routes stable when possible. Add only the minimum daemon metadata needed for native parity rather than inventing native-only backend behavior.
+- Use HTTP for command/query APIs and the daemon WebSocket event bus for live client updates. Keep the OpenClaw gateway socket daemon-internal.
 - Native UI must surface the same distinction between:
   - installed instance
   - staged config / pending gateway apply
@@ -91,7 +92,6 @@ This file captures the important operating rules for agents working in this repo
 - `apps/desktop-ui`: first-party user experience only
 - `apps/macos-native`: native macOS client only; keep it daemon-backed and OpenClaw-agnostic
 - `apps/shared/SlackClawKit`: shared Swift protocol, client, and chat packages for native clients
-- `SlackClaw.xcworkspace`: the root native-development entry point for Xcode; keep native clients parallel to the React app and future native apps parallel to `apps/macos-native`
 - `apps/daemon`: orchestration, policy, health, recovery, diagnostics, static asset serving in packaged mode
 - `packages/contracts`: shared product/domain contracts; keep these stable and explicit
 - `scripts/bootstrap-openclaw.mjs`: the single source of truth for OpenClaw install/reuse behavior

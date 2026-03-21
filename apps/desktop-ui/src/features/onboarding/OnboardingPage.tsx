@@ -46,6 +46,7 @@ import {
 } from "../../shared/api/client.js";
 import { memberAvatarPresets, resolveMemberAvatarPreset } from "../../shared/avatar-presets.js";
 import { settleAfterMutation } from "../../shared/data/settle.js";
+import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 import { t } from "../../shared/i18n/messages.js";
 import { Badge } from "../../shared/ui/Badge.js";
 import { Button } from "../../shared/ui/Button.js";
@@ -55,7 +56,12 @@ import { LoadingBlocker } from "../../shared/ui/LoadingBlocker.js";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar.js";
 import { ProviderLogo } from "../../shared/ui/ProviderLogo.js";
 import { onboardingCopy } from "./copy.js";
-import { buildOnboardingMemberRequest, onboardingDestinationPath, type OnboardingEmployeeDraft } from "./helpers.js";
+import {
+  buildOnboardingMemberRequest,
+  onboardingDestinationPath,
+  onboardingRefreshResourceForEvent,
+  type OnboardingEmployeeDraft
+} from "./helpers.js";
 
 const MODEL_KEY_CUSTOM_OPTION = "__custom_model_key__";
 const ONBOARDING_CHANNEL_IDS = new Set(["wechat", "feishu", "telegram"]);
@@ -429,6 +435,36 @@ export default function OnboardingPage() {
       return currentDraft.model?.modelKey ?? selectedProvider.sampleModels[0] ?? availableModels[0]?.key ?? "";
     });
   }, [availableModels, currentDraft.model?.methodId, currentDraft.model?.modelKey, selectedProvider]);
+
+  useEffect(() => {
+    return subscribeToDaemonEvents((event) => {
+      const resource = onboardingRefreshResourceForEvent(currentStep, event);
+      if (!resource) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          switch (resource) {
+            case "overview":
+              await readFreshOverview();
+              break;
+            case "model":
+              await readFreshModelConfig();
+              break;
+            case "channel":
+              await readFreshChannelConfig();
+              break;
+            case "team":
+              await readFreshAITeamOverview();
+              break;
+          }
+        } catch {
+          // Keep the onboarding flow responsive even if a live refresh misses once.
+        }
+      })();
+    });
+  }, [currentStep, refresh]);
 
   useEffect(() => {
     if (!selectedProvider || !modelKey) {

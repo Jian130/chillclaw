@@ -13,9 +13,13 @@ struct SettledMutationResult<Mutation, State> {
 @MainActor
 @Observable
 final class NativeOnboardingViewModel {
-    private unowned let appState: SlackClawAppState
+    typealias DaemonEventStreamFactory = @Sendable () -> AsyncStream<SlackClawEvent>
+
+    private let appState: SlackClawAppState
+    private let daemonEventStreamFactory: DaemonEventStreamFactory
     private var modelSessionTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
+    private var daemonEventTask: Task<Void, Never>?
     private var isApplyingDraft = false
 
     let copy = nativeOnboardingCopy()
@@ -53,8 +57,9 @@ final class NativeOnboardingViewModel {
     var selectedSkillIds: [String] = []
     var memoryEnabled = true
 
-    init(appState: SlackClawAppState) {
+    init(appState: SlackClawAppState, daemonEventStreamFactory: DaemonEventStreamFactory? = nil) {
         self.appState = appState
+        self.daemonEventStreamFactory = daemonEventStreamFactory ?? { appState.client.daemonEvents() }
     }
 
     var currentDraft: OnboardingDraftState {
@@ -133,9 +138,6 @@ final class NativeOnboardingViewModel {
         do {
             if appState.overview == nil {
                 await appState.refreshAll()
-            } else {
-                let overview = try await appState.client.fetchOverview()
-                appState.overview = overview
             }
 
             let state = try await appState.client.fetchOnboardingState()
@@ -165,6 +167,7 @@ final class NativeOnboardingViewModel {
         }
 
         pageLoading = false
+        startDaemonEventsIfNeeded()
     }
 
     func markWelcomeStarted() async {
@@ -649,6 +652,44 @@ final class NativeOnboardingViewModel {
         let overview = try await appState.client.fetchAITeamOverview()
         appState.aiTeamOverview = overview
         return overview
+    }
+
+    private func startDaemonEventsIfNeeded() {
+        guard daemonEventTask == nil else { return }
+
+        daemonEventTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = self.daemonEventStreamFactory()
+
+            for await event in stream {
+                if Task.isCancelled {
+                    break
+                }
+
+                await self.applyDaemonEvent(event)
+            }
+        }
+    }
+
+    private func applyDaemonEvent(_ event: SlackClawEvent) async {
+        guard let currentStep = onboardingState?.draft.currentStep else { return }
+        guard let resource = onboardingRefreshResourceForEvent(currentStep, event) else { return }
+
+        do {
+            switch resource {
+            case .overview:
+                _ = try await readFreshOverview()
+            case .model:
+                _ = try await readFreshModelConfig()
+            case .channel:
+                _ = try await readFreshChannelConfig()
+            case .team:
+                _ = try await readFreshAITeamOverview()
+            }
+            pageError = nil
+        } catch {
+            pageError = error.localizedDescription
+        }
     }
 
     private func settleAfterMutation<Mutation, State>(

@@ -67,6 +67,10 @@ import { OpenClawConfigManager } from "./openclaw-config-manager.js";
 import { OpenClawGatewayManager } from "./openclaw-gateway-manager.js";
 import { OpenClawInstanceManager } from "./openclaw-instance-manager.js";
 import { appendGatewayApplyMessage, summarizePendingGatewayApply } from "./openclaw-shared.js";
+import { type CommandResult, probeCommand as probeExternalCommand, resolveCommandFromPath as resolveCommandFromShellPath, runCommand as runExternalCommand } from "../platform/cli-runner.js";
+import { createDefaultSecretsAdapter } from "../platform/macos-keychain-secrets-adapter.js";
+import { OpenClawGatewaySocketAdapter, normalizeGatewaySocketUrl, readGatewayChatText } from "../platform/openclaw-gateway-socket-adapter.js";
+import type { SecretsAdapter } from "../platform/secrets-adapter.js";
 
 import type {
   AIEmployeeManager,
@@ -85,12 +89,6 @@ import type {
 } from "./adapter.js";
 import { getAppRootDir, getDataDir, getManagedOpenClawBinPath, getManagedOpenClawDir } from "../runtime-paths.js";
 import { errorToLogDetails, logDevelopmentCommand, writeErrorLog, writeInfoLog } from "../services/logger.js";
-
-interface CommandResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
 
 interface OpenClawStatusJson {
   setup?: {
@@ -158,38 +156,6 @@ interface OpenClawGatewayStatusJson {
     ok?: boolean;
     error?: string;
     url?: string;
-  };
-}
-
-interface OpenClawGatewaySocketEnvelope {
-  type?: string;
-  event?: string;
-  id?: string;
-  ok?: boolean;
-  payload?: Record<string, unknown>;
-  error?: string | { message?: string };
-}
-
-interface OpenClawGatewayConnectChallengePayload {
-  nonce?: string;
-}
-
-interface OpenClawGatewayChatEventPayload {
-  sessionKey?: string;
-  runId?: string;
-  state?: "delta" | "final" | "aborted" | "error";
-  message?: OpenClawChatMessageJson | string;
-  errorMessage?: string;
-}
-
-interface OpenClawGatewayAgentEventPayload {
-  runId?: string;
-  stream?: string;
-  data?: {
-    phase?: string;
-    name?: string;
-    isError?: boolean;
-    error?: string;
   };
 }
 
@@ -571,28 +537,6 @@ const READ_CACHE_TTL_MS = {
   bindings: 1000
 } as const;
 
-type GatewayBridgeListener = (event: EngineChatLiveEvent) => void;
-
-interface GatewaySocketBridgeState {
-  listeners: Set<GatewayBridgeListener>;
-  socket?: {
-    close: () => void;
-    send: (value: string) => void;
-    readyState: number;
-    addEventListener?: (type: string, listener: (event: unknown) => void) => void;
-    removeEventListener?: (type: string, listener: (event: unknown) => void) => void;
-    onopen?: (event: unknown) => void;
-    onmessage?: (event: { data?: unknown }) => void;
-    onclose?: (event: { code?: number; reason?: string }) => void;
-    onerror?: (event: unknown) => void;
-  };
-  connectPromise?: Promise<void>;
-  reconnectTimer?: NodeJS.Timeout;
-  connectRequestId?: string;
-  intentionalClose?: boolean;
-  connected: boolean;
-}
-
 type ReadCacheEntry = {
   expiresAt: number;
   promise: Promise<unknown>;
@@ -612,34 +556,7 @@ type EngineReadSnapshot = {
   updateJson?: OpenClawUpdateStatusJson;
 };
 
-const gatewaySocketBridgeState: GatewaySocketBridgeState = {
-  listeners: new Set(),
-  connected: false
-};
-
-export function buildGatewaySocketConnectParams(params: {
-  token: string;
-  platform?: string;
-  clientVersion?: string;
-}): Record<string, unknown> {
-  return {
-    minProtocol: 3,
-    maxProtocol: 3,
-    client: {
-      id: "gateway-client",
-      displayName: "SlackClaw daemon",
-      version: params.clientVersion ?? process.env.npm_package_version ?? "0.1.2",
-      platform: params.platform ?? process.platform,
-      mode: "backend"
-    },
-    caps: ["tool-events"],
-    auth: {
-      token: params.token
-    },
-    role: "operator",
-    scopes: ["operator.admin"]
-  };
-}
+export { buildGatewaySocketConnectParams } from "../platform/openclaw-gateway-socket-adapter.js";
 
 type ModelReadSnapshot = {
   allModels: ModelCatalogEntry[];
@@ -659,6 +576,34 @@ type SkillReadSnapshot = {
   list?: OpenClawSkillsListJson;
   warnings: string[];
 };
+
+const gatewaySocketBridge = new OpenClawGatewaySocketAdapter({
+  readConnectionInfo: async () => {
+    const snapshot = await readEngineSnapshot();
+    const url = snapshot.gatewayJson?.rpc?.url?.trim();
+
+    if (!url) {
+      return undefined;
+    }
+
+    const config = (await readOpenClawConfigFile(defaultOpenClawConfigPath())) ?? {};
+    const token = config.gateway?.auth?.token?.trim();
+
+    if (!token || token.startsWith("__OPENCLAW_")) {
+      return undefined;
+    }
+
+    return {
+      url: normalizeGatewaySocketUrl(url),
+      token
+    };
+  },
+  onReconnectError: async (error) => {
+    await writeErrorLog("SlackClaw lost the live OpenClaw chat event bridge.", {
+      error: errorToLogDetails(error)
+    });
+  }
+});
 
 const readCache = new Map<string, ReadCacheEntry>();
 const commandResolutionCache = new Map<string, CommandResolutionCacheEntry>();
@@ -1690,53 +1635,25 @@ async function runCommand(
   args: string[],
   options?: { allowFailure?: boolean; envOverrides?: Record<string, string | undefined>; input?: string }
 ): Promise<CommandResult> {
-  return new Promise((resolve, reject) => {
-    logExternalCommand(command, args);
-    const child = spawn(command, args, {
-      env: buildCommandEnv(command, options?.envOverrides)
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdin.end(options?.input);
-
-    child.on("error", (error) => {
+  return runExternalCommand(command, args, {
+    allowFailure: options?.allowFailure,
+    env: buildCommandEnv(command, options?.envOverrides),
+    input: options?.input,
+    beforeSpawn: (nextCommand, nextArgs) => {
+      logExternalCommand(nextCommand, nextArgs);
+    },
+    onSpawnError: async (error) => {
       const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code ?? "") : "";
       if (errorCode === "ENOENT") {
         invalidateResolvedCommandByPath(command);
         invalidateReadCache(`command:version:${command}`, `command:update:${command}`, `command:status:${command}`);
       }
-      void writeErrorLog("Failed to spawn system command for SlackClaw.", {
+      await writeErrorLog("Failed to spawn system command for SlackClaw.", {
         command,
         args,
         error: errorToLogDetails(error)
       });
-      reject(error);
-    });
-
-    child.on("exit", (code) => {
-      const result: CommandResult = {
-        code: code ?? 1,
-        stdout: stdout.trim(),
-        stderr: stderr.trim()
-      };
-
-      if (!options?.allowFailure && result.code !== 0) {
-        reject(new Error(result.stderr || result.stdout || `${command} ${args.join(" ")} failed`));
-        return;
-      }
-
-      resolve(result);
-    });
+    }
   });
 }
 
@@ -1750,24 +1667,8 @@ async function fileExists(pathname: string): Promise<boolean> {
 }
 
 async function resolveCommandFromPath(command: string): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    const child = spawn("sh", ["-lc", `command -v ${command}`], {
-      stdio: ["ignore", "pipe", "ignore"],
-      env: buildCommandEnv()
-    });
-
-    let stdout = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.on("exit", (code) => {
-      const resolved = stdout.trim();
-      resolve(code === 0 && resolved.startsWith("/") ? resolved : undefined);
-    });
-
-    child.on("error", () => resolve(undefined));
+  return resolveCommandFromShellPath(command, {
+    env: buildCommandEnv()
   });
 }
 
@@ -1788,12 +1689,9 @@ async function resolveCommand(command: string, extraCandidates: string[] = []): 
 }
 
 async function probeCommand(command: string, args: string[] = ["--version"]): Promise<boolean> {
-  try {
-    const result = await runCommand(command, args, { allowFailure: true });
-    return result.code === 0;
-  } catch {
-    return false;
-  }
+  return probeExternalCommand(command, args, {
+    env: buildCommandEnv(command)
+  });
 }
 
 async function resolveOpenClawCommand(options?: { fresh?: boolean }): Promise<string | undefined> {
@@ -2302,373 +2200,8 @@ function safeJsonPayloadParse<T>(value: string | undefined): T | undefined {
   return undefined;
 }
 
-function readChatTextFromUnknown(message: OpenClawChatMessageJson | string | undefined): string {
-  if (!message) {
-    return "";
-  }
-
-  if (typeof message === "string") {
-    return message.trim();
-  }
-
-  return (message.content ?? [])
-    .filter((part) => part?.type === "text")
-    .map((part) => part.text ?? "")
-    .join("")
-    .trim();
-}
-
-function formatGatewayToolActivity(payload: OpenClawGatewayAgentEventPayload | undefined): string | undefined {
-  const name = payload?.data?.name?.trim();
-  const phase = payload?.data?.phase?.trim();
-
-  if (!name) {
-    return undefined;
-  }
-
-  if (payload?.data?.isError || phase === "error") {
-    return `Tool issue: ${name}`;
-  }
-
-  if (phase === "result" || phase === "end") {
-    return `Tool finished: ${name}`;
-  }
-
-  if (phase === "start" || phase === "update") {
-    return `Using tools: ${name}`;
-  }
-
-  return `Using tools: ${name}`;
-}
-
-function emitGatewaySocketEvent(event: EngineChatLiveEvent): void {
-  for (const listener of gatewaySocketBridgeState.listeners) {
-    try {
-      listener(event);
-    } catch {
-      // Listener failures should not break the shared bridge.
-    }
-  }
-}
-
-function normalizeGatewaySocketUrl(url: string): string {
-  if (url.startsWith("http://")) {
-    return `ws://${url.slice("http://".length)}`;
-  }
-
-  if (url.startsWith("https://")) {
-    return `wss://${url.slice("https://".length)}`;
-  }
-
-  return url;
-}
-
-async function readGatewaySocketConnectionInfo(): Promise<{ url: string; token: string } | undefined> {
-  const snapshot = await readEngineSnapshot();
-  const url = snapshot.gatewayJson?.rpc?.url?.trim();
-
-  if (!url) {
-    return undefined;
-  }
-
-  const config = (await readOpenClawConfigFile(defaultOpenClawConfigPath())) ?? {};
-  const token = config.gateway?.auth?.token?.trim();
-
-  if (!token || token.startsWith("__OPENCLAW_")) {
-    return undefined;
-  }
-
-  return {
-    url: normalizeGatewaySocketUrl(url),
-    token
-  };
-}
-
-function closeGatewaySocketBridge(): void {
-  gatewaySocketBridgeState.intentionalClose = true;
-
-  if (gatewaySocketBridgeState.reconnectTimer) {
-    clearTimeout(gatewaySocketBridgeState.reconnectTimer);
-    gatewaySocketBridgeState.reconnectTimer = undefined;
-  }
-
-  gatewaySocketBridgeState.connectPromise = undefined;
-  gatewaySocketBridgeState.connected = false;
-
-  try {
-    gatewaySocketBridgeState.socket?.close();
-  } catch {
-    // Best-effort close.
-  }
-
-  gatewaySocketBridgeState.socket = undefined;
-}
-
-function scheduleGatewaySocketReconnect(reason?: string): void {
-  if (gatewaySocketBridgeState.intentionalClose || gatewaySocketBridgeState.listeners.size === 0) {
-    return;
-  }
-
-  if (gatewaySocketBridgeState.reconnectTimer) {
-    return;
-  }
-
-  emitGatewaySocketEvent({
-    type: "disconnected",
-    error: reason
-  });
-
-  gatewaySocketBridgeState.reconnectTimer = setTimeout(() => {
-    gatewaySocketBridgeState.reconnectTimer = undefined;
-    void ensureGatewaySocketBridgeConnected().catch(async (error) => {
-      await writeErrorLog("SlackClaw lost the live OpenClaw chat event bridge.", {
-        error: errorToLogDetails(error)
-      });
-      scheduleGatewaySocketReconnect(error instanceof Error ? error.message : "OpenClaw chat bridge reconnect failed.");
-    });
-  }, 1500);
-}
-
-function readGatewaySocketChallengeNonce(envelope: OpenClawGatewaySocketEnvelope): string | undefined {
-  if (envelope.event !== "connect.challenge") {
-    return undefined;
-  }
-
-  const payload = (envelope.payload ?? {}) as OpenClawGatewayConnectChallengePayload;
-  const nonce = payload.nonce?.trim();
-  return nonce ? nonce : undefined;
-}
-
-async function ensureGatewaySocketBridgeConnected(): Promise<void> {
-  if (gatewaySocketBridgeState.connected && gatewaySocketBridgeState.socket) {
-    return;
-  }
-
-  if (gatewaySocketBridgeState.connectPromise) {
-    return gatewaySocketBridgeState.connectPromise;
-  }
-
-  gatewaySocketBridgeState.connectPromise = (async () => {
-    const connection = await readGatewaySocketConnectionInfo();
-    const GatewaySocketCtor = globalThis.WebSocket as unknown as
-      | (new (url: string) => {
-          close: () => void;
-          send: (value: string) => void;
-          readyState: number;
-          onopen?: (event: unknown) => void;
-          onmessage?: (event: { data?: unknown }) => void;
-          onclose?: (event: { code?: number; reason?: string }) => void;
-          onerror?: (event: unknown) => void;
-        })
-      | undefined;
-
-    if (!GatewaySocketCtor) {
-      throw new Error("This SlackClaw runtime does not provide WebSocket support.");
-    }
-
-    if (!connection) {
-      throw new Error("SlackClaw could not resolve the OpenClaw gateway socket URL or auth token.");
-    }
-
-    gatewaySocketBridgeState.intentionalClose = false;
-    const socket = new GatewaySocketCtor(connection.url);
-    gatewaySocketBridgeState.socket = socket;
-    gatewaySocketBridgeState.connectRequestId = randomUUID();
-
-    await new Promise<void>((resolve, reject) => {
-      let authenticated = false;
-      let settled = false;
-
-      const fail = (error: Error) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        gatewaySocketBridgeState.socket = undefined;
-        gatewaySocketBridgeState.connected = false;
-        reject(error);
-      };
-
-      const succeed = () => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        gatewaySocketBridgeState.connected = true;
-        emitGatewaySocketEvent({ type: "connected" });
-        resolve();
-      };
-
-      socket.onmessage = (event) => {
-        const raw = typeof event.data === "string" ? event.data : String(event.data ?? "");
-        const envelope = safeJsonPayloadParse<OpenClawGatewaySocketEnvelope>(raw);
-
-        if (!envelope) {
-          return;
-        }
-
-        if (envelope.type === "event" && envelope.event === "connect.challenge") {
-          const nonce = readGatewaySocketChallengeNonce(envelope);
-
-          if (!nonce) {
-            fail(new Error("OpenClaw gateway connect challenge did not include a nonce."));
-            try {
-              socket.close();
-            } catch {
-              // Best-effort shutdown.
-            }
-            return;
-          }
-
-          socket.send(
-            JSON.stringify({
-              type: "req",
-              id: gatewaySocketBridgeState.connectRequestId,
-              method: "connect",
-              params: buildGatewaySocketConnectParams({
-                token: connection.token
-              })
-            })
-          );
-          return;
-        }
-
-        if (envelope.id === gatewaySocketBridgeState.connectRequestId) {
-          if (envelope.ok === false) {
-            const detail =
-              (typeof envelope.error === "string" ? envelope.error : envelope.error?.message) ??
-              "OpenClaw rejected the SlackClaw chat bridge connection.";
-            fail(new Error(detail));
-            return;
-          }
-
-          authenticated = true;
-          succeed();
-          return;
-        }
-
-        if (!authenticated || envelope.type !== "event") {
-          return;
-        }
-
-        if (envelope.event === "chat") {
-          const payload = (envelope.payload ?? {}) as OpenClawGatewayChatEventPayload;
-          const sessionKey = payload.sessionKey?.trim();
-
-          if (!sessionKey) {
-            return;
-          }
-
-          switch (payload.state) {
-            case "delta":
-              emitGatewaySocketEvent({
-                type: "assistant-delta",
-                sessionKey,
-                runId: payload.runId,
-                message: {
-                  id: `${sessionKey}:assistant:stream`,
-                  role: "assistant",
-                  text: readChatTextFromUnknown(payload.message),
-                  status: "streaming"
-                }
-              });
-              return;
-            case "final":
-              emitGatewaySocketEvent({
-                type: "assistant-completed",
-                sessionKey,
-                runId: payload.runId
-              });
-              return;
-            case "aborted":
-              emitGatewaySocketEvent({
-                type: "assistant-aborted",
-                sessionKey,
-                runId: payload.runId
-              });
-              return;
-            case "error":
-              emitGatewaySocketEvent({
-                type: "assistant-failed",
-                sessionKey,
-                runId: payload.runId,
-                error: payload.errorMessage ?? "OpenClaw reported a chat error."
-              });
-              return;
-            default:
-              return;
-          }
-        }
-
-        if (envelope.event === "agent") {
-          const payload = (envelope.payload ?? {}) as OpenClawGatewayAgentEventPayload;
-          const activityLabel = formatGatewayToolActivity(payload);
-
-          if (!activityLabel) {
-            return;
-          }
-
-          emitGatewaySocketEvent({
-            type: "assistant-tool-status",
-            runId: payload.runId,
-            activityLabel
-          });
-        }
-      };
-
-      socket.onerror = () => {
-        if (!authenticated) {
-          fail(new Error("SlackClaw could not open the OpenClaw chat event bridge."));
-        }
-      };
-
-      socket.onclose = (event) => {
-        gatewaySocketBridgeState.connected = false;
-        gatewaySocketBridgeState.socket = undefined;
-        gatewaySocketBridgeState.connectPromise = undefined;
-
-        if (!authenticated) {
-          fail(new Error(event.reason || "OpenClaw closed the chat bridge before SlackClaw connected."));
-          return;
-        }
-
-        scheduleGatewaySocketReconnect(event.reason);
-      };
-
-      socket.onopen = () => {
-        // Wait for the connect challenge before authenticating.
-      };
-    });
-  })().finally(() => {
-    gatewaySocketBridgeState.connectPromise = undefined;
-  });
-
-  return gatewaySocketBridgeState.connectPromise;
-}
-
-async function subscribeToGatewaySocketBridge(listener: GatewayBridgeListener): Promise<() => void> {
-  gatewaySocketBridgeState.listeners.add(listener);
-
-  try {
-    await ensureGatewaySocketBridgeConnected();
-  } catch (error) {
-    gatewaySocketBridgeState.listeners.delete(listener);
-    throw error;
-  }
-
-  return () => {
-    gatewaySocketBridgeState.listeners.delete(listener);
-
-    if (gatewaySocketBridgeState.listeners.size === 0) {
-      closeGatewaySocketBridge();
-    }
-  };
-}
-
 function readChatText(message: OpenClawChatMessageJson): string {
-  return readChatTextFromUnknown(message);
+  return readGatewayChatText(message);
 }
 
 function toVisibleChatRole(role: string | undefined): ChatMessage["role"] | undefined {
@@ -4250,11 +3783,64 @@ export class OpenClawAdapter implements EngineAdapter {
   readonly aiEmployees: AIEmployeeManager;
   readonly gateway: GatewayManager;
 
-  constructor() {
+  constructor(private readonly secrets: SecretsAdapter = createDefaultSecretsAdapter()) {
     this.instances = new OpenClawInstanceManager(this);
-    this.config = new OpenClawConfigManager(this);
-    this.aiEmployees = new OpenClawAIEmployeeManager(this);
-    this.gateway = new OpenClawGatewayManager(this);
+    this.config = new OpenClawConfigManager({
+      getModelConfig: () => this.getModelConfig(),
+      createSavedModelEntry: (request) => this.createSavedModelEntry(request),
+      updateSavedModelEntry: (entryId, request) => this.updateSavedModelEntry(entryId, request),
+      removeSavedModelEntry: (entryId) => this.removeSavedModelEntry(entryId),
+      setDefaultModelEntry: (request) => this.setDefaultModelEntry(request),
+      replaceFallbackModelEntries: (request) => this.replaceFallbackModelEntries(request),
+      authenticateModelProvider: (request) => this.authenticateModelProvider(request),
+      getModelAuthSession: (sessionId) => this.getModelAuthSession(sessionId),
+      submitModelAuthSessionInput: (sessionId, request) => this.submitModelAuthSessionInput(sessionId, request),
+      setDefaultModel: (modelKey) => this.setDefaultModel(modelKey),
+      getChannelState: (channelId) => this.getChannelState(channelId),
+      getConfiguredChannelEntries: () => this.getConfiguredChannelEntries(),
+      saveChannelEntry: (request) => this.saveChannelEntry(request),
+      removeChannelEntry: (request) => this.removeChannelEntry(request),
+      getSkillRuntimeCatalog: () => this.getSkillRuntimeCatalog(),
+      getInstalledSkillDetail: (skillId) => this.getInstalledSkillDetail(skillId),
+      listMarketplaceInstalledSkills: () => this.listMarketplaceInstalledSkills(),
+      exploreSkillMarketplace: (limit) => this.exploreSkillMarketplace(limit),
+      searchSkillMarketplace: (query, limit) => this.searchSkillMarketplace(query, limit),
+      getSkillMarketplaceDetail: (slug) => this.getSkillMarketplaceDetail(slug),
+      installMarketplaceSkill: (request) => this.installMarketplaceSkill(request),
+      updateMarketplaceSkill: (slug, request) => this.updateMarketplaceSkill(slug, request),
+      saveCustomSkill: (skillId, request) => this.saveCustomSkill(skillId, request),
+      removeInstalledSkill: (slug, request) => this.removeInstalledSkill(slug, request)
+    }, {
+      secrets: this.secrets,
+      resolveModelAuthSecretFieldIds: (providerId, methodId) =>
+        providerDefinitionById(providerId)?.authMethods.find((item) => item.id === methodId)?.fields
+          .filter((field) => field.secret === true)
+          .map((field) => field.id) ?? []
+    });
+    this.aiEmployees = new OpenClawAIEmployeeManager({
+      listAIMemberRuntimeCandidates: () => this.listAIMemberRuntimeCandidates(),
+      saveAIMemberRuntime: (request) => this.saveAIMemberRuntime(request),
+      getAIMemberBindings: (agentId) => this.getAIMemberBindings(agentId),
+      bindAIMemberChannel: (agentId, request) => this.bindAIMemberChannel(agentId, request),
+      unbindAIMemberChannel: (agentId, request) => this.unbindAIMemberChannel(agentId, request),
+      deleteAIMemberRuntime: (agentId, request) => this.deleteAIMemberRuntime(agentId, request)
+    });
+    this.gateway = new OpenClawGatewayManager({
+      restartGateway: () => this.restartGateway(),
+      healthCheck: (selectedProfileId) => this.healthCheck(selectedProfileId),
+      getActiveChannelSession: () => this.getActiveChannelSession(),
+      getChannelSession: (sessionId) => this.getChannelSession(sessionId),
+      submitChannelSessionInput: (sessionId, request) => this.submitChannelSessionInput(sessionId, request),
+      runTask: (request) => this.runTask(request),
+      getChatThreadDetail: (request) => this.getChatThreadDetail(request),
+      subscribeToLiveChatEvents: (listener) => this.subscribeToLiveChatEvents(listener),
+      sendChatMessage: (request) => this.sendChatMessage(request),
+      abortChatMessage: (request) => this.abortChatMessage(request),
+      startWhatsappLogin: () => this.startWhatsappLogin(),
+      approvePairing: (channelId, request) => this.approvePairing(channelId, request),
+      prepareFeishu: () => this.prepareFeishu(),
+      startGatewayAfterChannels: () => this.startGatewayAfterChannels()
+    });
   }
 
   invalidateReadCaches(): void {
@@ -5953,7 +5539,7 @@ export class OpenClawAdapter implements EngineAdapter {
     return { requiresGatewayApply: true };
   }
 
-  async getModelConfig(): Promise<ModelConfigOverview> {
+  private async getModelConfig(): Promise<ModelConfigOverview> {
     const snapshot = await readModelSnapshot();
 
     if (isCleanModelRuntime(snapshot)) {
@@ -6128,7 +5714,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
+  private async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
     const session = modelAuthSessions.get(sessionId);
 
     if (!session) {
@@ -6437,37 +6023,6 @@ export class OpenClawAdapter implements EngineAdapter {
       modelConfig: await this.getModelConfig(),
       requiresGatewayApply: true
     };
-  }
-
-  async onboard(profileId: string): Promise<void> {
-    const statusBefore = await this.collectStatusData();
-
-    if (statusBefore.setupRequired || !statusBefore.cliVersion) {
-      const result = await runOpenClaw(
-        [
-          "onboard",
-          "--non-interactive",
-          "--accept-risk",
-          "--flow",
-          "quickstart",
-          "--mode",
-          "local",
-          "--skip-channels",
-          "--skip-search",
-          "--skip-skills",
-          "--skip-ui",
-          "--install-daemon",
-          "--json"
-        ],
-        { allowFailure: true }
-      );
-
-      if (result.code !== 0) {
-        throw new Error(result.stderr || result.stdout || "OpenClaw onboarding failed.");
-      }
-    }
-
-    await this.configure(profileId);
   }
 
   async configure(profileId: string): Promise<void> {
@@ -7204,7 +6759,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async saveChannelEntry(
+  private async saveChannelEntry(
     request: SaveChannelEntryRequest
   ): Promise<{ message: string; channel: ChannelSetupState; session?: ChannelSession; requiresGatewayApply?: boolean }> {
     switch (request.channelId) {
@@ -7322,7 +6877,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
+  private async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
     const agentId =
       request.existingAgentId ??
       resolveReadableMemberAgentId(
@@ -7478,8 +7033,8 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async subscribeToLiveChatEvents(listener: GatewayBridgeListener): Promise<() => void> {
-    return subscribeToGatewaySocketBridge(listener);
+  private async subscribeToLiveChatEvents(listener: (event: EngineChatLiveEvent) => void): Promise<() => void> {
+    return gatewaySocketBridge.subscribe(listener);
   }
 
   async sendChatMessage(
@@ -7595,7 +7150,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async configureFeishu(
+  private async configureFeishu(
     request: FeishuSetupRequest
   ): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
     const configSave = await this.runMutationWithConfigFallback({
@@ -7643,7 +7198,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async configureTelegram(request: TelegramSetupRequest): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
+  private async configureTelegram(request: TelegramSetupRequest): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
     const args = ["channels", "add", "--channel", "telegram", "--token", request.token];
 
     if (request.accountName?.trim()) {
@@ -7676,7 +7231,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
+  private async startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
     if (whatsappLoginSession?.status === "in-progress") {
       return {
         message: "WhatsApp login is already running.",
@@ -7786,7 +7341,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async configureWechatWorkaround(
+  private async configureWechatWorkaround(
     request: WechatSetupRequest
   ): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
     const pluginSpec = request.pluginSpec?.trim() || "@openclaw-china/wecom-app";

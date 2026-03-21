@@ -1,4 +1,4 @@
-import type { SaveAIMemberRequest } from "@slackclaw/contracts";
+import type { OnboardingStep, SaveAIMemberRequest, SlackClawEvent } from "@slackclaw/contracts";
 
 import { resolveMemberAvatarPreset } from "../../shared/avatar-presets.js";
 
@@ -50,4 +50,32 @@ export function buildOnboardingMemberRequest(draft: OnboardingEmployeeDraft): Sa
       contextWindow: 128000
     }
   };
+}
+
+export type OnboardingRefreshResource = "overview" | "model" | "channel" | "team";
+
+export function onboardingRefreshResourceForEvent(
+  step: OnboardingStep,
+  event: SlackClawEvent
+): OnboardingRefreshResource | undefined {
+  switch (step) {
+    case "install":
+      return event.type === "deploy.completed" || event.type === "gateway.status" ? "overview" : undefined;
+    case "model":
+      return event.type === "config.applied" && event.resource === "models" ? "model" : undefined;
+    case "channel":
+      if (event.type === "config.applied" && event.resource === "channels") {
+        return "channel";
+      }
+      return event.type === "channel.session.updated" ? "channel" : undefined;
+    case "employee":
+    case "complete":
+      if (event.type !== "config.applied") {
+        return undefined;
+      }
+      return ["ai-employees", "models", "skills"].includes(event.resource) ? "team" : undefined;
+    case "welcome":
+    default:
+      return undefined;
+  }
 }

@@ -7,7 +7,6 @@ import type {
   BindAIMemberChannelRequest,
   ChatActionResponse,
   ChatOverview,
-  ChatStreamEvent,
   ChatThreadDetail,
   DeleteAIMemberRequest,
   ChannelActionResponse,
@@ -61,10 +60,13 @@ import type {
   WechatSetupRequest
 } from "@slackclaw/contracts";
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.origin.includes("127.0.0.1:4545")
+export function resolveApiBase() {
+  return typeof window !== "undefined" && window.location.origin.includes("127.0.0.1:4545")
     ? `${window.location.origin}/api`
     : "http://127.0.0.1:4545/api";
+}
+
+const API_BASE = resolveApiBase();
 
 const inflightGetRequests = new Map<string, Promise<unknown>>();
 const responseGetCache = new Map<string, { expiresAt: number; value: unknown }>();
@@ -419,21 +421,6 @@ export function abortChatThread(threadId: string, request: AbortChatRequest = {}
     method: "POST",
     body: JSON.stringify(request)
   });
-}
-
-export function subscribeToChatEvents(
-  onEvent: (event: ChatStreamEvent | { type: "connected" }) => void,
-  onError?: (error: Event) => void
-): () => void {
-  const source = new EventSource(`${API_BASE}/chat/events`);
-  source.onmessage = (event) => {
-    onEvent(JSON.parse(event.data) as ChatStreamEvent | { type: "connected" });
-  };
-  if (onError) {
-    source.onerror = onError;
-  }
-
-  return () => source.close();
 }
 
 export function createAIMember(request: SaveAIMemberRequest): Promise<AITeamActionResponse> {

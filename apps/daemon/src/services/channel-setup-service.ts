@@ -15,7 +15,9 @@ import type {
 import { createDefaultProductOverview } from "@slackclaw/contracts";
 
 import type { EngineAdapter } from "../engine/adapter.js";
+import { channelSecretName, NoopSecretsAdapter, type SecretsAdapter } from "../platform/secrets-adapter.js";
 import type { AppState } from "./state-store.js";
+import { EventPublisher } from "./event-publisher.js";
 import { StateStore, type StoredChannelEntryState } from "./state-store.js";
 
 const CHANNEL_ORDER: SupportedChannelId[] = ["telegram", "whatsapp", "feishu", "wechat"];
@@ -162,6 +164,10 @@ function labelFor(channelId: SupportedChannelId, values: Record<string, string>)
   return channelTitle(channelId);
 }
 
+function secretFieldIdsFor(channelId: SupportedChannelId): string[] {
+  return capabilityFor(channelId).fieldDefs.filter((field) => field.secret === true).map((field) => field.id);
+}
+
 function editableValuesFor(channelId: SupportedChannelId, values: Record<string, string>): Record<string, string> {
   switch (channelId) {
     case "telegram":
@@ -298,7 +304,9 @@ function gatewaySummary(
 export class ChannelSetupService {
   constructor(
     private readonly adapter: EngineAdapter,
-    private readonly store: StateStore
+    private readonly store: StateStore,
+    private readonly eventPublisher?: EventPublisher,
+    private readonly secrets: SecretsAdapter = new NoopSecretsAdapter()
   ) {}
 
   async getOverviewFromState(state?: AppState): Promise<ChannelSetupOverview> {
@@ -370,6 +378,17 @@ export class ChannelSetupService {
     const shouldPersistEntry = request.action !== "prepare";
     const nextEntryId = entryId ?? entryIdFor(channelId);
 
+    await Promise.all(
+      secretFieldIdsFor(channelId).map(async (fieldId) => {
+        const value = request.values[fieldId]?.trim();
+        if (!value) {
+          return;
+        }
+
+        await this.secrets.set(channelSecretName(channelId, nextEntryId, fieldId), value);
+      })
+    );
+
     const nextState = await this.store.update((current) => {
       const existingEntries = current.channelOnboarding?.entries ?? {};
       const nextEntries = { ...existingEntries };
@@ -404,6 +423,18 @@ export class ChannelSetupService {
       };
     });
 
+    this.eventPublisher?.publishConfigApplied({
+      resource: "channels",
+      summary: result.message
+    });
+
+    if (result.session) {
+      this.eventPublisher?.publishChannelSessionUpdated({
+        channelId,
+        session: result.session
+      });
+    }
+
     return {
       status: result.session ? "interactive" : "completed",
       message: result.message,
@@ -432,6 +463,8 @@ export class ChannelSetupService {
       values: record.editableValues
     });
 
+    await Promise.all(secretFieldIdsFor(record.channelId).map((fieldId) => this.secrets.delete(channelSecretName(record.channelId, request.entryId, fieldId))));
+
     const defaults = defaultChannelMap();
     const nextState = await this.store.update((next) => {
       const entries = { ...(next.channelOnboarding?.entries ?? {}) };
@@ -451,6 +484,11 @@ export class ChannelSetupService {
       };
     });
 
+    this.eventPublisher?.publishConfigApplied({
+      resource: "channels",
+      summary: result.message
+    });
+
     return {
       status: "completed",
       message: result.message,
@@ -460,15 +498,27 @@ export class ChannelSetupService {
   }
 
   async getSession(sessionId: string): Promise<ChannelSessionResponse> {
+    const session = await this.adapter.gateway.getChannelSession(sessionId);
+    this.eventPublisher?.publishChannelSessionUpdated({
+      channelId: session.channelId,
+      session
+    });
+
     return {
-      session: await this.adapter.gateway.getChannelSession(sessionId),
+      session,
       channelConfig: await this.getConfigOverview()
     };
   }
 
   async submitSessionInput(sessionId: string, request: ChannelSessionInputRequest): Promise<ChannelSessionResponse> {
+    const session = await this.adapter.gateway.submitChannelSessionInput(sessionId, request);
+    this.eventPublisher?.publishChannelSessionUpdated({
+      channelId: session.channelId,
+      session
+    });
+
     return {
-      session: await this.adapter.gateway.submitChannelSessionInput(sessionId, request),
+      session,
       channelConfig: await this.getConfigOverview()
     };
   }

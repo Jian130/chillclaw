@@ -6,6 +6,7 @@ import {
   type DeploymentTargetsResponse,
   type AITeamOverview,
   type ChatActionResponse,
+  type SlackClawEvent,
   type ChatOverview,
   type ChannelConfigOverview,
   type ModelConfigOverview,
@@ -313,6 +314,56 @@ test("chat overview and action responses serialize thread state and messages", (
   assert.equal(parsed.thread?.messages[1]?.role, "assistant");
   assert.equal(parsed.thread?.messages[0]?.clientMessageId, "client-1");
   assert.equal(parsed.thread?.composerState.canSend, true);
+});
+
+test("daemon event envelope serializes deploy, gateway, task, and chat updates", () => {
+  const events: SlackClawEvent[] = [
+    {
+      type: "deploy.progress",
+      correlationId: "corr-1",
+      targetId: "managed-local",
+      phase: "installing",
+      percent: 50,
+      message: "Installing OpenClaw."
+    },
+    {
+      type: "gateway.status",
+      reachable: true,
+      pendingGatewayApply: false,
+      summary: "Gateway is healthy."
+    },
+    {
+      type: "task.progress",
+      taskId: "task-1",
+      status: "running",
+      message: "Generating task summary."
+    },
+    {
+      type: "chat.stream",
+      threadId: "thread-1",
+      sessionKey: "agent:agent-1:slackclaw-chat:thread-1",
+      payload: {
+        type: "assistant-delta",
+        threadId: "thread-1",
+        message: {
+          id: "message-1",
+          role: "assistant",
+          text: "hello",
+          status: "streaming"
+        }
+      }
+    }
+  ];
+
+  const parsed = JSON.parse(JSON.stringify(events)) as SlackClawEvent[];
+  assert.equal(parsed[0]?.type, "deploy.progress");
+  assert.equal(parsed[0]?.targetId, "managed-local");
+  assert.equal(parsed[1]?.type, "gateway.status");
+  assert.equal(parsed[1]?.reachable, true);
+  assert.equal(parsed[2]?.type, "task.progress");
+  assert.equal(parsed[2]?.status, "running");
+  assert.equal(parsed[3]?.type, "chat.stream");
+  assert.equal(parsed[3]?.payload.type, "assistant-delta");
 });
 
 test("skill catalog overview serializes installed entries and readiness", () => {

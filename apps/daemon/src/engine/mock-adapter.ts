@@ -320,9 +320,56 @@ export class MockAdapter implements EngineAdapter {
 
   constructor() {
     this.instances = new OpenClawInstanceManager(this);
-    this.config = new OpenClawConfigManager(this);
-    this.aiEmployees = new OpenClawAIEmployeeManager(this);
-    this.gateway = new OpenClawGatewayManager(this);
+    this.config = new OpenClawConfigManager({
+      getModelConfig: () => this.getModelConfig(),
+      createSavedModelEntry: (request) => this.createSavedModelEntry(request),
+      updateSavedModelEntry: (entryId, request) => this.updateSavedModelEntry(entryId, request),
+      removeSavedModelEntry: (entryId) => this.removeSavedModelEntry(entryId),
+      setDefaultModelEntry: (request) => this.setDefaultModelEntry(request),
+      replaceFallbackModelEntries: (request) => this.replaceFallbackModelEntries(request),
+      authenticateModelProvider: (request) => this.authenticateModelProvider(request),
+      getModelAuthSession: (sessionId) => this.getModelAuthSession(sessionId),
+      submitModelAuthSessionInput: (sessionId, request) => this.submitModelAuthSessionInput(sessionId, request),
+      setDefaultModel: (modelKey) => this.setDefaultModel(modelKey),
+      getChannelState: (channelId) => this.getChannelState(channelId),
+      getConfiguredChannelEntries: () => this.getConfiguredChannelEntries(),
+      saveChannelEntry: (request) => this.saveChannelEntry(request),
+      removeChannelEntry: (request) => this.removeChannelEntry(request),
+      getSkillRuntimeCatalog: () => this.getSkillRuntimeCatalog(),
+      getInstalledSkillDetail: (skillId) => this.getInstalledSkillDetail(skillId),
+      listMarketplaceInstalledSkills: () => this.listMarketplaceInstalledSkills(),
+      exploreSkillMarketplace: (limit) => this.exploreSkillMarketplace(limit),
+      searchSkillMarketplace: (query, limit) => this.searchSkillMarketplace(query, limit),
+      getSkillMarketplaceDetail: (slug) => this.getSkillMarketplaceDetail(slug),
+      installMarketplaceSkill: (request) => this.installMarketplaceSkill(request),
+      updateMarketplaceSkill: (slug, request) => this.updateMarketplaceSkill(slug, request),
+      saveCustomSkill: (skillId, request) => this.saveCustomSkill(skillId, request),
+      removeInstalledSkill: (slug, request) => this.removeInstalledSkill(slug, request)
+    });
+    this.aiEmployees = new OpenClawAIEmployeeManager({
+      listAIMemberRuntimeCandidates: () => this.listAIMemberRuntimeCandidates(),
+      saveAIMemberRuntime: (request) => this.saveAIMemberRuntime(request),
+      getAIMemberBindings: (agentId) => this.getAIMemberBindings(agentId),
+      bindAIMemberChannel: (agentId, request) => this.bindAIMemberChannel(agentId, request),
+      unbindAIMemberChannel: (agentId, request) => this.unbindAIMemberChannel(agentId, request),
+      deleteAIMemberRuntime: (agentId, request) => this.deleteAIMemberRuntime(agentId, request)
+    });
+    this.gateway = new OpenClawGatewayManager({
+      restartGateway: () => this.restartGateway(),
+      healthCheck: (selectedProfileId) => this.healthCheck(selectedProfileId),
+      getActiveChannelSession: () => this.getActiveChannelSession(),
+      getChannelSession: (sessionId) => this.getChannelSession(sessionId),
+      submitChannelSessionInput: (sessionId, request) => this.submitChannelSessionInput(sessionId, request),
+      runTask: (request) => this.runTask(request),
+      getChatThreadDetail: (request) => this.getChatThreadDetail(request),
+      subscribeToLiveChatEvents: (listener) => this.subscribeToLiveChatEvents(listener),
+      sendChatMessage: (request) => this.sendChatMessage(request),
+      abortChatMessage: (request) => this.abortChatMessage(request),
+      startWhatsappLogin: () => this.startWhatsappLogin(),
+      approvePairing: (channelId, request) => this.approvePairing(channelId, request),
+      prepareFeishu: () => this.prepareFeishu(),
+      startGatewayAfterChannels: () => this.startGatewayAfterChannels()
+    });
   }
 
   private markGatewayApplyPending(summary = summarizePendingGatewayApply()): void {
@@ -551,7 +598,7 @@ export class MockAdapter implements EngineAdapter {
     return { requiresGatewayApply: true };
   }
 
-  async getModelConfig(): Promise<ModelConfigOverview> {
+  private async getModelConfig(): Promise<ModelConfigOverview> {
     const defaultEntry = this.savedEntries.find((entry) => entry.isDefault) ?? this.savedEntries[0];
     return {
       providers: this.providerCatalog,
@@ -728,7 +775,7 @@ export class MockAdapter implements EngineAdapter {
     };
   }
 
-  async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
+  private async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
     return {
       session: {
         id: sessionId,
@@ -758,10 +805,6 @@ export class MockAdapter implements EngineAdapter {
       modelConfig: await this.getModelConfig(),
       requiresGatewayApply: true
     };
-  }
-
-  async onboard(profileId: string): Promise<void> {
-    this.profileId = profileId;
   }
 
   async configure(profileId: string): Promise<void> {
@@ -983,7 +1026,7 @@ export class MockAdapter implements EngineAdapter {
     throw new Error("Mock channel sessions do not accept direct input.");
   }
 
-  async saveChannelEntry(
+  private async saveChannelEntry(
     request: SaveChannelEntryRequest
   ): Promise<{ message: string; channel: ChannelSetupState; session?: ChannelSession; requiresGatewayApply?: boolean }> {
     switch (request.channelId) {
@@ -1052,7 +1095,7 @@ export class MockAdapter implements EngineAdapter {
     };
   }
 
-  async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
+  private async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
     const agentId =
       request.existingAgentId ??
       resolveReadableMemberAgentId(
@@ -1180,7 +1223,7 @@ export class MockAdapter implements EngineAdapter {
     };
   }
 
-  async subscribeToLiveChatEvents(listener: (event: EngineChatLiveEvent) => void): Promise<() => void> {
+  private async subscribeToLiveChatEvents(listener: (event: EngineChatLiveEvent) => void): Promise<() => void> {
     this.chatListeners.add(listener);
     listener({ type: "connected" });
     return () => {
@@ -1265,7 +1308,7 @@ export class MockAdapter implements EngineAdapter {
     }
   }
 
-  async configureTelegram(
+  private async configureTelegram(
     _request: TelegramSetupRequest
   ): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
     this.channels.telegram = {
@@ -1278,7 +1321,7 @@ export class MockAdapter implements EngineAdapter {
     return { message: "Mock Telegram token saved.", channel: this.channels.telegram, requiresGatewayApply: true };
   }
 
-  async startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
+  private async startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
     this.channels.whatsapp = {
       ...this.channels.whatsapp,
       status: "awaiting-pairing",
@@ -1327,7 +1370,7 @@ export class MockAdapter implements EngineAdapter {
     return { message: "Mock Feishu plugin installed.", channel: this.channels.feishu };
   }
 
-  async configureFeishu(
+  private async configureFeishu(
     request: FeishuSetupRequest
   ): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
     this.channels.feishu = {
@@ -1340,7 +1383,7 @@ export class MockAdapter implements EngineAdapter {
     return { message: "Mock Feishu channel configured.", channel: this.channels.feishu, requiresGatewayApply: true };
   }
 
-  async configureWechatWorkaround(
+  private async configureWechatWorkaround(
     _request: WechatSetupRequest
   ): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
     this.channels.wechat = {

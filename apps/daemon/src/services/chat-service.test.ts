@@ -7,14 +7,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import { MockAdapter } from "../engine/mock-adapter.js";
 import { AITeamService } from "./ai-team-service.js";
 import { ChatService } from "./chat-service.js";
+import { EventBusService } from "./event-bus-service.js";
+import { EventPublisher } from "./event-publisher.js";
 import { StateStore } from "./state-store.js";
 
-async function createServices(testName: string) {
+async function createServices(testName: string, options?: { withEvents?: boolean }) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
   const adapter = new MockAdapter();
   const store = new StateStore(filePath);
   const aiTeamService = new AITeamService(adapter, store);
-  const chatService = new ChatService(adapter, store, aiTeamService);
+  const eventBus = options?.withEvents ? new EventBusService() : undefined;
+  const chatService = new ChatService(adapter, store, aiTeamService, eventBus ? new EventPublisher(eventBus) : undefined);
 
   const created = await aiTeamService.saveMember(undefined, {
     name: "Alex Morgan",
@@ -42,6 +45,7 @@ async function createServices(testName: string) {
     store,
     aiTeamService,
     chatService,
+    eventBus,
     member: created.overview.members[0]
   };
 }
@@ -164,6 +168,28 @@ test("chat service sends messages and keeps thread histories isolated", async ()
   assert.equal(firstDetail.messages.some((message) => message.clientMessageId === "client-1"), true);
   assert.equal(secondDetail.messages.some((message) => message.text.includes("Draft tomorrow's plan.")), true);
   assert.equal(overview.threads.length, 2);
+});
+
+test("chat service mirrors chat stream updates onto the daemon event bus", async () => {
+  const { chatService, member, eventBus } = await createServices("chat-service-daemon-events", { withEvents: true });
+  const eventTypes: string[] = [];
+  const payloadTypes: string[] = [];
+  const unsubscribe = eventBus!.subscribe((event) => {
+    eventTypes.push(event.type);
+    if (event.type === "chat.stream") {
+      payloadTypes.push(event.payload.type);
+    }
+  });
+  const thread = (await chatService.createThread({ memberId: member.id, mode: "new" })).thread!;
+
+  await chatService.sendMessage(thread.id, { message: "Summarize today's work.", clientMessageId: "client-event" });
+  await delay(60);
+  unsubscribe();
+
+  assert.equal(eventTypes.includes("chat.stream"), true);
+  assert.equal(payloadTypes.includes("thread-created"), true);
+  assert.equal(payloadTypes.includes("message-created"), true);
+  assert.equal(payloadTypes.includes("assistant-completed"), true);
 });
 
 test("chat service abort returns the current thread detail when nothing is running", async () => {

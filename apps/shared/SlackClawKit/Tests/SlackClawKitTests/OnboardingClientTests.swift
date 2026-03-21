@@ -271,6 +271,48 @@ struct OnboardingClientTests {
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/first-run/setup")
         #expect(request.timeoutInterval == 300)
     }
+
+    @Test
+    func chatEventsAreDerivedFromDaemonEvents() async throws {
+        let session = URLSession(configuration: .ephemeral)
+        let client = SlackClawAPIClient(
+            session: session,
+            configurationProvider: {
+                .init(
+                    daemonURL: URL(string: "http://127.0.0.1:4545")!,
+                    fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+                )
+            },
+            daemonEventStreamFactory: { _ in
+                AsyncThrowingStream { continuation in
+                    continuation.yield(
+                        """
+                        {"type":"gateway.status","reachable":true,"pendingGatewayApply":false,"summary":"Ready"}
+                        """.data(using: .utf8)!
+                    )
+                    continuation.yield(
+                        """
+                        {"type":"chat.stream","threadId":"thread-1","sessionKey":"agent:main:thread-1","payload":{"type":"assistant-delta","threadId":"thread-1","activityLabel":"Responding…","message":{"id":"assistant-1","role":"assistant","text":"Hello","status":"streaming"}}}
+                        """.data(using: .utf8)!
+                    )
+                    continuation.finish()
+                }
+            }
+        )
+
+        let stream = try await client.chatEvents()
+        var iterator = stream.makeAsyncIterator()
+        let first = try await iterator.next()
+
+        guard case let .assistantDelta(threadId, message, activityLabel)? = first else {
+            Issue.record("Expected assistant delta from daemon chat.stream event")
+            return
+        }
+
+        #expect(threadId == "thread-1")
+        #expect(message.text == "Hello")
+        #expect(activityLabel == "Responding…")
+    }
 }
 
 private func readRequestBody(_ request: URLRequest) -> Data? {

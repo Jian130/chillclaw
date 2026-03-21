@@ -36,6 +36,13 @@ let nativeOnboardingPreferredColorScheme: ColorScheme = .light
 let nativeOnboardingTextPrimary = Color(red: 0.09, green: 0.12, blue: 0.18)
 let nativeOnboardingTextSecondary = Color(red: 0.41, green: 0.45, blue: 0.54)
 
+enum OnboardingRefreshResource {
+    case overview
+    case model
+    case channel
+    case team
+}
+
 struct NativeOnboardingEmployeeDraft: Sendable {
     var name: String
     var jobTitle: String
@@ -90,6 +97,42 @@ func onboardingStepIndex(_ step: OnboardingStep) -> Int {
 
 func onboardingIsCurrentOrLater(_ step: OnboardingStep, target: OnboardingStep) -> Bool {
     onboardingStepIndex(step) >= onboardingStepIndex(target)
+}
+
+func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: SlackClawEvent) -> OnboardingRefreshResource? {
+    switch step {
+    case .welcome:
+        return nil
+    case .install:
+        switch event {
+        case .deployCompleted, .gatewayStatus:
+            return .overview
+        case .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
+            return nil
+        }
+    case .model:
+        guard case let .configApplied(resource, _) = event, resource == .models else {
+            return nil
+        }
+        return .model
+    case .channel:
+        switch event {
+        case let .configApplied(resource, _):
+            return resource == .channels ? .channel : nil
+        case .channelSessionUpdated:
+            return .channel
+        case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
+            return nil
+        }
+    case .employee, .complete:
+        guard case let .configApplied(resource, _) = event else {
+            return nil
+        }
+        if resource == .aiEmployees || resource == .models || resource == .skills {
+            return .team
+        }
+        return nil
+    }
 }
 
 func installDisposition(overview: ProductOverview?, setup: SetupRunResponse) -> String {

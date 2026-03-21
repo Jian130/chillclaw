@@ -270,4 +270,61 @@ struct SlackClawProtocolTests {
         #expect(response.install?.actualVersion == "2026.3.13")
         #expect(response.overview.engine.installed == true)
     }
+
+    @Test
+    func daemonEventDecodesDeployAndChatPayloads() throws {
+        let deployData = """
+        {
+          "type": "deploy.progress",
+          "correlationId": "corr-1",
+          "targetId": "managed-local",
+          "phase": "installing",
+          "percent": 50,
+          "message": "Installing OpenClaw."
+        }
+        """.data(using: .utf8)!
+
+        let deployEvent = try JSONDecoder.slackClaw.decode(SlackClawEvent.self, from: deployData)
+        guard case let .deployProgress(correlationId, targetId, phase, percent, message) = deployEvent else {
+            Issue.record("Expected deployProgress event")
+            return
+        }
+        #expect(correlationId == "corr-1")
+        #expect(targetId == "managed-local")
+        #expect(phase == .installing)
+        #expect(percent == 50)
+        #expect(message == "Installing OpenClaw.")
+
+        let chatData = """
+        {
+          "type": "chat.stream",
+          "threadId": "thread-1",
+          "sessionKey": "agent:agent-1:slackclaw-chat:thread-1",
+          "payload": {
+            "type": "assistant-delta",
+            "threadId": "thread-1",
+            "message": {
+              "id": "message-1",
+              "role": "assistant",
+              "text": "hello",
+              "status": "streaming"
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let chatEvent = try JSONDecoder.slackClaw.decode(SlackClawEvent.self, from: chatData)
+        guard case let .chatStream(threadId, sessionKey, payload) = chatEvent else {
+            Issue.record("Expected chatStream event")
+            return
+        }
+        #expect(threadId == "thread-1")
+        #expect(sessionKey == "agent:agent-1:slackclaw-chat:thread-1")
+        guard case let .assistantDelta(payloadThreadId, message, _) = payload else {
+            Issue.record("Expected assistantDelta payload")
+            return
+        }
+        #expect(payloadThreadId == "thread-1")
+        #expect(message.text == "hello")
+    }
 }

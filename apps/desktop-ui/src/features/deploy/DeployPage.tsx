@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { DeploymentTargetId, DeploymentTargetStatus, DeploymentTargetsResponse, ProductOverview } from "@slackclaw/contracts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DeploymentTargetId, DeploymentTargetStatus, DeploymentTargetsResponse, ProductOverview, SlackClawDeployPhase, SlackClawEvent } from "@slackclaw/contracts";
 import {
   AlertCircle,
   CheckCircle2,
@@ -14,6 +14,7 @@ import {
 import { fetchDeploymentTargets, installDeploymentTarget, restartGateway, uninstallDeploymentTarget, updateDeploymentTarget } from "../../shared/api/client.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
 import { useOverview } from "../../app/providers/OverviewProvider.js";
+import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 import { settleAfterMutation } from "../../shared/data/settle.js";
 import { t } from "../../shared/i18n/messages.js";
 import { Button } from "../../shared/ui/Button.js";
@@ -43,6 +44,17 @@ type ActivityState = {
     state: ActivityStepState;
   }>;
   status: "idle" | "running" | "completed" | "failed";
+};
+
+type DeployActivityLabels = {
+  installTitle: string;
+  installSteps: string[];
+  updateTitle: string;
+  updateSteps: string[];
+  uninstallTitle: string;
+  uninstallSteps: string[];
+  restartTitle: string;
+  restartSteps: string[];
 };
 
 const variantMeta: Record<DeploymentTargetId, VariantMeta> = {
@@ -174,6 +186,76 @@ export function createActivityState(
   };
 }
 
+function activityTemplateForPhase(
+  phase: SlackClawDeployPhase,
+  labels: DeployActivityLabels
+): { title: string; steps: string[]; stepIndex: number } | undefined {
+  switch (phase) {
+    case "detecting":
+      return { title: labels.installTitle, steps: labels.installSteps, stepIndex: 0 };
+    case "reusing":
+      return { title: labels.installTitle, steps: labels.installSteps, stepIndex: 1 };
+    case "installing":
+      return { title: labels.installTitle, steps: labels.installSteps, stepIndex: 2 };
+    case "verifying":
+      return { title: labels.installTitle, steps: labels.installSteps, stepIndex: labels.installSteps.length - 1 };
+    case "updating":
+      return { title: labels.updateTitle, steps: labels.updateSteps, stepIndex: 1 };
+    case "uninstalling":
+      return { title: labels.uninstallTitle, steps: labels.uninstallSteps, stepIndex: 1 };
+    case "restarting-gateway":
+      return { title: labels.restartTitle, steps: labels.restartSteps, stepIndex: 1 };
+    default:
+      return undefined;
+  }
+}
+
+export function shouldRefreshDeploymentTargetsForEvent(event: SlackClawEvent): boolean {
+  return event.type === "deploy.completed" || event.type === "gateway.status";
+}
+
+export function applyDeployEventToActivity(
+  currentActivity: ActivityState | null,
+  event: SlackClawEvent,
+  labels: DeployActivityLabels
+): ActivityState | null {
+  if (event.type === "deploy.progress") {
+    const template = activityTemplateForPhase(event.phase, labels);
+
+    if (!template) {
+      return currentActivity;
+    }
+
+    return createActivityState(template.title, template.steps, template.stepIndex, event.message, "running");
+  }
+
+  if (event.type === "deploy.completed") {
+    if (!currentActivity) {
+      return null;
+    }
+
+    return createActivityState(
+      currentActivity.title,
+      currentActivity.steps.map((step) => step.label),
+      currentActivity.steps.length - 1,
+      event.message,
+      event.status === "completed" ? "completed" : "failed"
+    );
+  }
+
+  if (event.type === "gateway.status" && currentActivity?.title === labels.restartTitle && event.reachable) {
+    return createActivityState(
+      currentActivity.title,
+      currentActivity.steps.map((step) => step.label),
+      currentActivity.steps.length - 1,
+      event.summary,
+      "completed"
+    );
+  }
+
+  return currentActivity;
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -256,13 +338,27 @@ export default function DeployPage() {
   const [targetsError, setTargetsError] = useState("");
   const [checkedAt, setCheckedAt] = useState<string>();
   const [targets, setTargets] = useState<DeploymentTargetStatus[]>([]);
+  const activityRef = useRef<ActivityState | null>(null);
+  const deployActivityLabels = useMemo<DeployActivityLabels>(
+    () => ({
+      installTitle: copy.progressInstallTitle,
+      installSteps: installStepLabels,
+      updateTitle: copy.progressUpdateTitle,
+      updateSteps: updateStepLabels,
+      uninstallTitle: copy.progressUninstallTitle,
+      uninstallSteps: uninstallStepLabels,
+      restartTitle: copy.progressRestartTitle,
+      restartSteps: restartStepLabels
+    }),
+    [copy, installStepLabels, restartStepLabels, uninstallStepLabels, updateStepLabels]
+  );
 
   function applyTargetsResult(result: DeploymentTargetsResponse) {
     setTargets(result.targets);
     setCheckedAt(result.checkedAt);
   }
 
-  async function loadTargets(options?: { fresh?: boolean }) {
+  const loadTargets = useCallback(async (options?: { fresh?: boolean }) => {
     setTargetsLoading(true);
     setTargetsError("");
 
@@ -274,11 +370,15 @@ export default function DeployPage() {
     } finally {
       setTargetsLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     void loadTargets();
-  }, []);
+  }, [loadTargets]);
+
+  useEffect(() => {
+    activityRef.current = activity;
+  }, [activity]);
 
   const deployTargets = useMemo(() => decorateTargets(targets), [targets]);
   const installedTargets = useMemo(() => deployTargets.filter((target) => target.installed), [deployTargets]);
@@ -288,6 +388,21 @@ export default function DeployPage() {
   );
   const plannedTargets = useMemo(() => deployTargets.filter((target) => target.planned), [deployTargets]);
   const actionBusy = Boolean(installingTargetId) || Boolean(updatingTargetId) || Boolean(uninstallingTargetId) || restartingGateway;
+
+  useEffect(() => {
+    return subscribeToDaemonEvents((event) => {
+      if (!actionBusy) {
+        const nextActivity = applyDeployEventToActivity(activityRef.current, event, deployActivityLabels);
+        if (nextActivity !== activityRef.current) {
+          setActivity(nextActivity);
+        }
+      }
+
+      if (shouldRefreshDeploymentTargetsForEvent(event)) {
+        void loadTargets({ fresh: true });
+      }
+    });
+  }, [actionBusy, deployActivityLabels, loadTargets]);
 
   function startActivity(title: string, stepLabels: string[]) {
     let stepIndex = 0;

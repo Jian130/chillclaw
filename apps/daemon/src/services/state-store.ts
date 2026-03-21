@@ -1,5 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import type {
   AIMemberDetail,
@@ -11,6 +10,7 @@ import type {
   TeamDetail,
   SupportedChannelId
 } from "@slackclaw/contracts";
+import { FilesystemStateAdapter } from "../platform/filesystem-state-adapter.js";
 import { getDataDir } from "../runtime-paths.js";
 
 export interface StoredChannelEntryState {
@@ -93,23 +93,20 @@ const DEFAULT_STATE: AppState = {
 
 export class StateStore {
   private readonly filePath: string;
+  private readonly filesystem: FilesystemStateAdapter;
 
-  constructor(filePath = resolve(getDataDir(), "state.json")) {
+  constructor(filePath = resolve(getDataDir(), "state.json"), filesystem = new FilesystemStateAdapter()) {
     this.filePath = filePath;
+    this.filesystem = filesystem;
   }
 
   async read(): Promise<AppState> {
-    try {
-      const raw = await readFile(this.filePath, "utf8");
-      return { ...DEFAULT_STATE, ...JSON.parse(raw) } as AppState;
-    } catch {
-      return DEFAULT_STATE;
-    }
+    const persisted = await this.filesystem.readJson(this.filePath, DEFAULT_STATE);
+    return { ...DEFAULT_STATE, ...persisted } as AppState;
   }
 
   async write(nextState: AppState): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(nextState, null, 2));
+    await this.filesystem.writeJson(this.filePath, nextState);
   }
 
   async update(updater: (current: AppState) => AppState): Promise<AppState> {

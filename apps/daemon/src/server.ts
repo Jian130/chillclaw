@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
+import { WebSocketServer, type WebSocket } from "ws";
 
 import type {
   AbortChatRequest,
@@ -30,18 +32,21 @@ import type {
 } from "@slackclaw/contracts";
 
 import { createEngineAdapter } from "./engine/registry.js";
+import { createDefaultSecretsAdapter } from "./platform/macos-keychain-secrets-adapter.js";
 import { AppControlService } from "./services/app-control-service.js";
 import { AppServiceManager } from "./services/app-service-manager.js";
 import { AITeamService } from "./services/ai-team-service.js";
 import { ChatService } from "./services/chat-service.js";
 import { ChannelSetupService } from "./services/channel-setup-service.js";
 import { errorToLogDetails, writeErrorLog, writeInfoLog } from "./services/logger.js";
+import { EventPublisher } from "./services/event-publisher.js";
 import { OnboardingService } from "./services/onboarding-service.js";
 import { OverviewService } from "./services/overview-service.js";
 import { SetupService } from "./services/setup-service.js";
 import { SkillService } from "./services/skill-service.js";
 import { StateStore } from "./services/state-store.js";
 import { TaskService } from "./services/task-service.js";
+import { EventBusService } from "./services/event-bus-service.js";
 import { getDataDir, getStaticDir } from "./runtime-paths.js";
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -119,19 +124,36 @@ async function serveStaticAsset(requestUrl: string, response: ServerResponse): P
 
 export function startServer(port = 4545) {
   const adapter = createEngineAdapter();
+  const secrets = createDefaultSecretsAdapter();
   const store = new StateStore();
   const appServiceManager = new AppServiceManager();
   const overviewService = new OverviewService(adapter, store, appServiceManager);
-  const channelSetupService = new ChannelSetupService(adapter, store);
-  const aiTeamService = new AITeamService(adapter, store);
-  const chatService = new ChatService(adapter, store, aiTeamService);
-  const skillService = new SkillService(adapter, store);
-  const setupService = new SetupService(adapter, store, overviewService);
+  const eventBus = new EventBusService();
+  const eventPublisher = new EventPublisher(eventBus);
+  const channelSetupService = new ChannelSetupService(adapter, store, eventPublisher, secrets);
+  const aiTeamService = new AITeamService(adapter, store, eventPublisher);
+  const chatService = new ChatService(adapter, store, aiTeamService, eventPublisher);
+  const skillService = new SkillService(adapter, store, eventPublisher);
+  const setupService = new SetupService(adapter, store, overviewService, eventPublisher);
   const onboardingService = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
-  const taskService = new TaskService(adapter, store);
+  const taskService = new TaskService(adapter, store, eventPublisher);
+  const eventSocketServer = new WebSocketServer({ noServer: true });
   let server: ReturnType<typeof createServer>;
   const appControlService = new AppControlService(() => {
     server.close();
+  });
+
+  eventSocketServer.on("connection", (socket: WebSocket) => {
+    const unsubscribe = eventBus.subscribe((event) => {
+      if (socket.readyState === socket.OPEN) {
+        socket.send(JSON.stringify(event));
+      }
+    });
+
+    socket.on("close", unsubscribe);
+    socket.on("error", () => {
+      unsubscribe();
+    });
   });
 
   server = createServer(async (request, response) => {
@@ -162,12 +184,17 @@ export function startServer(port = 4545) {
       const pathname = requestUrl.pathname;
       const freshRead = requestUrl.searchParams.get("fresh") === "1";
 
-      if (request.method === "GET" && pathname.startsWith("/api/") && pathname !== "/api/ping" && pathname !== "/api/chat/events" && freshRead) {
+      if (request.method === "GET" && pathname.startsWith("/api/") && pathname !== "/api/ping" && freshRead) {
         adapter.invalidateReadCaches();
       }
 
       if (request.method === "GET" && pathname === "/api/ping") {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (request.method === "GET" && pathname === "/api/events") {
+        sendJson(response, 426, { error: "Upgrade required. Connect with WebSocket." });
         return;
       }
 
@@ -187,7 +214,23 @@ export function startServer(port = 4545) {
           request.url === "/api/deploy/targets/managed-local/install")
       ) {
         const targetId = request.url.includes("/managed-local/") ? "managed-local" : "standard";
-        sendJson(response, 200, await adapter.instances.installDeploymentTarget(targetId));
+        const correlationId = randomUUID();
+        eventPublisher.publishDeployProgress({
+          correlationId,
+          targetId,
+          phase: "installing",
+          percent: 10,
+          message: `SlackClaw is installing the ${targetId} OpenClaw runtime.`
+        });
+        const result = await adapter.instances.installDeploymentTarget(targetId);
+        eventPublisher.publishDeployCompleted({
+          correlationId,
+          targetId,
+          status: result.status,
+          message: result.message,
+          engineStatus: result.engineStatus
+        });
+        sendJson(response, 200, result);
         return;
       }
 
@@ -197,7 +240,23 @@ export function startServer(port = 4545) {
           request.url === "/api/deploy/targets/managed-local/update")
       ) {
         const targetId = request.url.includes("/managed-local/") ? "managed-local" : "standard";
-        sendJson(response, 200, await adapter.instances.updateDeploymentTarget(targetId));
+        const correlationId = randomUUID();
+        eventPublisher.publishDeployProgress({
+          correlationId,
+          targetId,
+          phase: "updating",
+          percent: 10,
+          message: `SlackClaw is updating the ${targetId} OpenClaw runtime.`
+        });
+        const result = await adapter.instances.updateDeploymentTarget(targetId);
+        eventPublisher.publishDeployCompleted({
+          correlationId,
+          targetId,
+          status: result.status,
+          message: result.message,
+          engineStatus: result.engineStatus
+        });
+        sendJson(response, 200, result);
         return;
       }
 
@@ -207,12 +266,34 @@ export function startServer(port = 4545) {
           request.url === "/api/deploy/targets/managed-local/uninstall")
       ) {
         const targetId = request.url.includes("/managed-local/") ? "managed-local" : "standard";
-        sendJson(response, 200, await adapter.instances.uninstallDeploymentTarget(targetId));
+        const correlationId = randomUUID();
+        eventPublisher.publishDeployProgress({
+          correlationId,
+          targetId,
+          phase: "uninstalling",
+          percent: 10,
+          message: `SlackClaw is removing the ${targetId} OpenClaw runtime.`
+        });
+        const result = await adapter.instances.uninstallDeploymentTarget(targetId);
+        eventPublisher.publishDeployCompleted({
+          correlationId,
+          targetId,
+          status: result.status,
+          message: result.message,
+          engineStatus: result.engineStatus
+        });
+        sendJson(response, 200, result);
         return;
       }
 
       if (request.method === "POST" && pathname === "/api/deploy/gateway/restart") {
-        sendJson(response, 200, await adapter.gateway.restartGateway());
+        const result = await adapter.gateway.restartGateway();
+        eventPublisher.publishGatewayStatus({
+          reachable: result.engineStatus.running && !result.engineStatus.pendingGatewayApply,
+          pendingGatewayApply: Boolean(result.engineStatus.pendingGatewayApply),
+          summary: result.engineStatus.summary
+        });
+        sendJson(response, 200, result);
         return;
       }
 
@@ -371,12 +452,6 @@ export function startServer(port = 4545) {
 
       if (request.method === "GET" && pathname === "/api/ai-team/overview") {
         sendJson(response, 200, await aiTeamService.getOverview());
-        return;
-      }
-
-      if (request.method === "GET" && pathname === "/api/chat/events") {
-        const unsubscribe = chatService.subscribe(response);
-        request.on("close", unsubscribe);
         return;
       }
 
@@ -642,6 +717,22 @@ export function startServer(port = 4545) {
     void writeErrorLog("SlackClaw daemon rejected a malformed client connection.", errorToLogDetails(error));
     if (socket.writable) {
       socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    }
+  });
+
+  server.on("upgrade", (request, socket, head) => {
+    try {
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (requestUrl.pathname !== "/api/events") {
+        socket.destroy();
+        return;
+      }
+
+      eventSocketServer.handleUpgrade(request, socket, head, (webSocket: WebSocket) => {
+        eventSocketServer.emit("connection", webSocket, request);
+      });
+    } catch {
+      socket.destroy();
     }
   });
 

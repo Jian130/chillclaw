@@ -704,6 +704,63 @@ export type ChatStreamEvent =
       thread: ChatThreadSummary;
     };
 
+export type SlackClawTaskProgressStatus = "pending" | "running" | "completed" | "failed";
+export type SlackClawDeployPhase =
+  | "detecting"
+  | "reusing"
+  | "installing"
+  | "updating"
+  | "uninstalling"
+  | "verifying"
+  | "restarting-gateway";
+export type SlackClawConfigResource = "models" | "channels" | "skills" | "ai-employees" | "onboarding" | "gateway";
+
+export type SlackClawEvent =
+  | {
+      type: "deploy.progress";
+      correlationId: string;
+      targetId: DeploymentTargetId;
+      phase: SlackClawDeployPhase;
+      percent?: number;
+      message: string;
+    }
+  | {
+      type: "deploy.completed";
+      correlationId: string;
+      targetId: DeploymentTargetId;
+      status: "completed" | "failed";
+      message: string;
+      engineStatus: EngineStatus;
+    }
+  | {
+      type: "gateway.status";
+      reachable: boolean;
+      pendingGatewayApply: boolean;
+      summary: string;
+    }
+  | {
+      type: "task.progress";
+      taskId: string;
+      status: SlackClawTaskProgressStatus;
+      message: string;
+    }
+  | {
+      type: "chat.stream";
+      threadId: string;
+      sessionKey: string;
+      payload: ChatStreamEvent;
+    }
+  | {
+      type: "channel.session.updated";
+      channelId: SupportedChannelId;
+      session: ChannelSession;
+    }
+  | {
+      type: "config.applied";
+      resource: SlackClawConfigResource;
+      summary: string;
+    };
+
 export interface ProductOverview {
   appName: string;
   appVersion: string;

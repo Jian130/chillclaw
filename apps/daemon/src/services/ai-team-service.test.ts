@@ -6,17 +6,21 @@ import { resolve } from "node:path";
 import type { DeleteAIMemberRequest } from "@slackclaw/contracts";
 
 import { MockAdapter } from "../engine/mock-adapter.js";
+import { EventBusService } from "./event-bus-service.js";
+import { EventPublisher } from "./event-publisher.js";
 import { AITeamService } from "./ai-team-service.js";
 import { StateStore } from "./state-store.js";
 
-function createService(testName: string, adapter = new MockAdapter()) {
+function createService(testName: string, adapter = new MockAdapter(), options?: { withEvents?: boolean }) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
   const store = new StateStore(filePath);
+  const bus = options?.withEvents ? new EventBusService() : undefined;
 
   return {
     adapter,
     store,
-    service: new AITeamService(adapter, store)
+    service: new AITeamService(adapter, store, bus ? new EventPublisher(bus) : undefined),
+    bus
   };
 }
 
@@ -101,4 +105,49 @@ test("AI team delete passes keep-workspace mode through and removes team members
   assert.equal(removed.message.includes("workspace/history was kept"), true);
   assert.equal(state.aiTeam?.members[member.id], undefined);
   assert.equal(state.aiTeam?.teams[Object.keys(state.aiTeam?.teams ?? {})[0]]?.memberIds.length, 0);
+});
+
+test("AI team service publishes config events for member and team mutations", async () => {
+  const { service, bus } = createService("ai-team-events", new MockAdapter(), { withEvents: true });
+  const events: string[] = [];
+  bus?.subscribe((event) => {
+    if (event.type === "config.applied") {
+      events.push(`${event.type}:${event.resource}`);
+    }
+  });
+
+  const created = await service.saveMember(undefined, {
+    name: "Jordan Lee",
+    jobTitle: "Support Lead",
+    avatar: {
+      presetId: "operator",
+      accent: "var(--avatar-1)",
+      emoji: "🦊",
+      theme: "sunrise"
+    },
+    brainEntryId: "mock-openai-gpt-4o-mini",
+    personality: "Calm",
+    soul: "Help clearly.",
+    workStyles: [],
+    skillIds: [],
+    knowledgePackIds: [],
+    capabilitySettings: {
+      memoryEnabled: true,
+      contextWindow: 128000
+    }
+  });
+
+  const member = created.overview.members[0];
+  await service.saveTeam(undefined, {
+    name: "Support",
+    purpose: "Handle user questions",
+    memberIds: [member.id]
+  });
+  await service.deleteMember(member.id, { deleteMode: "keep-workspace" });
+
+  assert.deepEqual(events, [
+    "config.applied:ai-employees",
+    "config.applied:ai-employees",
+    "config.applied:ai-employees"
+  ]);
 });

@@ -22,6 +22,7 @@ import type {
 
 import type { ChannelSetupState } from "@slackclaw/contracts";
 import type { ConfigManager, SkillRuntimeCatalog } from "./adapter.js";
+import { NoopSecretsAdapter, modelAuthSecretName, type SecretsAdapter } from "../platform/secrets-adapter.js";
 
 type ConfigAccess = {
   getModelConfig: () => Promise<ModelConfigOverview>;
@@ -54,17 +55,46 @@ type ConfigAccess = {
 };
 
 export class OpenClawConfigManager implements ConfigManager {
-  constructor(private readonly access: ConfigAccess) {}
+  private readonly secrets: SecretsAdapter;
+  private readonly resolveModelAuthSecretFieldIds: (providerId: string, methodId: string) => string[];
+
+  constructor(
+    private readonly access: ConfigAccess,
+    options?: {
+      secrets?: SecretsAdapter;
+      resolveModelAuthSecretFieldIds?: (providerId: string, methodId: string) => string[];
+    }
+  ) {
+    this.secrets = options?.secrets ?? new NoopSecretsAdapter();
+    this.resolveModelAuthSecretFieldIds = options?.resolveModelAuthSecretFieldIds ?? (() => []);
+  }
+
+  private async persistModelSecrets(providerId: string, methodId: string, values: Record<string, string>): Promise<void> {
+    const fieldIds = this.resolveModelAuthSecretFieldIds(providerId, methodId);
+
+    await Promise.all(
+      fieldIds.map(async (fieldId) => {
+        const value = values[fieldId]?.trim();
+        if (!value) {
+          return;
+        }
+
+        await this.secrets.set(modelAuthSecretName(providerId, methodId, fieldId), value);
+      })
+    );
+  }
 
   getModelConfig() {
     return this.access.getModelConfig();
   }
 
-  createSavedModelEntry(request: SaveModelEntryRequest) {
+  async createSavedModelEntry(request: SaveModelEntryRequest) {
+    await this.persistModelSecrets(request.providerId, request.methodId, request.values);
     return this.access.createSavedModelEntry(request);
   }
 
-  updateSavedModelEntry(entryId: string, request: SaveModelEntryRequest) {
+  async updateSavedModelEntry(entryId: string, request: SaveModelEntryRequest) {
+    await this.persistModelSecrets(request.providerId, request.methodId, request.values);
     return this.access.updateSavedModelEntry(entryId, request);
   }
 
@@ -80,7 +110,8 @@ export class OpenClawConfigManager implements ConfigManager {
     return this.access.replaceFallbackModelEntries(request);
   }
 
-  authenticateModelProvider(request: ModelAuthRequest) {
+  async authenticateModelProvider(request: ModelAuthRequest) {
+    await this.persistModelSecrets(request.providerId, request.methodId, request.values);
     return this.access.authenticateModelProvider(request);
   }
 

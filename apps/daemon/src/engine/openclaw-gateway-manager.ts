@@ -4,6 +4,8 @@ import type {
   ChannelSession,
   ChannelSessionInputRequest,
   ChannelSetupState,
+  EngineTaskRequest,
+  EngineTaskResult,
   EngineStatus,
   HealthCheckResult,
   PairingApprovalRequest,
@@ -18,6 +20,7 @@ type GatewayAccess = {
   getActiveChannelSession: () => Promise<ChannelSession | undefined>;
   getChannelSession: (sessionId: string) => Promise<ChannelSession>;
   submitChannelSessionInput: (sessionId: string, request: ChannelSessionInputRequest) => Promise<ChannelSession>;
+  runTask: (request: EngineTaskRequest) => Promise<EngineTaskResult>;
   getChatThreadDetail: (request: { agentId: string; threadId: string; sessionKey: string }) => Promise<ChatThreadDetail>;
   subscribeToLiveChatEvents: (listener: (event: EngineChatLiveEvent) => void) => Promise<() => void>;
   sendChatMessage: (request: SendChatMessageRequest & { agentId: string; threadId: string; sessionKey: string }) => Promise<{ runId?: string }>;
@@ -49,6 +52,10 @@ export class OpenClawGatewayManager implements GatewayManager {
 
   submitChannelSessionInput(sessionId: string, request: ChannelSessionInputRequest) {
     return this.access.submitChannelSessionInput(sessionId, request);
+  }
+
+  runTask(request: EngineTaskRequest) {
+    return this.access.runTask(request);
   }
 
   getChatThreadDetail(request: { agentId: string; threadId: string; sessionKey: string }) {

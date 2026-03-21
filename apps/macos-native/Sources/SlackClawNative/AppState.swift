@@ -25,6 +25,59 @@ struct SlackClawAppDataLoader {
     }
 }
 
+func shouldRefreshNativeOverviewForEvent(_ event: SlackClawEvent) -> Bool {
+    switch event {
+    case .deployCompleted, .gatewayStatus, .configApplied:
+        return true
+    case let .taskProgress(_, status, _):
+        return status != .running
+    case .chatStream, .channelSessionUpdated, .deployProgress:
+        return false
+    }
+}
+
+func shouldRefreshNativeSectionForEvent(_ event: SlackClawEvent, selectedSection: NativeSection) -> Bool {
+    switch selectedSection {
+    case .dashboard:
+        switch event {
+        case .deployCompleted, .gatewayStatus, .configApplied:
+            return true
+        case let .taskProgress(_, status, _):
+            return status != .running
+        case .chatStream, .channelSessionUpdated, .deployProgress:
+            return false
+        }
+    case .deploy:
+        switch event {
+        case .deployCompleted, .gatewayStatus:
+            return true
+        case .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
+            return false
+        }
+    case .configuration:
+        switch event {
+        case .channelSessionUpdated:
+            return true
+        case let .configApplied(resource, _):
+            return resource == .models || resource == .channels || resource == .gateway
+        case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
+            return false
+        }
+    case .skills:
+        guard case let .configApplied(resource, _) = event else {
+            return false
+        }
+        return resource == .skills
+    case .members, .team, .chat:
+        guard case let .configApplied(resource, _) = event else {
+            return false
+        }
+        return resource == .aiEmployees || resource == .models || resource == .skills
+    case .settings:
+        return false
+    }
+}
+
 enum NativeSection: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
     case deploy = "Deploy"
@@ -52,12 +105,16 @@ enum NativeClientError: Error, LocalizedError {
 @MainActor
 @Observable
 final class SlackClawAppState {
+    typealias DaemonEventStreamFactory = @Sendable () -> AsyncStream<SlackClawEvent>
+
     let client: SlackClawAPIClient
     var chatViewModel: SlackClawChatViewModel
     let endpointStore: DaemonEndpointStore
     let processManager: DaemonProcessManager
     let configuration: SlackClawClientConfiguration
     private let loader: SlackClawAppDataLoader
+    private let daemonEventStreamFactory: DaemonEventStreamFactory
+    private var daemonEventTask: Task<Void, Never>?
 
     var selectedSection: NativeSection = .dashboard
     var overview: ProductOverview?
@@ -82,12 +139,14 @@ final class SlackClawAppState {
         endpointStore: DaemonEndpointStore? = nil,
         processManager: DaemonProcessManager? = nil,
         chatViewModel: SlackClawChatViewModel? = nil,
-        loader: SlackClawAppDataLoader? = nil
+        loader: SlackClawAppDataLoader? = nil,
+        daemonEventStreamFactory: DaemonEventStreamFactory? = nil
     ) {
         let resolvedClient = client ?? SlackClawAPIClient(configurationProvider: { configuration })
         self.configuration = configuration
         self.client = resolvedClient
         self.loader = loader ?? .live(client: resolvedClient)
+        self.daemonEventStreamFactory = daemonEventStreamFactory ?? { resolvedClient.daemonEvents() }
         self.endpointStore = endpointStore ?? DaemonEndpointStore(configuration: configuration, ping: { try await resolvedClient.ping() })
         self.processManager = processManager ?? DaemonProcessManager(ping: { try await resolvedClient.ping() })
         self.chatViewModel = chatViewModel ?? SlackClawChatViewModel(transport: DaemonChatTransport(client: resolvedClient))
@@ -102,6 +161,7 @@ final class SlackClawAppState {
             errorMessage = error.localizedDescription
         }
         hasBootstrapped = true
+        startDaemonEventsIfNeeded()
     }
 
     func refreshDaemonState() async {
@@ -148,6 +208,44 @@ final class SlackClawAppState {
 
     func openFallbackWeb() {
         NSWorkspace.shared.open(configuration.fallbackWebURL)
+    }
+
+    func startDaemonEventsIfNeeded() {
+        guard daemonEventTask == nil else { return }
+        daemonEventTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = self.daemonEventStreamFactory()
+
+            for await event in stream {
+                if Task.isCancelled {
+                    break
+                }
+
+                await self.applyDaemonEvent(event)
+            }
+        }
+    }
+
+    func applyDaemonEvent(_ event: SlackClawEvent) async {
+        guard hasBootstrapped else { return }
+
+        if shouldRefreshNativeOverviewForEvent(event) {
+            do {
+                try await refreshOverview()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        guard !requiresOnboarding else { return }
+        guard shouldRefreshNativeSectionForEvent(event, selectedSection: selectedSection) else { return }
+
+        do {
+            try await refreshCurrentSectionData()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func refreshOverview() async throws {

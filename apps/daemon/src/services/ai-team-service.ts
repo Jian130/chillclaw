@@ -16,6 +16,7 @@ import type {
 } from "@slackclaw/contracts";
 import type { EngineAdapter } from "../engine/adapter.js";
 import type { AIMemberRuntimeCandidate } from "../engine/adapter.js";
+import { EventPublisher } from "./event-publisher.js";
 import { StateStore, type AITeamState } from "./state-store.js";
 
 const DEFAULT_TEAM_VISION =
@@ -174,7 +175,8 @@ function activityItem(
 export class AITeamService {
   constructor(
     private readonly adapter: EngineAdapter,
-    private readonly store: StateStore
+    private readonly store: StateStore,
+    private readonly eventPublisher?: EventPublisher
   ) {}
 
   async getOverview(): Promise<AITeamOverview> {
@@ -334,6 +336,11 @@ export class AITeamService {
       };
     });
 
+    this.eventPublisher?.publishConfigApplied({
+      resource: "ai-employees",
+      summary: current ? `${request.name.trim()} was updated.` : `${request.name.trim()} was created.`
+    });
+
     return {
       status: "completed",
       message: current ? `${request.name.trim()} was updated.` : `${request.name.trim()} was created.`,
@@ -392,6 +399,14 @@ export class AITeamService {
       };
     });
 
+    this.eventPublisher?.publishConfigApplied({
+      resource: "ai-employees",
+      summary:
+        request.deleteMode === "keep-workspace"
+          ? `${member.name} was removed and the workspace/history was kept.`
+          : `${member.name} was removed.`
+    });
+
     return {
       status: "completed",
       message:
@@ -437,6 +452,11 @@ export class AITeamService {
       };
     });
 
+    this.eventPublisher?.publishConfigApplied({
+      resource: "ai-employees",
+      summary: `${member.name} bindings were refreshed.`
+    });
+
     return {
       memberId,
       bindings
@@ -475,6 +495,11 @@ export class AITeamService {
           ].slice(0, 20)
         }
       };
+    });
+
+    this.eventPublisher?.publishConfigApplied({
+      resource: "ai-employees",
+      summary: `${member.name} is now bound to ${request.binding}.`
     });
 
     return {
@@ -519,6 +544,11 @@ export class AITeamService {
       };
     });
 
+    this.eventPublisher?.publishConfigApplied({
+      resource: "ai-employees",
+      summary: `${member.name} is no longer bound to ${request.binding}.`
+    });
+
     return {
       status: "completed",
       message: `${member.name} is no longer bound to ${request.binding}.`,
@@ -557,6 +587,11 @@ export class AITeamService {
           }
         }
       };
+    });
+
+    this.eventPublisher?.publishConfigApplied({
+      resource: "ai-employees",
+      summary: "Team was removed."
     });
 
     return {

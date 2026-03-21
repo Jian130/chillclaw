@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { AIMemberDetail, ChatThreadDetail, ChatThreadSummary } from "@slackclaw/contracts";
+import type { AIMemberDetail, ChatThreadDetail, ChatThreadSummary, SlackClawEvent } from "@slackclaw/contracts";
 
-import { applyChatEventToDetail, memberNameForThread, preferredNewChatMemberId, sortChatThreads } from "./ChatPage.js";
+import {
+  applyChatEventToDetail,
+  chatStreamEventFromDaemonEvent,
+  memberNameForThread,
+  preferredNewChatMemberId,
+  sortChatThreads
+} from "./ChatPage.js";
 
 const members: AIMemberDetail[] = [
   {
@@ -173,5 +179,37 @@ describe("ChatPage helpers", () => {
 
     expect(aborted?.messages.at(-1)?.interrupted).toBe(true);
     expect(aborted?.composerState.canSend).toBe(true);
+  });
+
+  it("extracts chat stream payloads from daemon events", () => {
+    const chatEvent: SlackClawEvent = {
+      type: "chat.stream",
+      threadId: "thread-1",
+      sessionKey: "agent:agent-1:slackclaw-chat:thread-1",
+      payload: {
+        type: "assistant-delta",
+        threadId: "thread-1",
+        activityLabel: "Responding…",
+        message: {
+          id: "thread-1:assistant:stream",
+          role: "assistant",
+          text: "Working on it...",
+          status: "streaming"
+        }
+      }
+    };
+
+    expect(chatStreamEventFromDaemonEvent(chatEvent)).toEqual(chatEvent.payload);
+  });
+
+  it("ignores non-chat daemon events when deriving chat stream updates", () => {
+    expect(
+      chatStreamEventFromDaemonEvent({
+        type: "gateway.status",
+        reachable: true,
+        pendingGatewayApply: false,
+        summary: "Gateway is healthy."
+      })
+    ).toBeUndefined();
   });
 });

@@ -19,6 +19,25 @@
   - `gateway` for live gateway lifecycle, health, chat, pairing, and apply/restart flows
 - changed daemon services and routes to delegate through the composed manager boundary while keeping the existing HTTP route surface stable
 - added pending gateway-apply signals so SlackClaw can distinguish staged config from live/applied runtime state
+- added the first hybrid daemon event-bus foundation:
+  - shared `SlackClawEvent` contracts in TypeScript and Swift
+  - one client-facing daemon WebSocket endpoint at `/api/events`
+  - browser and native client event-stream primitives for incremental adoption
+  - first live event publishing for first-run install/setup, deploy actions, gateway restart, and chat stream mirroring
+- extracted the first explicit daemon-side filesystem/state adapter and routed state persistence plus operational log writes through it instead of direct scattered `fs/promises` calls
+- extended daemon event publication into config-facing services so channel, skill, and AI-employee mutations now emit `config.applied`, and interactive channel flows emit `channel.session.updated`
+- wired the React overview provider to the daemon event bus so deploy, gateway, and config events trigger fresh overview reads automatically
+- extracted an explicit daemon-side secrets adapter seam, added a safe macOS keychain implementation, and wired channel/model secret mirroring through that boundary instead of leaving raw secrets as implicit request plumbing
+- extracted explicit daemon-side CLI runner and OpenClaw gateway-socket adapter seams so the core service no longer keeps those mechanics embedded as one-off logic inside `openclaw-adapter.ts`
+- wired the React Deploy page to the daemon event bus so deploy completion and gateway-status pushes now refresh target state automatically, while external deploy-progress events can drive the visible activity panel
+- wired the React AI Team provider and the native macOS app state to the daemon event bus so config changes now refresh live member/team state without waiting for a manual page reload
+- wired the React onboarding and chat surfaces to the daemon event bus so setup progress and live chat updates now flow through the shared WebSocket event channel instead of page-specific polling and chat-only SSE
+- moved task execution onto the composed `gateway` manager so product services can stop depending on the old flat `adapter.runTask(...)` compatibility method
+- changed the shared Swift client so native chat derives its live transcript stream from daemon `chat.stream` events instead of opening a second `/api/chat/events` transport
+- wired the native onboarding view model to the shared daemon event bus so install, model, channel, and AI-employee steps refresh the right authoritative resource when matching daemon events arrive
+- removed the remaining public flat behavior bag from the `EngineAdapter` interface, leaving the composed managers as the typed product-facing seam while concrete adapters keep extra helper methods only as implementation details
+- removed the old daemon-side `/api/chat/events` SSE route and subscriber plumbing now that both web and native chat consume the shared `/api/events` WebSocket bus
+- moved concrete adapter tests onto the composed manager seam and rewired concrete OpenClaw/mock managers with explicit access objects so concrete-only helper methods can keep shrinking behind the managers instead of acting like a second public API
 
 ### Deploy and runtime management
 
@@ -97,7 +116,7 @@
 - changed `npm start` so local dev startup no longer auto-runs OpenClaw bootstrap or installation; use the in-product install flow or `npm run bootstrap:openclaw` when you want to install it explicitly
 - expanded development-mode command logging so daemon-side `npm`, `brew`, `launchctl`, helper shell commands, and bootstrap commands are echoed to the console, not just `openclaw`
 - added `npm restart` as the one-command managed dev restart path on top of the existing `npm stop` and `npm start` scripts
-- added a root `SlackClaw.xcworkspace` so Xcode can open the native macOS app and shared Swift packages together while keeping React and future native apps parallel in the repo layout
+- removed the non-runnable root Xcode workspace stub and restored `apps/macos-native/Package.swift` as the direct Xcode entry point for native development
 
 ### UI polish
 

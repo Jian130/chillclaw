@@ -3,7 +3,8 @@ import type {
   AITeamOverview,
   DeleteAIMemberRequest,
   SaveAIMemberRequest,
-  SaveTeamRequest
+  SaveTeamRequest,
+  SlackClawEvent
 } from "@slackclaw/contracts";
 
 import {
@@ -17,6 +18,7 @@ import {
   updateAIMember,
   updateTeam
 } from "../../shared/api/client.js";
+import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 import { settleAfterMutation } from "../../shared/data/settle.js";
 
 interface AITeamContextValue {
@@ -33,6 +35,14 @@ interface AITeamContextValue {
 }
 
 const AITeamContext = createContext<AITeamContextValue | null>(null);
+
+export function shouldRefreshAITeamForEvent(event: SlackClawEvent): boolean {
+  if (event.type !== "config.applied") {
+    return false;
+  }
+
+  return event.resource === "ai-employees" || event.resource === "models" || event.resource === "skills";
+}
 
 export function AITeamProvider(props: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
@@ -56,6 +66,16 @@ export function AITeamProvider(props: PropsWithChildren) {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    return subscribeToDaemonEvents((event) => {
+      if (!shouldRefreshAITeamForEvent(event)) {
+        return;
+      }
+
+      void refresh({ fresh: true });
+    });
   }, [refresh]);
 
   async function settleAITeamOverview<TResponse extends { overview: AITeamOverview }>(options: {

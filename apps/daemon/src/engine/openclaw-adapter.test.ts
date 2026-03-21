@@ -193,7 +193,7 @@ test("npm-managed OpenClaw detection only matches the expected global npm comman
 
 test("AI member discovery tolerates mixed plugin logs and preserves runtime metadata", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
-    const members = await adapter.listAIMemberRuntimeCandidates();
+    const members = await adapter.aiEmployees.listAIMemberRuntimeCandidates();
 
     assert.equal(members.length, 3);
     assert.deepEqual(
@@ -208,7 +208,7 @@ test("AI member discovery tolerates mixed plugin logs and preserves runtime meta
 
 test("AI member discovery falls back to stderr when OpenClaw writes JSON there", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
-    const members = await adapter.listAIMemberRuntimeCandidates();
+    const members = await adapter.aiEmployees.listAIMemberRuntimeCandidates();
 
     assert.equal(members.length, 3);
     assert.deepEqual(
@@ -479,7 +479,7 @@ function countCommands(commands: string[], needle: string): number {
 
 test("OpenClaw model config uses the full provider catalog and one status read per refresh cycle", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    const config = await adapter.getModelConfig();
+    const config = await adapter.config.getModelConfig();
     const commands = await readCommands(logPath);
 
     assert.equal(countCommands(commands, "models list --json"), 1);
@@ -524,7 +524,7 @@ test("OpenClaw model config clears stale configured models when the live runtime
 
       adapter.invalidateReadCaches();
 
-      const config = await adapter.getModelConfig();
+      const config = await adapter.config.getModelConfig();
 
       assert.equal(config.models.length, 0);
       assert.equal(config.savedEntries.length, 0);
@@ -543,7 +543,7 @@ test("OpenClaw model config clears stale configured models when the live runtime
 
 test("creating a normal OAuth saved model entry authenticates through models auth login without creating a hidden agent", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    const created = await adapter.createSavedModelEntry({
+    const created = await adapter.config.createSavedModelEntry({
       label: "OpenAI Codex",
       providerId: "openai",
       methodId: "openai-codex",
@@ -556,10 +556,10 @@ test("creating a normal OAuth saved model entry authenticates through models aut
     assert.equal(created.status, "interactive");
     assert.ok(created.authSession?.id);
 
-    let session = await adapter.getModelAuthSession(created.authSession!.id);
+    let session = await adapter.config.getModelAuthSession(created.authSession!.id);
     for (let attempt = 0; attempt < 10 && session.session.status === "running"; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 150));
-      session = await adapter.getModelAuthSession(created.authSession!.id);
+      session = await adapter.config.getModelAuthSession(created.authSession!.id);
     }
     const commands = await readCommands(logPath);
 
@@ -596,9 +596,13 @@ test("OpenClaw channel reads reuse one list and one probe across channel state a
 
 test("configureTelegram falls back to direct config writes when the command path rejects telegram", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath, configPath }) => {
-    const result = await adapter.configureTelegram({
-      token: "123:fake-token",
-      accountName: "Fallback Bot"
+    const result = await adapter.config.saveChannelEntry({
+      channelId: "telegram",
+      action: "save",
+      values: {
+        token: "123:fake-token",
+        accountName: "Fallback Bot"
+      }
     });
     const commands = await readCommands(logPath);
     const config = JSON.parse(await readFile(configPath, "utf8")) as {
@@ -622,7 +626,7 @@ test("configureTelegram falls back to direct config writes when the command path
 
 test("saveCustomSkill stages the skill change without restarting the gateway", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    const result = await adapter.saveCustomSkill(undefined, {
+    const result = await adapter.config.saveCustomSkill(undefined, {
       name: "Summarizer",
       description: "Summarize content",
       instructions: "Summarize user content clearly."
@@ -640,9 +644,9 @@ test("saveCustomSkill stages the skill change without restarting the gateway", a
 
 test("saveAIMemberRuntime stages agent changes without restarting the gateway", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    const modelConfig = await adapter.getModelConfig();
+    const modelConfig = await adapter.config.getModelConfig();
     const brainEntry = modelConfig.savedEntries[0];
-    const result = await adapter.saveAIMemberRuntime({
+    const result = await adapter.aiEmployees.saveAIMemberRuntime({
       memberId: "member-1",
       existingAgentId: "existing-agent",
       name: "AI Assistant",
@@ -683,15 +687,19 @@ test("saveAIMemberRuntime stages agent changes without restarting the gateway", 
 
 test("restartGateway clears the pending apply flag after staged changes", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
-    await adapter.configureTelegram({
-      token: "123:fake-token",
-      accountName: "Apply Bot"
+    await adapter.config.saveChannelEntry({
+      channelId: "telegram",
+      action: "save",
+      values: {
+        token: "123:fake-token",
+        accountName: "Apply Bot"
+      }
     });
 
     const before = await adapter.status();
     assert.equal(before.pendingGatewayApply, true);
 
-    const result = await adapter.restartGateway();
+    const result = await adapter.gateway.restartGateway();
 
     assert.equal(result.status, "completed");
     assert.equal(result.engineStatus.pendingGatewayApply, false);
@@ -703,11 +711,15 @@ test("restartGateway clears the pending apply flag after staged changes", async 
 
 test("configureFeishu falls back to direct config writes when config set drifts", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath, configPath }) => {
-    const result = await adapter.configureFeishu({
-      appId: "cli-app-id",
-      appSecret: "cli-app-secret",
-      domain: "feishu",
-      botName: "SlackClaw Feishu"
+    const result = await adapter.config.saveChannelEntry({
+      channelId: "feishu",
+      action: "save",
+      values: {
+        appId: "cli-app-id",
+        appSecret: "cli-app-secret",
+        domain: "feishu",
+        botName: "SlackClaw Feishu"
+      }
     });
     const commands = await readCommands(logPath);
     const config = JSON.parse(await readFile(configPath, "utf8")) as {
@@ -726,13 +738,17 @@ test("configureFeishu falls back to direct config writes when config set drifts"
 
 test("configureWechatWorkaround falls back to direct config writes when config set drifts", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath, configPath }) => {
-    const result = await adapter.configureWechatWorkaround({
-      pluginSpec: "@openclaw-china/wecom-app",
-      corpId: "corp-id",
-      agentId: "1000001",
-      secret: "corp-secret",
-      token: "verify-token",
-      encodingAesKey: "aes-key"
+    const result = await adapter.config.saveChannelEntry({
+      channelId: "wechat",
+      action: "save",
+      values: {
+        pluginSpec: "@openclaw-china/wecom-app",
+        corpId: "corp-id",
+        agentId: "1000001",
+        secret: "corp-secret",
+        token: "verify-token",
+        encodingAesKey: "aes-key"
+      }
     });
     const commands = await readCommands(logPath);
     const config = JSON.parse(await readFile(configPath, "utf8")) as {
@@ -753,7 +769,7 @@ test("configureWechatWorkaround falls back to direct config writes when config s
 
 test("AI member runtime candidate discovery uses one agents list and no per-agent bindings reads", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    await adapter.listAIMemberRuntimeCandidates();
+    await adapter.aiEmployees.listAIMemberRuntimeCandidates();
     const commands = await readCommands(logPath);
 
     assert.equal(countCommands(commands, "agents list --json --bindings"), 1);
@@ -909,7 +925,7 @@ test("updateDeploymentTarget restarts the gateway after a successful update", as
 
 test("restartGateway issues one gateway restart and reports success when the gateway returns", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    const result = await adapter.restartGateway();
+    const result = await adapter.gateway.restartGateway();
     const commands = await readCommands(logPath);
 
     assert.equal(result.status, "completed");
@@ -920,7 +936,7 @@ test("restartGateway issues one gateway restart and reports success when the gat
 
 test("sendChatMessage does not block on --expect-final", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    const result = await adapter.sendChatMessage({
+    const result = await adapter.gateway.sendChatMessage({
       threadId: "thread-1",
       agentId: "existing-agent",
       sessionKey: "agent:existing-agent:slackclaw-chat:thread-1",
@@ -943,7 +959,7 @@ test("sendChatMessage does not block on --expect-final", async () => {
 
 test("chat history maps assistant error messages into failed chat messages", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
-    const detail = await adapter.getChatThreadDetail({
+    const detail = await adapter.gateway.getChatThreadDetail({
       threadId: "thread-1",
       agentId: "existing-agent",
       sessionKey: "agent:existing-agent:slackclaw-chat:thread-1"
@@ -960,7 +976,7 @@ test("chat history maps assistant error messages into failed chat messages", asy
 
 test("chat history hides internal tool messages and only exposes visible user and assistant transcript messages", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
-    const detail = await adapter.getChatThreadDetail({
+    const detail = await adapter.gateway.getChatThreadDetail({
       threadId: "thread-1",
       agentId: "existing-agent",
       sessionKey: "agent:existing-agent:slackclaw-chat:thread-1"
@@ -982,7 +998,7 @@ test("chat history hides internal tool messages and only exposes visible user an
 
 test("chat history collapses consecutive assistant messages into one visible reply", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
-    const detail = await adapter.getChatThreadDetail({
+    const detail = await adapter.gateway.getChatThreadDetail({
       threadId: "thread-1",
       agentId: "existing-agent",
       sessionKey: "agent:existing-agent:slackclaw-chat:thread-1"

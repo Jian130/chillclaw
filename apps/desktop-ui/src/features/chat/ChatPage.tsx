@@ -8,7 +8,15 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { AIMemberDetail, ChatMessage, ChatOverview, ChatStreamEvent, ChatThreadDetail, ChatThreadSummary } from "@slackclaw/contracts";
+import type {
+  AIMemberDetail,
+  ChatMessage,
+  ChatOverview,
+  ChatStreamEvent,
+  ChatThreadDetail,
+  ChatThreadSummary,
+  SlackClawEvent
+} from "@slackclaw/contracts";
 
 import { useAITeam } from "../../app/providers/AITeamProvider.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
@@ -17,9 +25,9 @@ import {
   createChatThread,
   fetchChatOverview,
   fetchChatThread,
-  sendChatMessage,
-  subscribeToChatEvents
+  sendChatMessage
 } from "../../shared/api/client.js";
+import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 import { useChatLayoutMode } from "../../shared/data/responsive.js";
 import { t } from "../../shared/i18n/messages.js";
 import { Badge } from "../../shared/ui/Badge.js";
@@ -76,6 +84,14 @@ function mergeThreadSummary(
 
 export function sortChatThreads(threads: ChatThreadSummary[]): ChatThreadSummary[] {
   return [...threads].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+export function chatStreamEventFromDaemonEvent(event: SlackClawEvent): ChatStreamEvent | undefined {
+  if (event.type !== "chat.stream") {
+    return undefined;
+  }
+
+  return event.payload;
 }
 
 export function memberNameForThread(thread: ChatThreadSummary, members: AIMemberDetail[]): string {
@@ -592,8 +608,9 @@ export default function ChatPage() {
   }, [unreadByThreadId]);
 
   useEffect(() => {
-    return subscribeToChatEvents((event) => {
-      if (event.type === "connected") {
+    return subscribeToDaemonEvents((daemonEvent) => {
+      const event = chatStreamEventFromDaemonEvent(daemonEvent);
+      if (!event) {
         return;
       }
 

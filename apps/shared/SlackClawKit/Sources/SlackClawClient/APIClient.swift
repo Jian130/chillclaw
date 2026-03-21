@@ -26,47 +26,26 @@ public enum SlackClawClientError: Error, LocalizedError {
 }
 
 public final class SlackClawAPIClient: @unchecked Sendable {
-    public typealias EventStreamFactory = @Sendable (_ url: URL) async throws -> AsyncThrowingStream<String, Error>
-
     private enum RequestTimeout {
         static let longRunning: TimeInterval = 300
     }
 
     private let session: URLSession
     private let configurationProvider: @Sendable () async -> SlackClawClientConfiguration
-    private let eventStreamFactory: EventStreamFactory
+    private let daemonEventStreamClient: SlackClawEventStreamClient
 
     public init(
         session: URLSession = .shared,
         configurationProvider: @escaping @Sendable () async -> SlackClawClientConfiguration,
-        eventStreamFactory: EventStreamFactory? = nil
+        daemonEventStreamFactory: SlackClawEventStreamClient.RawEventStreamFactory? = nil
     ) {
         self.session = session
         self.configurationProvider = configurationProvider
-        self.eventStreamFactory = eventStreamFactory ?? { url in
-            let (bytes, response) = try await session.bytes(from: url)
-            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
-                throw SlackClawClientError.invalidResponse
-            }
-
-            let parser = SSEParser()
-            return AsyncThrowingStream { continuation in
-                let task = Task {
-                    do {
-                        for try await line in bytes.lines {
-                            let payloads = parser.feed(line + "\n")
-                            for payload in payloads {
-                                continuation.yield(payload)
-                            }
-                        }
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
-                    }
-                }
-                continuation.onTermination = { @Sendable _ in task.cancel() }
-            }
-        }
+        self.daemonEventStreamClient = SlackClawEventStreamClient(
+            session: session,
+            configurationProvider: configurationProvider,
+            rawEventStreamFactory: daemonEventStreamFactory
+        )
     }
 
     public func ping() async throws -> Bool {
@@ -227,26 +206,21 @@ public final class SlackClawAPIClient: @unchecked Sendable {
     }
 
     public func chatEvents() async throws -> AsyncThrowingStream<ChatStreamEvent, Error> {
-        let config = await configurationProvider()
-        let url = config.daemonURL.appending(path: "/api/chat/events")
-        let rawStream = try await eventStreamFactory(url)
-
         return AsyncThrowingStream { continuation in
             let task = Task {
-                do {
-                    for try await payload in rawStream {
-                        guard let data = payload.data(using: .utf8) else { continue }
-                        if let event = try? JSONDecoder.slackClaw.decode(ChatStreamEvent.self, from: data) {
-                            continuation.yield(event)
-                        }
+                for await event in daemonEventStreamClient.daemonEvents() {
+                    if case let .chatStream(_, _, payload) = event {
+                        continuation.yield(payload)
                     }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
                 }
+                continuation.finish()
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
+    }
+
+    public func daemonEvents() -> AsyncStream<SlackClawEvent> {
+        daemonEventStreamClient.daemonEvents()
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {

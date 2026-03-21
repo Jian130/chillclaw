@@ -6,6 +6,7 @@ import Testing
 @testable import SlackClawProtocol
 
 @MainActor
+@Suite(.serialized)
 struct OnboardingTests {
     @Test
     func appStateRequiresOnboardingWhenSetupIncomplete() {
@@ -139,6 +140,251 @@ struct OnboardingTests {
         #expect(appState.errorMessage == nil)
         #expect(await loadRecorder.events() == ["overview", "models", "team"])
     }
+
+    @Test
+    func onboardingBootstrapReusesExistingOverviewWithoutRefetchingIt() async throws {
+        let recorder = NativeRequestRecorder()
+        let session = await recorder.session { request in
+            let path = request.url?.path ?? ""
+            if path == "/api/overview" {
+                throw URLError(.timedOut)
+            }
+
+            #expect(path == "/api/onboarding/state")
+
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = """
+            {
+              "firstRun": {
+                "introCompleted": true,
+                "setupCompleted": false
+              },
+              "draft": {
+                "currentStep": "welcome"
+              },
+              "summary": {}
+            }
+            """
+            return (response, Data(body.utf8))
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(
+            session: session,
+            configurationProvider: { configuration }
+        )
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: SlackClawChatViewModel(transport: FakeChatTransport()),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false)
+
+        let emptyStream = AsyncStream<SlackClawEvent> { continuation in
+            continuation.finish()
+        }
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { emptyStream }
+        )
+        await viewModel.bootstrap()
+
+        #expect(viewModel.pageError == nil)
+        #expect(await recorder.recordedURLs() == ["http://127.0.0.1:4545/api/onboarding/state?fresh=1"])
+    }
+
+    @Test
+    func onboardingRefreshResourceMapsDaemonEventsByStep() {
+        let installEvent = SlackClawEvent.deployCompleted(
+            correlationId: "deploy-1",
+            targetId: "managed-local",
+            status: "completed",
+            message: "Installed.",
+            engineStatus: makeOverview(setupCompleted: true).engine
+        )
+        let modelEvent = SlackClawEvent.configApplied(resource: .models, summary: "Models saved.")
+        let channelEvent = SlackClawEvent.channelSessionUpdated(
+            channelId: "wechat",
+            session: .init(
+                id: "session-1",
+                channelId: "wechat",
+                entryId: nil,
+                status: "ready",
+                message: "Ready",
+                logs: [],
+                launchUrl: nil,
+                inputPrompt: nil
+            )
+        )
+        let employeeEvent = SlackClawEvent.configApplied(resource: .aiEmployees, summary: "AI employees saved.")
+        let unrelatedEvent = SlackClawEvent.taskProgress(taskId: "task-1", status: .running, message: "Working")
+
+        #expect(onboardingRefreshResourceForEvent(.install, installEvent) == .overview)
+        #expect(onboardingRefreshResourceForEvent(.model, modelEvent) == .model)
+        #expect(onboardingRefreshResourceForEvent(.channel, channelEvent) == .channel)
+        #expect(onboardingRefreshResourceForEvent(.employee, employeeEvent) == .team)
+        #expect(onboardingRefreshResourceForEvent(.complete, employeeEvent) == .team)
+        #expect(onboardingRefreshResourceForEvent(.welcome, unrelatedEvent) == nil)
+        #expect(onboardingRefreshResourceForEvent(.model, unrelatedEvent) == nil)
+    }
+
+    @Test
+    func onboardingDaemonEventsRefreshOnlyTheCurrentStepResource() async throws {
+        let recorder = NativeRequestRecorder()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/onboarding/state":
+                let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .model))
+                return (jsonResponse(url: url), body)
+            case "/api/models/config":
+                let body = try JSONEncoder.slackClaw.encode(emptyModelConfig())
+                return (jsonResponse(url: url), body)
+            case "/api/channels/config":
+                let body = try JSONEncoder.slackClaw.encode(emptyChannelConfig())
+                return (jsonResponse(url: url), body)
+            case "/api/ai-team/overview":
+                let body = try JSONEncoder.slackClaw.encode(emptyAITeamOverview())
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(
+            session: session,
+            configurationProvider: { configuration }
+        )
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: SlackClawChatViewModel(transport: FakeChatTransport()),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false)
+
+        let eventStream = AsyncStream<SlackClawEvent> { continuation in
+            continuation.yield(.configApplied(resource: .models, summary: "Models saved."))
+            continuation.finish()
+        }
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { eventStream }
+        )
+
+        await viewModel.bootstrap()
+        await waitForRecordedURLCount(recorder, expectedCount: 3)
+
+        #expect(
+            await recorder.recordedURLs() == [
+                "http://127.0.0.1:4545/api/onboarding/state?fresh=1",
+                "http://127.0.0.1:4545/api/models/config?fresh=1",
+                "http://127.0.0.1:4545/api/models/config?fresh=1"
+            ]
+        )
+    }
+
+    @Test
+    func onboardingDaemonEventsIgnoreIrrelevantSteps() async throws {
+        let recorder = NativeRequestRecorder()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/onboarding/state":
+                let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .channel))
+                return (jsonResponse(url: url), body)
+            case "/api/channels/config":
+                let body = try JSONEncoder.slackClaw.encode(emptyChannelConfig())
+                return (jsonResponse(url: url), body)
+            case "/api/models/config":
+                let body = try JSONEncoder.slackClaw.encode(emptyModelConfig())
+                return (jsonResponse(url: url), body)
+            case "/api/ai-team/overview":
+                let body = try JSONEncoder.slackClaw.encode(emptyAITeamOverview())
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(
+            session: session,
+            configurationProvider: { configuration }
+        )
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: SlackClawChatViewModel(transport: FakeChatTransport()),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false)
+
+        let eventStream = AsyncStream<SlackClawEvent> { continuation in
+            continuation.yield(.taskProgress(taskId: "task-1", status: .running, message: "Working"))
+            continuation.finish()
+        }
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { eventStream }
+        )
+
+        await viewModel.bootstrap()
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
+
+        let urls = await recorder.recordedURLs()
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/channels/config?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/models/config?fresh=1"))
+        #expect(urls.filter { $0.contains("/api/channels/config") }.count == 1)
+        #expect(urls.filter { $0.contains("/api/models/config") }.count == 1)
+        #expect(urls.filter { $0.contains("/api/ai-team/overview") }.isEmpty)
+    }
 }
 
 private func makeOverview(setupCompleted: Bool) -> ProductOverview {
@@ -234,6 +480,33 @@ private func emptyAITeamOverview() -> AITeamOverview {
     )
 }
 
+private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStateResponse {
+    .init(
+        firstRun: .init(introCompleted: true, setupCompleted: false),
+        draft: .init(currentStep: step),
+        summary: .init()
+    )
+}
+
+private func jsonResponse(url: URL) -> HTTPURLResponse {
+    HTTPURLResponse(
+        url: url,
+        statusCode: 200,
+        httpVersion: nil,
+        headerFields: ["Content-Type": "application/json"]
+    )!
+}
+
+private func waitForRecordedURLCount(_ recorder: NativeRequestRecorder, expectedCount: Int) async {
+    for _ in 0 ..< 50 {
+        if await recorder.recordedURLs().count >= expectedCount {
+            return
+        }
+
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
 private actor NativeLoadRecorder {
     private var recorded: [String] = []
 
@@ -243,6 +516,31 @@ private actor NativeLoadRecorder {
 
     func events() -> [String] {
         recorded
+    }
+}
+
+private actor NativeRequestRecorder {
+    private var requests: [URLRequest] = []
+
+    func session(handler: @escaping @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)) async -> URLSession {
+        await MainActor.run {
+            NativeRecordingURLProtocol.handler = { request in
+                await self.record(request)
+                return try await handler(request)
+            }
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [NativeRecordingURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    func record(_ request: URLRequest) {
+        requests.append(request)
+    }
+
+    func recordedURLs() -> [String] {
+        requests.compactMap { $0.url?.absoluteString }
     }
 }
 
@@ -297,4 +595,33 @@ private actor FakeLaunchAgentController: LaunchAgentControlling {
     func status() async -> LaunchAgentStatus {
         .init(installed: true, running: true, detail: "fake")
     }
+}
+
+private final class NativeRecordingURLProtocol: URLProtocol, @unchecked Sendable {
+    @MainActor static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Task {
+            guard let client else { return }
+            let handler = await MainActor.run { Self.handler }
+            guard let handler else {
+                client.urlProtocol(self, didFailWithError: SlackClawClientError.invalidResponse)
+                return
+            }
+
+            do {
+                let (response, data) = try await handler(request)
+                client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client.urlProtocol(self, didLoad: data)
+                client.urlProtocolDidFinishLoading(self)
+            } catch {
+                client.urlProtocol(self, didFailWithError: error)
+            }
+        }
+    }
+
+    override func stopLoading() {}
 }

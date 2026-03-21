@@ -4,17 +4,21 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import { MockAdapter } from "../engine/mock-adapter.js";
+import { EventBusService } from "./event-bus-service.js";
+import { EventPublisher } from "./event-publisher.js";
 import { SkillService } from "./skill-service.js";
 import { StateStore } from "./state-store.js";
 
-function createService(testName: string, adapter = new MockAdapter()) {
+function createService(testName: string, adapter = new MockAdapter(), options?: { withEvents?: boolean }) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
   const store = new StateStore(filePath);
+  const bus = options?.withEvents ? new EventBusService() : undefined;
 
   return {
     adapter,
     store,
-    service: new SkillService(adapter, store)
+    service: new SkillService(adapter, store, bus ? new EventPublisher(bus) : undefined),
+    bus
   };
 }
 
@@ -73,4 +77,29 @@ test("skill service updates and removes marketplace skills", async () => {
   await service.removeSkill(installed!.id);
   overview = await service.getConfigOverview();
   assert.equal(overview.installedSkills.some((skill) => skill.slug === "weather-api"), false);
+});
+
+test("skill service publishes config events for install, update, and remove", async () => {
+  const { service, bus } = createService("skills-events", new MockAdapter(), { withEvents: true });
+  const events: string[] = [];
+  bus?.subscribe((event) => {
+    if (event.type === "config.applied") {
+      events.push(`${event.type}:${event.resource}`);
+    }
+  });
+
+  await service.installMarketplaceSkill({ slug: "weather-api" });
+
+  let overview = await service.getConfigOverview();
+  const installed = overview.installedSkills.find((skill) => skill.slug === "weather-api");
+  assert.ok(installed);
+
+  await service.updateSkill(installed!.id, { action: "update", version: "1.0.2" });
+  await service.removeSkill(installed!.id);
+
+  assert.deepEqual(events, [
+    "config.applied:skills",
+    "config.applied:skills",
+    "config.applied:skills"
+  ]);
 });

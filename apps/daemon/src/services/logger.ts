@@ -1,9 +1,10 @@
-import { appendFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { FilesystemStateAdapter } from "../platform/filesystem-state-adapter.js";
 import { getAppRootDir, getLogDir } from "../runtime-paths.js";
 
 const ERROR_LOG_PATH = resolve(getLogDir(), "error.log");
+const filesystem = new FilesystemStateAdapter();
 
 function formatMessage(level: "INFO" | "ERROR", message: string, details?: unknown): string {
   const payload =
@@ -16,8 +17,7 @@ function formatMessage(level: "INFO" | "ERROR", message: string, details?: unkno
 
 export async function writeErrorLog(message: string, details?: unknown): Promise<void> {
   try {
-    await mkdir(getLogDir(), { recursive: true });
-    await appendFile(ERROR_LOG_PATH, formatMessage("ERROR", message, details), "utf8");
+    await filesystem.appendLog(ERROR_LOG_PATH, formatMessage("ERROR", message, details));
   } catch {
     // Logging must never crash the app.
   }
@@ -25,8 +25,7 @@ export async function writeErrorLog(message: string, details?: unknown): Promise
 
 export async function writeInfoLog(message: string, details?: unknown): Promise<void> {
   try {
-    await mkdir(getLogDir(), { recursive: true });
-    await appendFile(ERROR_LOG_PATH, formatMessage("INFO", message, details), "utf8");
+    await filesystem.appendLog(ERROR_LOG_PATH, formatMessage("INFO", message, details));
   } catch {
     // Logging must never crash the app.
   }

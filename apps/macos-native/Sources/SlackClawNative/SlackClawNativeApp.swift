@@ -5,6 +5,7 @@ import SlackClawChatUI
 
 @main
 struct SlackClawNativeApp: App {
+    @NSApplicationDelegateAdaptor(NativeAppDelegate.self) private var appDelegate
     @State private var appState = SlackClawAppState()
 
     var body: some Scene {

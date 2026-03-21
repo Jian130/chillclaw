@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
-import type { ProductOverview } from "@slackclaw/contracts";
+import type { ProductOverview, SlackClawEvent } from "@slackclaw/contracts";
 
 import { fetchOverview } from "../../shared/api/client.js";
+import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 
 interface OverviewContextValue {
   loading: boolean;
@@ -12,6 +13,14 @@ interface OverviewContextValue {
 }
 
 const OverviewContext = createContext<OverviewContextValue | null>(null);
+
+export function shouldRefreshOverviewForEvent(event: SlackClawEvent): boolean {
+  if (event.type === "task.progress") {
+    return event.status !== "running";
+  }
+
+  return event.type === "deploy.completed" || event.type === "gateway.status" || event.type === "config.applied";
+}
 
 export function OverviewProvider(props: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
@@ -35,6 +44,16 @@ export function OverviewProvider(props: PropsWithChildren) {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    return subscribeToDaemonEvents((event) => {
+      if (!shouldRefreshOverviewForEvent(event)) {
+        return;
+      }
+
+      void refresh({ fresh: true });
+    });
   }, [refresh]);
 
   const value = useMemo(

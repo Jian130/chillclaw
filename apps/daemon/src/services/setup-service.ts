@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   InstallResponse,
   SetupRunResponse,
@@ -5,6 +7,7 @@ import type {
 } from "@slackclaw/contracts";
 
 import type { EngineAdapter } from "../engine/adapter.js";
+import { EventPublisher } from "./event-publisher.js";
 import { OverviewService } from "./overview-service.js";
 import { StateStore } from "./state-store.js";
 
@@ -12,7 +15,8 @@ export class SetupService {
   constructor(
     private readonly adapter: EngineAdapter,
     private readonly store: StateStore,
-    private readonly overviewService: OverviewService
+    private readonly overviewService: OverviewService,
+    private readonly eventPublisher?: EventPublisher
   ) {}
 
   async markIntroCompleted() {
@@ -25,6 +29,7 @@ export class SetupService {
   }
 
   async runFirstRunSetup(options?: { forceLocal?: boolean }): Promise<SetupRunResponse> {
+    const correlationId = `first-run-setup:${randomUUID()}`;
     const steps: SetupStepResult[] = [];
     let installResult: InstallResponse | undefined;
 
@@ -34,6 +39,15 @@ export class SetupService {
     }));
 
     const statusBefore = await this.adapter.instances.status();
+    this.eventPublisher?.publishDeployProgress({
+      correlationId,
+      targetId: "managed-local",
+      phase: statusBefore.installed ? "reusing" : "detecting",
+      percent: 10,
+      message: statusBefore.installed
+        ? `Found OpenClaw ${statusBefore.version ?? "installed"} and SlackClaw is preparing to reuse it.`
+        : "SlackClaw is preparing a managed local OpenClaw install for this Mac."
+    });
     steps.push({
       id: "check-existing-openclaw",
       title: "Check for an existing OpenClaw installation",
@@ -44,6 +58,13 @@ export class SetupService {
     });
 
     installResult = await this.adapter.instances.install(false, { forceLocal: options?.forceLocal ?? false });
+    this.eventPublisher?.publishDeployCompleted({
+      correlationId,
+      targetId: "managed-local",
+      status: installResult.status === "installed" || installResult.status === "already-installed" ? "completed" : "failed",
+      message: installResult.message,
+      engineStatus: installResult.engineStatus
+    });
     steps.push({
       id: "prepare-openclaw",
       title: "Prepare OpenClaw and its required dependencies",

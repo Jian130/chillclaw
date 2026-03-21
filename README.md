@@ -62,7 +62,7 @@ flowchart LR
     App --> Native["Native macOS client<br/>SwiftUI"]
     Native --> LaunchAgent["SlackClaw LaunchAgent"]
     LaunchAgent --> Daemon["SlackClaw daemon<br/>Node.js HTTP API"]
-    Native -->|HTTP /api + SSE| Daemon
+    Native -->|HTTP /api + WebSocket events| Daemon
     Native -. explicit fallback .-> Browser["Fallback UI<br/>React + TypeScript"]
     Browser -->|HTTP /api + static UI| Daemon
     Daemon --> Contracts["Shared contracts<br/>@slackclaw/contracts"]
@@ -83,14 +83,20 @@ flowchart LR
 - `SlackClaw.app` is now a native SwiftUI client that talks only to the local SlackClaw daemon.
 - In the packaged app, the daemon is intended to run under a per-user macOS `LaunchAgent` instead of a one-off background shell process.
 - The daemon serves the `/api` endpoints and still serves the built React frontend assets as an explicit fallback surface.
-- The daemon also owns OpenClaw chat session lifecycle and relays live chat updates to the UI over SSE.
+- UI clients use HTTP for commands and authoritative reads, plus one daemon WebSocket endpoint at `/api/events` for push updates.
+- The old dedicated `/api/chat/events` client stream is retired; chat now rides the same shared daemon event channel as deploy, gateway, and config updates.
+- The React overview, deploy, AI-team, onboarding, and chat surfaces now consume the daemon event bus for incremental refresh instead of relying only on manual polling or page-local SSE.
+- The native macOS app state, native onboarding flow, and native chat transport all listen to the shared daemon event bus so overview, step-scoped onboarding data, active sections, and live chat transcript updates reconcile through one WebSocket channel.
+- The daemon owns the OpenClaw gateway socket internally for chat and runtime behavior instead of exposing that socket to clients.
+- The daemon-side platform layer now owns explicit filesystem/state, CLI runner, gateway socket, and secrets seams, including a macOS keychain-backed secrets adapter for mirrored user-entered credentials.
 - Read-only OpenClaw CLI reads are cached and coalesced inside the daemon per logical refresh cycle so one page load does not fan out into repeated duplicate CLI calls.
 - The engine seam lives behind `EngineAdapter`, so SlackClaw product logic does not talk to OpenClaw directly.
+- `EngineAdapter` is now the composed manager boundary itself rather than a second public flat method bag on top of those managers.
 - `EngineAdapter` is now a composed facade over four engine-neutral managers:
   - `instances`: install, uninstall, update, and runtime detection
   - `config`: models, channels, skills, instance workspace, and web-tool policy
   - `aiEmployees`: OpenClaw agent-backed AI employee config and workspace management
-  - `gateway`: live gateway lifecycle, health, chat, login, and pairing flows
+  - `gateway`: live gateway lifecycle, health, tasks, chat, login, and pairing flows
 - Config and AI employee saves are staged changes. They write correct engine and workspace state first, then the gateway manager is responsible for applying them live.
 - `OpenClawAdapter` checks for an existing OpenClaw install, reuses it when available, and otherwise deploys a SlackClaw-managed local OpenClaw runtime under the user's SlackClaw data directory.
 - The adapter seam is intentionally future-facing: it should later support local-LLM runtimes and model families such as Qwen, MiniMax-exposed local runtimes, Llama, Mistral, and other OpenAI-compatible local gateways.
@@ -107,7 +113,7 @@ flowchart LR
 SlackClaw now includes a daemon-backed native macOS client with:
 
 - `apps/macos-native`: SwiftUI app shell and native product screens
-- `apps/shared/SlackClawKit`: native protocol models, daemon HTTP/SSE client, and reusable chat UI/view models
+- `apps/shared/SlackClawKit`: native protocol models, daemon HTTP/WebSocket client layers, and reusable chat UI/view models
 - the same six-step daemon-backed onboarding gate as the React client, shown before the main native shell until first-run setup is fully completed
 
 The native client is the packaged default. The React UI remains in the repo and in the app bundle as:
@@ -304,16 +310,15 @@ Run the native Swift package tests with:
 
 `npm run test:mac-native`
 
-Open the native-client workspace in Xcode with:
+Open the native macOS client package in Xcode with:
 
-`open -a Xcode /Users/home/Ryo/Projects/slackclaw/SlackClaw.xcworkspace`
+`open -a Xcode /Users/home/Ryo/Projects/slackclaw/apps/macos-native/Package.swift`
 
-The workspace is the native development entry point for Swift code. It currently includes:
+Open the shared Swift package in a separate Xcode window when needed:
 
-- `apps/macos-native`
-- `apps/shared/SlackClawKit`
+`open -a Xcode /Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/Package.swift`
 
-React remains a parallel app under `apps/desktop-ui`, and future native clients such as `apps/windows-native` should stay parallel to `apps/macos-native` rather than being folded into the Swift workspace structure.
+React remains a parallel app under `apps/desktop-ui`, and future native clients such as `apps/windows-native` should stay parallel to `apps/macos-native`.
 
 This produces:
 

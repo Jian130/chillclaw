@@ -134,6 +134,7 @@ test("chat service prefers the live AI member mapping over stale stored agent id
     teams: [],
     activity: [],
     availableBrains: [],
+    memberPresets: [],
     knowledgePacks: [],
     skillOptions: []
   })) as typeof aiTeamService.getOverview;

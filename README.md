@@ -39,10 +39,10 @@ The desktop shell is implemented as a web UI + local daemon boundary so a Tauri 
   - supports Telegram, WhatsApp, Feishu, and a WeChat workaround path
   - keeps command-first setup behavior, with config-backed recovery for known safe command drift cases
 - Onboarding:
-  - uses a six-step full-screen onboarding flow at `/onboarding`
+  - uses a seven-step full-screen onboarding flow at `/onboarding`
   - persists draft onboarding progress through the daemon so refreshes resume the current step
-  - wires install, model setup, channel setup, and AI employee creation to the real SlackClaw daemon flows instead of mock state
-  - uses a daemon-owned onboarding UI config so step 3 can curate the three guided model providers independently from the full Configuration-page provider catalog
+  - wires install, permissions, model setup, channel setup, and AI employee creation to the real SlackClaw daemon flows instead of mock state
+  - uses a daemon-owned onboarding UI config so step 4 can curate the three guided model providers independently from the full Configuration-page provider catalog
 - Chat page:
   - supports real multi-thread chat with AI members backed by OpenClaw agents
   - creates or reuses chat threads per AI member
@@ -115,8 +115,8 @@ SlackClaw now includes a daemon-backed native macOS client with:
 
 - `apps/macos-native`: SwiftUI app shell and native product screens
 - `apps/shared/SlackClawKit`: native protocol models, daemon HTTP/WebSocket client layers, and reusable chat UI/view models
-- the same six-step daemon-backed onboarding gate as the React client, shown before the main native shell until first-run setup is fully completed
-- the same daemon-owned onboarding config for curated provider and channel selection, so React and native steps 3 and 4 stay aligned to one source of truth
+- the same seven-step daemon-backed onboarding gate as the React client, shown before the main native shell until first-run setup is fully completed
+- the same daemon-owned onboarding config for curated provider and channel selection, so React and native steps 4 and 5 stay aligned to one source of truth
   - onboarding curated provider/channel metadata uses `platformUrl` for platform destinations, `docsUrl` for documentation links, and `tutorialVideoUrl` for optional in-app tutorial video modals
 
 The native client is the packaged default. The React UI remains in the repo and in the app bundle as:
@@ -220,10 +220,10 @@ Notes:
 
 When a user installs and opens SlackClaw for the first time:
 
-1. SlackClaw opens a six-step onboarding flow at `/onboarding`.
+1. SlackClaw opens a seven-step onboarding flow at `/onboarding`.
 2. `Welcome` initializes the guided setup and stores onboarding draft progress in the daemon-backed state store.
-3. `Install OpenClaw` checks whether a compatible runtime already exists on the Mac and reuses it when possible.
-4. If OpenClaw is missing, SlackClaw deploys the latest available OpenClaw runtime into `~/Library/Application Support/SlackClaw/data/openclaw-runtime`.
+3. `Install OpenClaw` checks whether a compatible runtime already exists on the Mac, reuses it when possible, and deploys the latest available managed runtime when it is missing.
+4. `Permissions` guides the user through the macOS capabilities ChillClaw may need and reuses the same permissions UI that appears in Settings.
 5. `Configure Model` saves the first real model entry and handles any interactive provider auth through the daemon.
 6. `Configure Channel` saves one launch channel configuration for WeChat, Feishu, or Telegram without requiring the gateway to be running yet.
 7. `Create AI Employee` creates the first real OpenClaw-backed AI employee using the selected onboarding model.
@@ -330,11 +330,13 @@ Run the native Swift package tests with:
 
 Open the native macOS client package in Xcode with:
 
-`open -a Xcode /Users/home/Ryo/Projects/slackclaw/apps/macos-native/Package.swift`
+`open -a Xcode apps/macos-native/Package.swift`
+
+Then choose the `SlackClawNative` scheme, select `My Mac`, and press Run.
 
 Open the shared Swift package in a separate Xcode window when needed:
 
-`open -a Xcode /Users/home/Ryo/Projects/slackclaw/apps/shared/SlackClawKit/Package.swift`
+`open -a Xcode apps/shared/SlackClawKit/Package.swift`
 
 React remains a parallel app under `apps/desktop-ui`, and future native clients such as `apps/windows-native` should stay parallel to `apps/macos-native`.
 

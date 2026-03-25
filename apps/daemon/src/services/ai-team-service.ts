@@ -4,6 +4,7 @@ import type {
   AITeamActionResponse,
   AITeamActivityItem,
   AITeamOverview,
+  AIMemberPreset,
   BindAIMemberChannelRequest,
   BrainAssignment,
   DeleteAIMemberRequest,
@@ -16,6 +17,7 @@ import type {
 } from "@slackclaw/contracts";
 import type { EngineAdapter } from "../engine/adapter.js";
 import type { AIMemberRuntimeCandidate } from "../engine/adapter.js";
+import { aiMemberPresets, defaultAIMemberSkillOptions } from "../config/ai-member-presets.js";
 import { EventPublisher } from "./event-publisher.js";
 import { StateStore, type AITeamState } from "./state-store.js";
 
@@ -172,6 +174,34 @@ function activityItem(
   };
 }
 
+function resolveMemberPresets(
+  knowledgePacks: KnowledgePack[],
+  skillOptions: SkillOption[]
+): AIMemberPreset[] {
+  const availableKnowledgePackIds = new Set(knowledgePacks.map((pack) => pack.id));
+  const availableSkillIds = new Set(skillOptions.map((skill) => skill.id));
+
+  return aiMemberPresets.map((preset) => ({
+    ...preset,
+    skillIds: preset.skillIds.filter((skillId) => availableSkillIds.has(skillId)),
+    knowledgePackIds: preset.knowledgePackIds.filter((packId) => availableKnowledgePackIds.has(packId))
+  }));
+}
+
+function mergeSkillOptions(runtimeSkillOptions: SkillOption[]): SkillOption[] {
+  const byId = new Map<string, SkillOption>();
+
+  for (const skill of defaultAIMemberSkillOptions) {
+    byId.set(skill.id, skill);
+  }
+
+  for (const skill of runtimeSkillOptions) {
+    byId.set(skill.id, skill);
+  }
+
+  return Array.from(byId.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
 export class AITeamService {
   constructor(
     private readonly adapter: EngineAdapter,
@@ -185,24 +215,27 @@ export class AITeamService {
     const modelConfig = await this.adapter.config.getModelConfig();
     const runtimeSkills = await this.adapter.config.getSkillRuntimeCatalog();
     const teams = Object.values(aiTeam.teams).sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0) || left.name.localeCompare(right.name));
+    const runtimeSkillOptions = runtimeSkills.skills
+      .filter((skill) => skill.eligible && !skill.disabled && !skill.blockedByAllowlist)
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map(
+        (skill): SkillOption => ({
+          id: skill.id,
+          label: skill.name,
+          description: skill.description
+        })
+      );
     const baseOverview = {
       teamVision: aiTeam.teamVision,
       members: [],
       teams,
       activity: aiTeam.activity,
       availableBrains: modelConfig.savedEntries,
+      memberPresets: [],
       knowledgePacks: DEFAULT_KNOWLEDGE_PACKS,
-      skillOptions: runtimeSkills.skills
-        .filter((skill) => skill.eligible && !skill.disabled && !skill.blockedByAllowlist)
-        .sort((left, right) => left.name.localeCompare(right.name))
-        .map(
-          (skill): SkillOption => ({
-            id: skill.id,
-            label: skill.name,
-            description: skill.description
-          })
-        )
+      skillOptions: mergeSkillOptions(runtimeSkillOptions)
     } satisfies AITeamOverview;
+    const memberPresets = resolveMemberPresets(baseOverview.knowledgePacks, baseOverview.skillOptions);
     const runtimeMembers = await this.adapter.aiEmployees.listAIMemberRuntimeCandidates();
     const storedByAgentId = new Map(Object.values(aiTeam.members).map((member) => [member.agentId, member]));
 
@@ -248,6 +281,7 @@ export class AITeamService {
       teams,
       activity: aiTeam.activity,
       availableBrains: modelConfig.savedEntries,
+      memberPresets,
       knowledgePacks: DEFAULT_KNOWLEDGE_PACKS,
       skillOptions: baseOverview.skillOptions
     };

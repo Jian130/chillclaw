@@ -746,7 +746,7 @@ describe("onboarding helpers", () => {
     });
   });
 
-  it("advances to the model step when the user confirms an existing OpenClaw install", () => {
+  it("advances to the permissions step when the user confirms an existing OpenClaw install", () => {
     expect(
       buildExistingInstallAdvanceDraft({
         engine: {
@@ -759,7 +759,7 @@ describe("onboarding helpers", () => {
         }
       })
     ).toEqual({
-      currentStep: "model",
+      currentStep: "permissions",
       install: {
         installed: true,
         version: "2026.3.13",

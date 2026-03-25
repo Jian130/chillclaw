@@ -70,32 +70,49 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="general">
-          <Card>
-            <CardHeader>
-              <CardTitle>{copy.general}</CardTitle>
-            </CardHeader>
-            <CardContent className="field-grid">
-              <div>
-                <FieldLabel htmlFor="instance-name">Instance Name</FieldLabel>
-                <Input
-                  id="instance-name"
-                  onChange={(event) =>
-                    update((current) => ({
-                      ...current,
-                      settings: {
-                        ...current.settings,
-                        general: { ...current.settings.general, instanceName: event.target.value }
-                      }
-                    }))
-                  }
-                  value={state.settings.general.instanceName}
-                />
-              </div>
-              <div className="check-row"><div className="check-row__meta"><strong>Auto-start on boot</strong><p>Stored locally for the current SlackClaw workspace.</p></div><Switch checked={state.settings.general.autoStart} onCheckedChange={(checked) => update((current) => ({ ...current, settings: { ...current.settings, general: { ...current.settings.general, autoStart: checked } } }))} /></div>
-              <div className="check-row"><div className="check-row__meta"><strong>Check for updates</strong><p>Keep SlackClaw aware of product updates.</p></div><Switch checked={state.settings.general.checkUpdates} onCheckedChange={(checked) => update((current) => ({ ...current, settings: { ...current.settings, general: { ...current.settings.general, checkUpdates: checked } } }))} /></div>
-              <div className="check-row"><div className="check-row__meta"><strong>Send telemetry</strong><p>Frontend-local preference only until a daemon-backed setting exists.</p></div><Switch checked={state.settings.general.telemetry} onCheckedChange={(checked) => update((current) => ({ ...current, settings: { ...current.settings, general: { ...current.settings.general, telemetry: checked } } }))} /></div>
-            </CardContent>
-          </Card>
+          <div className="panel-stack">
+            <Card>
+              <CardHeader>
+                <CardTitle>{copy.permissionsTitle}</CardTitle>
+              </CardHeader>
+              <CardContent className="panel-stack">
+                <p className="card__description">{copy.permissionsBody}</p>
+                <div className="card card--muted">
+                  <div className="panel-stack" style={{ gap: 8 }}>
+                    <strong>{copy.permissionsNativeTitle}</strong>
+                    <p className="card__description">{copy.permissionsNativeBody}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>{copy.general}</CardTitle>
+              </CardHeader>
+              <CardContent className="field-grid">
+                <div>
+                  <FieldLabel htmlFor="instance-name">Instance Name</FieldLabel>
+                  <Input
+                    id="instance-name"
+                    onChange={(event) =>
+                      update((current) => ({
+                        ...current,
+                        settings: {
+                          ...current.settings,
+                          general: { ...current.settings.general, instanceName: event.target.value }
+                        }
+                      }))
+                    }
+                    value={state.settings.general.instanceName}
+                  />
+                </div>
+                <div className="check-row"><div className="check-row__meta"><strong>Auto-start on boot</strong><p>Stored locally for the current SlackClaw workspace.</p></div><Switch checked={state.settings.general.autoStart} onCheckedChange={(checked) => update((current) => ({ ...current, settings: { ...current.settings, general: { ...current.settings.general, autoStart: checked } } }))} /></div>
+                <div className="check-row"><div className="check-row__meta"><strong>Check for updates</strong><p>Keep SlackClaw aware of product updates.</p></div><Switch checked={state.settings.general.checkUpdates} onCheckedChange={(checked) => update((current) => ({ ...current, settings: { ...current.settings, general: { ...current.settings.general, checkUpdates: checked } } }))} /></div>
+                <div className="check-row"><div className="check-row__meta"><strong>Send telemetry</strong><p>Frontend-local preference only until a daemon-backed setting exists.</p></div><Switch checked={state.settings.general.telemetry} onCheckedChange={(checked) => update((current) => ({ ...current, settings: { ...current.settings, general: { ...current.settings.general, telemetry: checked } } }))} /></div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="deployment">

@@ -197,6 +197,11 @@ const en: TranslationTree = {
     feishuPrepareBody: "SlackClaw checks whether the current OpenClaw already includes the Feishu plugin before installing anything.",
     feishuSetupTitle: "Set up Feishu channel",
     gatewayStart: "Restart Gateway",
+    editChannel: "Edit",
+    continueSetup: "Continue Setup",
+    approvePairing: "Approve Pairing",
+    removeChannel: "Remove",
+    removingChannel: "Removing...",
     telegram: "Telegram",
     whatsapp: "WhatsApp",
     feishu: "Feishu (飞书)",
@@ -238,6 +243,10 @@ const en: TranslationTree = {
     emptySearchBody: "Try a different name, role, or status filter.",
     memoryEnabled: "Memory",
     memoryDisabled: "Memory off",
+    memberPresetLabel: "Preset",
+    memberPresetSummaryLabel: "Preset summary",
+    memberPresetCustomLabel: "Custom setup",
+    memberPresetSummaryBody: "Choose a preset to preload a useful starter setup.",
     brainFallback: "No Brain assigned yet",
     brainFallbackBody: "Choose a configured model to give this member a managed Brain.",
     bindingSingular: "binding",
@@ -340,6 +349,10 @@ const en: TranslationTree = {
     deployment: "Deployment",
     logging: "Logging",
     advanced: "Advanced",
+    permissionsTitle: "Permissions",
+    permissionsBody: "Review the macOS permissions ChillClaw may need for Automation, Notifications, Accessibility, Screen Recording, Microphone, Speech Recognition, Camera, and Location.",
+    permissionsNativeTitle: "Manage this in the native macOS app",
+    permissionsNativeBody: "The local web interface keeps settings aligned, but only the native ChillClaw app can request or refresh macOS permission prompts.",
     exportDiagnostics: "Export Diagnostics",
     checkUpdates: "Check for Updates",
     installService: "Install Service",
@@ -384,6 +397,12 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       active: "运行中",
       attention: "需要处理",
       setupRequired: "需要设置"
+    },
+    members: {
+      memberPresetLabel: "预设",
+      memberPresetSummaryLabel: "预设摘要",
+      memberPresetCustomLabel: "自定义设置",
+      memberPresetSummaryBody: "选择一个预设，预先载入一套实用的起始配置。"
     },
     deploy: {
       infoTitle: "一键部署",
@@ -440,7 +459,18 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       summarySafeTitle: "清晰且安全",
       summarySafeBody: "部署只负责安装。引导和频道配置会在下一步完成。"
     },
+    config: {
+      approvePairing: "批准配对",
+      continueSetup: "继续设置",
+      editChannel: "编辑",
+      removeChannel: "移除",
+      removingChannel: "正在移除..."
+    },
     settings: {
+      permissionsTitle: "权限",
+      permissionsBody: "查看 ChillClaw 可能需要的 macOS 权限，包括自动化、通知、辅助功能、屏幕录制、麦克风、语音识别、相机和定位。",
+      permissionsNativeTitle: "请在原生 macOS 应用中管理",
+      permissionsNativeBody: "本地网页界面只用于保持设置一致，只有原生 ChillClaw 应用才能请求或刷新 macOS 权限弹窗。",
       redoOnboarding: "重新运行引导",
       redoOnboardingBody: "不卸载 SlackClaw，重新运行一次引导设置。",
       redoOnboardingRunning: "正在重置...",
@@ -476,6 +506,12 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       active: "稼働中",
       attention: "要対応",
       setupRequired: "セットアップが必要"
+    },
+    members: {
+      memberPresetLabel: "プリセット",
+      memberPresetSummaryLabel: "プリセット概要",
+      memberPresetCustomLabel: "カスタム設定",
+      memberPresetSummaryBody: "プリセットを選ぶと、役立つ初期設定をあらかじめ読み込みます。"
     },
     deploy: {
       infoTitle: "ワンクリック配備",
@@ -532,7 +568,18 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       summarySafeTitle: "安全で明確",
       summarySafeBody: "デプロイはインストールで止まります。オンボーディングとチャネル設定は次の段階です。"
     },
+    config: {
+      approvePairing: "ペアリングを承認",
+      continueSetup: "設定を続ける",
+      editChannel: "編集",
+      removeChannel: "削除",
+      removingChannel: "削除中..."
+    },
     settings: {
+      permissionsTitle: "権限",
+      permissionsBody: "ChillClaw が必要とする可能性のある macOS 権限を確認します。対象はオートメーション、通知、アクセシビリティ、画面収録、マイク、音声認識、カメラ、位置情報です。",
+      permissionsNativeTitle: "ネイティブ macOS アプリで管理してください",
+      permissionsNativeBody: "ローカル Web インターフェースは設定の整合だけを保ちます。macOS の権限ダイアログを要求または更新できるのはネイティブの ChillClaw アプリだけです。",
       redoOnboarding: "オンボーディングをやり直す",
       redoOnboardingBody: "SlackClaw をアンインストールせずに、ガイド付きセットアップをもう一度実行します。",
       redoOnboardingRunning: "リセット中...",
@@ -568,6 +615,12 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       active: "실행 중",
       attention: "확인 필요",
       setupRequired: "설정 필요"
+    },
+    members: {
+      memberPresetLabel: "프리셋",
+      memberPresetSummaryLabel: "프리셋 요약",
+      memberPresetCustomLabel: "사용자 설정",
+      memberPresetSummaryBody: "프리셋을 선택하면 유용한 시작 구성이 미리 적용됩니다."
     },
     deploy: {
       infoTitle: "원클릭 배포",
@@ -624,7 +677,18 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       summarySafeTitle: "안전하고 명확함",
       summarySafeBody: "배포는 설치 단계까지만 진행됩니다. 온보딩과 채널 구성은 다음 단계에서 처리됩니다."
     },
+    config: {
+      approvePairing: "페어링 승인",
+      continueSetup: "설정 계속",
+      editChannel: "편집",
+      removeChannel: "제거",
+      removingChannel: "제거하는 중..."
+    },
     settings: {
+      permissionsTitle: "권한",
+      permissionsBody: "자동화, 알림, 손쉬운 사용, 화면 기록, 마이크, 음성 인식, 카메라, 위치에 대해 ChillClaw가 필요로 할 수 있는 macOS 권한을 확인합니다.",
+      permissionsNativeTitle: "기본 macOS 앱에서 관리하세요",
+      permissionsNativeBody: "로컬 웹 인터페이스는 설정 상태만 맞춰 줍니다. macOS 권한 프롬프트를 요청하거나 새로 고칠 수 있는 것은 기본 ChillClaw 앱뿐입니다.",
       redoOnboarding: "온보딩 다시 실행",
       redoOnboardingBody: "SlackClaw를 제거하지 않고 안내형 설정을 다시 실행합니다.",
       redoOnboardingRunning: "재설정하는 중...",
@@ -660,6 +724,12 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       active: "Activo",
       attention: "Requiere atención",
       setupRequired: "Necesita configuración"
+    },
+    members: {
+      memberPresetLabel: "Preajuste",
+      memberPresetSummaryLabel: "Resumen del preajuste",
+      memberPresetCustomLabel: "Configuración personalizada",
+      memberPresetSummaryBody: "Elige un preajuste para cargar una configuración inicial útil."
     },
     deploy: {
       infoTitle: "Despliegue con un clic",
@@ -716,7 +786,18 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
       summarySafeTitle: "Seguro y claro",
       summarySafeBody: "El despliegue termina en la instalación. El onboarding y la configuración de canales vienen después."
     },
+    config: {
+      approvePairing: "Aprobar emparejamiento",
+      continueSetup: "Continuar configuración",
+      editChannel: "Editar",
+      removeChannel: "Eliminar",
+      removingChannel: "Eliminando..."
+    },
     settings: {
+      permissionsTitle: "Permisos",
+      permissionsBody: "Revisa los permisos de macOS que ChillClaw puede necesitar para Automatización, Notificaciones, Accesibilidad, Grabación de pantalla, Micrófono, Reconocimiento de voz, Cámara y Ubicación.",
+      permissionsNativeTitle: "Adminístralo en la app nativa de macOS",
+      permissionsNativeBody: "La interfaz web local mantiene los ajustes alineados, pero solo la app nativa de ChillClaw puede solicitar o volver a abrir los avisos de permisos de macOS.",
       redoOnboarding: "Repetir onboarding",
       redoOnboardingBody: "Vuelve a ejecutar la configuración guiada sin desinstalar SlackClaw.",
       redoOnboardingRunning: "Restableciendo...",

@@ -29,6 +29,43 @@ struct DashboardSupportTests {
         #expect(presentation.activityRows.count == 2)
         #expect(presentation.heroVersion == "2026.3.13")
     }
+
+    @Test
+    func dashboardPresentationLocalizesShellLabelsForChinese() {
+        let presentation = makeDashboardPresentation(
+            overview: makeDashboardOverview(),
+            modelConfig: makeDashboardModelConfig(),
+            aiTeamOverview: makeDashboardAITeamOverview(),
+            localeIdentifier: "zh"
+        )
+
+        #expect(presentation.metrics[0] == .init(title: "引擎", value: "已安装", detail: "Ready"))
+        #expect(presentation.metrics[2] == .init(title: "AI 员工", value: "2", detail: "1 就绪 / 1 忙碌"))
+        #expect(presentation.metrics[3] == .init(title: "进行中的任务", value: "3", detail: "进行中"))
+
+        #expect(presentation.healthItems[0] == .init(title: "OpenClaw 已部署", status: "运行中", tone: .success))
+        #expect(presentation.healthItems[2] == .init(title: "渠道已配置", status: "2 个就绪", tone: .success))
+        #expect(presentation.healthItems[4] == .init(title: "AI 员工名单", status: "2 名成员", tone: .info))
+        #expect(presentation.employeeRows[0].status == "就绪")
+        #expect(presentation.employeeRows[1].status == "忙碌")
+    }
+
+    @Test
+    func dashboardCopyLocalizesSidebarAndSectionLabels() {
+        let copy = nativeDashboardCopy(localeIdentifier: "zh")
+
+        #expect(copy.dashboardTitle == "仪表盘")
+        #expect(copy.createEmployee == "创建员工")
+        #expect(copy.sidebarStatusTitle == "状态：运行中")
+        #expect(copy.sidebarStatusReadySummary == "所有系统运行正常")
+        #expect(nativeSectionTitle(.settings, localeIdentifier: "zh") == "设置")
+        #expect(nativeSectionTitle(.configuration, localeIdentifier: "zh") == "配置")
+    }
+
+    @Test
+    func dashboardMetricCardsUseSharedMinimumHeight() {
+        #expect(nativeDashboardMetricCardMinHeight == 170)
+    }
 }
 
 private func makeDashboardOverview() -> ProductOverview {
@@ -140,6 +177,7 @@ private func makeDashboardAITeamOverview() -> AITeamOverview {
             .init(id: "activity-2", memberId: "member-2", memberName: "Support Captain", action: "Started response", description: "Opened a customer follow-up.", timestamp: "2026-03-20 10:05", tone: "started")
         ],
         availableBrains: [],
+        memberPresets: [],
         knowledgePacks: [],
         skillOptions: []
     )

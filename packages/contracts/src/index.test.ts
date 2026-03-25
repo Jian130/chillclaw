@@ -228,6 +228,21 @@ test("AI team overview serializes brain assignments and team membership", () => 
     ],
     activity: [],
     availableBrains: [],
+    memberPresets: [
+      {
+        id: "general-assistant",
+        label: "General Assistant",
+        description: "Start with a reliable default kit for everyday work.",
+        avatarPresetId: "operator",
+        jobTitle: "General Assistant",
+        personality: "Clear, practical, and dependable",
+        soul: "Turn requests into useful next steps without extra overhead.",
+        workStyles: ["Methodical", "Structured"],
+        skillIds: ["research-brief"],
+        knowledgePackIds: ["company-handbook"],
+        defaultMemoryEnabled: true
+      }
+    ],
     knowledgePacks: [
       {
         id: "company-handbook",
@@ -248,6 +263,8 @@ test("AI team overview serializes brain assignments and team membership", () => 
   const parsed = JSON.parse(JSON.stringify(overview)) as AITeamOverview;
 
   assert.equal(parsed.members[0].brain?.entryId, "brain-1");
+  assert.equal(parsed.memberPresets[0].id, "general-assistant");
+  assert.equal(parsed.memberPresets[0].jobTitle, "General Assistant");
   assert.equal(parsed.members[0].source, "slackclaw");
   assert.equal(parsed.members[0].hasManagedMetadata, true);
   assert.equal(parsed.members[0].bindingCount, 1);

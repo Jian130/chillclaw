@@ -90,7 +90,7 @@ export function buildExistingInstallAdvanceDraft(
   overview?: Pick<ProductOverview, "engine">
 ): Pick<OnboardingStateResponse["draft"], "currentStep" | "install"> {
   return {
-    currentStep: "model",
+    currentStep: "permissions",
     install: {
       installed: true,
       version: overview?.engine.version,

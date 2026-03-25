@@ -70,7 +70,7 @@ export class OnboardingService {
     });
 
     const draft = nextState.onboarding?.draft ?? defaultOnboardingDraftState();
-    const summary = await this.buildSummary(draft);
+    const summary = this.shouldReuseDraftSummary(request) ? this.buildDraftSummary(draft) : await this.buildSummary(draft);
 
     return {
       firstRun: {
@@ -125,6 +125,32 @@ export class OnboardingService {
       config: onboardingUiConfig,
       summary: await this.buildSummary(draft)
     };
+  }
+
+  private shouldReuseDraftSummary(request: UpdateOnboardingStateRequest): boolean {
+    return !request.install && !request.model && !request.channel && !request.employee;
+  }
+
+  private buildDraftSummary(draft: ReturnType<typeof defaultOnboardingDraftState>): OnboardingCompletionSummary {
+    const summary: OnboardingCompletionSummary = {};
+
+    if (draft.install) {
+      summary.install = { ...draft.install };
+    }
+
+    if (draft.model) {
+      summary.model = { ...draft.model };
+    }
+
+    if (draft.channel) {
+      summary.channel = { ...draft.channel };
+    }
+
+    if (draft.employee) {
+      summary.employee = { ...draft.employee };
+    }
+
+    return summary;
   }
 
   private async buildSummary(draft: ReturnType<typeof defaultOnboardingDraftState>): Promise<OnboardingCompletionSummary> {

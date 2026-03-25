@@ -137,11 +137,15 @@ struct RootView: View {
 
 private struct NativeSidebar: View {
     @Bindable var appState: SlackClawAppState
+    @AppStorage(nativeOnboardingLocaleDefaultsKey) private var selectedLocaleIdentifier = resolveNativeOnboardingLocaleIdentifier()
     let iconForSection: (NativeSection) -> String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sidebarBrand
+        let localeIdentifier = resolveNativeOnboardingLocaleIdentifier(selectedLocaleIdentifier)
+        let copy = nativeDashboardCopy(localeIdentifier: localeIdentifier)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            sidebarBrand(copy: copy)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(NativeSection.allCases) { section in
@@ -152,7 +156,7 @@ private struct NativeSidebar: View {
                             Image(systemName: iconForSection(section))
                                 .font(.system(size: 18, weight: .medium))
                                 .frame(width: 24)
-                            Text(section.rawValue)
+                            Text(nativeSectionTitle(section, localeIdentifier: localeIdentifier))
                                 .font(.system(size: 17, weight: .semibold))
                             Spacer(minLength: 0)
                         }
@@ -172,24 +176,34 @@ private struct NativeSidebar: View {
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Status: Active")
-                    .font(.system(size: 17, weight: .semibold))
-                Text(sidebarStatusSummary)
-                    .font(.system(size: 15))
-                    .foregroundStyle(Color(red: 0.34, green: 0.41, blue: 0.54))
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 14) {
+                NativeLocalePicker(
+                    selected: nativeLocalePickerSelectedOption(localeIdentifier: localeIdentifier),
+                    options: nativeOnboardingLocaleOptions,
+                    onSelect: { nextLocaleIdentifier in
+                        selectedLocaleIdentifier = resolveNativeOnboardingLocaleIdentifier(nextLocaleIdentifier)
+                    }
+                )
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(copy.sidebarStatusTitle)
+                        .font(.system(size: 17, weight: .semibold))
+                    Text(sidebarStatusSummary(copy: copy))
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color(red: 0.34, green: 0.41, blue: 0.54))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.blue.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.blue.opacity(0.14), lineWidth: 1)
+                )
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.blue.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color.blue.opacity(0.14), lineWidth: 1)
-            )
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
@@ -197,7 +211,7 @@ private struct NativeSidebar: View {
         .background(Color.white)
     }
 
-    private var sidebarBrand: some View {
+    private func sidebarBrand(copy: NativeDashboardCopy) -> some View {
         HStack(spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -217,7 +231,7 @@ private struct NativeSidebar: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("SlackClaw")
                     .font(.system(size: 26, weight: .bold))
-                Text("OpenClaw Made Easy")
+                Text(copy.brandSubtitle)
                     .font(.system(size: 15))
                     .foregroundStyle(Color(red: 0.38, green: 0.46, blue: 0.6))
             }
@@ -227,10 +241,10 @@ private struct NativeSidebar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var sidebarStatusSummary: String {
+    private func sidebarStatusSummary(copy: NativeDashboardCopy) -> String {
         switch appState.endpointStatus {
         case .ready:
-            return "All systems operational"
+            return copy.sidebarStatusReadySummary
         case let .unavailable(reason):
             return reason
         }

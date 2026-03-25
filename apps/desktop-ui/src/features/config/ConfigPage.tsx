@@ -1,6 +1,7 @@
 import { Copy, ExternalLink, Link2, MessageCircle, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  ChannelCapability,
   ChannelConfigOverview,
   ConfiguredChannelEntry,
   ModelAuthSessionResponse,
@@ -348,6 +349,61 @@ function findCreatedSavedEntry(previousEntries: SavedModelEntry[], nextEntries: 
 
 function findCreatedChannelEntry(previousEntries: ConfiguredChannelEntry[], nextEntries: ConfiguredChannelEntry[]) {
   return nextEntries.find((entry) => !previousEntries.some((previous) => previous.id === entry.id));
+}
+
+export function configuredChannelActionState(
+  entry: Pick<ConfiguredChannelEntry, "pairingRequired">,
+  capability: Pick<ChannelCapability, "supportsPairing"> | undefined
+) {
+  return {
+    primaryAction: entry.pairingRequired ? "continue-setup" : "edit",
+    showApproveAction: Boolean(capability?.supportsPairing)
+  } as const;
+}
+
+export function shouldCloseChannelDialogAfterAction(
+  action: "save" | "prepare" | "login" | "approve-pairing",
+  channelId: string,
+  hasSession: boolean
+) {
+  if (hasSession) {
+    return false;
+  }
+
+  if (action === "approve-pairing") {
+    return true;
+  }
+
+  return action === "save" && channelId !== "whatsapp";
+}
+
+function ConfiguredChannelCardActions(props: {
+  capability?: ChannelCapability;
+  copy: Record<string, string>;
+  entry: ConfiguredChannelEntry;
+  busy: string;
+  onEdit: () => void;
+  onApprove: () => void;
+  onRemove: () => void;
+}) {
+  const actionState = configuredChannelActionState(props.entry, props.capability);
+
+  return (
+    <div className="actions-row">
+      {actionState.showApproveAction ? (
+        <Button onClick={props.onApprove} variant="outline">
+          {props.copy.approvePairing}
+        </Button>
+      ) : null}
+      <Button onClick={props.onEdit} variant="outline">
+        {actionState.primaryAction === "continue-setup" ? props.copy.continueSetup : props.copy.editChannel}
+      </Button>
+      <Button loading={props.busy === `remove:${props.entry.id}`} onClick={props.onRemove} variant="outline">
+        <Trash2 size={14} />
+        {props.busy === `remove:${props.entry.id}` ? props.copy.removingChannel : props.copy.removeChannel}
+      </Button>
+    </div>
+  );
 }
 
 function ModelDialog(props: {
@@ -796,7 +852,7 @@ function ChannelDialog(props: {
       props.onChannelConfigChange(result.state);
       setMessage(result.mutation.message);
 
-      if (action === "save" && capability.id !== "whatsapp") {
+      if (shouldCloseChannelDialogAfterAction(action, capability.id, Boolean(result.mutation.session))) {
         props.onClose();
       }
     } finally {
@@ -1529,16 +1585,15 @@ export default function ConfigPage() {
                         </div>
                       </div>
                       <div className="actions-row">
-                        <Button
-                          onClick={() => openEditChannelDialog(entry)}
-                          variant="outline"
-                        >
-                          {entry.pairingRequired ? "Continue Setup" : "Edit"}
-                        </Button>
-                        <Button loading={busy === `remove:${entry.id}`} onClick={() => void handleRemoveChannel(entry)} variant="outline">
-                          <Trash2 size={14} />
-                          {busy === `remove:${entry.id}` ? "Removing..." : "Remove"}
-                        </Button>
+                        <ConfiguredChannelCardActions
+                          busy={busy}
+                          capability={capability}
+                          copy={copy}
+                          entry={entry}
+                          onApprove={() => openEditChannelDialog(entry)}
+                          onEdit={() => openEditChannelDialog(entry)}
+                          onRemove={() => void handleRemoveChannel(entry)}
+                        />
                       </div>
                     </div>
                     <p className="card__description" style={{ marginTop: 14 }}>{entry.summary}</p>

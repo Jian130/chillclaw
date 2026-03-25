@@ -55,8 +55,8 @@ private struct NativeMetricCard: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
+        .frame(maxWidth: .infinity, minHeight: nativeDashboardMetricCardMinHeight, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(.white)
@@ -214,9 +214,9 @@ private struct DashboardEmployeeCard: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        DashboardStatusPill(status: row.status, tone: row.status == "ready" ? .success : row.status == "busy" ? .info : .neutral)
+                        DashboardStatusPill(status: row.status, tone: row.statusTone)
                         if row.activeTaskCount > 0 {
-                            DashboardStatusPill(status: "\(row.activeTaskCount) active", tone: .neutral)
+                            DashboardStatusPill(status: row.activeTaskLabel, tone: .neutral)
                         }
                     }
                 }
@@ -295,21 +295,25 @@ private struct DashboardHealthRow: View {
 
 struct DashboardScreen: View {
     @Bindable var appState: SlackClawAppState
+    @AppStorage(nativeOnboardingLocaleDefaultsKey) private var selectedLocaleIdentifier = resolveNativeOnboardingLocaleIdentifier()
 
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
                 if let overview = appState.overview {
+                    let localeIdentifier = resolveNativeOnboardingLocaleIdentifier(selectedLocaleIdentifier)
                     let presentation = makeDashboardPresentation(
                         overview: overview,
                         modelConfig: appState.modelConfig,
-                        aiTeamOverview: appState.aiTeamOverview
+                        aiTeamOverview: appState.aiTeamOverview,
+                        localeIdentifier: localeIdentifier
                     )
 
                     dashboardContent(
                         overview: overview,
                         presentation: presentation,
-                        availableWidth: geometry.size.width
+                        availableWidth: geometry.size.width,
+                        localeIdentifier: localeIdentifier
                     )
                     .padding(24)
                 } else {
@@ -325,18 +329,20 @@ struct DashboardScreen: View {
     private func dashboardContent(
         overview: ProductOverview,
         presentation: NativeDashboardPresentation,
-        availableWidth: CGFloat
+        availableWidth: CGFloat,
+        localeIdentifier: String
     ) -> some View {
         let isCompact = availableWidth < 1120
         let metricColumns = dashboardMetricColumns(for: availableWidth)
+        let copy = nativeDashboardCopy(localeIdentifier: localeIdentifier)
 
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Dashboard")
+                    Text(copy.dashboardTitle)
                         .font(.largeTitle)
                         .fontWeight(.bold)
-                    Text("Track your workspace status, AI member roster, and recent activity from one screen.")
+                    Text(copy.dashboardSubtitle)
                         .font(.title3)
                         .foregroundStyle(.secondary)
                 }
@@ -344,12 +350,12 @@ struct DashboardScreen: View {
                 Spacer()
 
                 HStack(spacing: 12) {
-                    Button("Create Employee") {
+                    Button(copy.createEmployee) {
                         appState.selectedSection = .members
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Button("Open Team") {
+                    Button(copy.openTeam) {
                         appState.selectedSection = .team
                     }
                     .buttonStyle(.bordered)
@@ -358,16 +364,16 @@ struct DashboardScreen: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
-                    NativeBadge(label: "Powered by OpenClaw", systemImage: "sparkles", tone: .info)
-                    NativeBadge(label: "Workspace active", systemImage: "checkmark.circle.fill", tone: .success)
+                    NativeBadge(label: copy.poweredByOpenClaw, systemImage: "sparkles", tone: .info)
+                    NativeBadge(label: copy.workspaceActive, systemImage: "checkmark.circle.fill", tone: .success)
                     NativeBadge(label: presentation.heroVersion, systemImage: "brain.head.profile", tone: .neutral)
                 }
 
-                Text("Figma shell, backend-truthful state")
+                Text(copy.heroTitle)
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("The layout mirrors the React dashboard while the metrics and lists stay daemon-backed.")
+                Text(copy.heroBody)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -394,18 +400,18 @@ struct DashboardScreen: View {
 
             if isCompact {
                 VStack(alignment: .leading, spacing: 16) {
-                    employeeStatusSection(presentation: presentation)
-                    recentActivitySection(presentation: presentation)
-                    workspaceHealthSection(presentation: presentation)
+                    employeeStatusSection(presentation: presentation, localeIdentifier: localeIdentifier)
+                    recentActivitySection(presentation: presentation, localeIdentifier: localeIdentifier)
+                    workspaceHealthSection(presentation: presentation, localeIdentifier: localeIdentifier)
                 }
             } else {
                 HStack(alignment: .top, spacing: 16) {
-                    employeeStatusSection(presentation: presentation)
+                    employeeStatusSection(presentation: presentation, localeIdentifier: localeIdentifier)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
 
                     VStack(alignment: .leading, spacing: 16) {
-                        recentActivitySection(presentation: presentation)
-                        workspaceHealthSection(presentation: presentation)
+                        recentActivitySection(presentation: presentation, localeIdentifier: localeIdentifier)
+                        workspaceHealthSection(presentation: presentation, localeIdentifier: localeIdentifier)
                     }
                     .frame(width: min(availableWidth * 0.34, 420), alignment: .top)
                 }
@@ -427,11 +433,13 @@ struct DashboardScreen: View {
         return [GridItem(.flexible(minimum: 220), spacing: 16)]
     }
 
-    private func employeeStatusSection(presentation: NativeDashboardPresentation) -> some View {
-        SectionCard(title: "Employee Status") {
+    private func employeeStatusSection(presentation: NativeDashboardPresentation, localeIdentifier: String) -> some View {
+        let copy = nativeDashboardCopy(localeIdentifier: localeIdentifier)
+
+        return SectionCard(title: copy.employeeStatusTitle) {
             HStack {
                 Spacer()
-                Button("View all") {
+                Button(copy.viewAll) {
                     appState.selectedSection = .team
                 }
                 .buttonStyle(.plain)
@@ -439,7 +447,7 @@ struct DashboardScreen: View {
             }
 
             if presentation.employeeRows.isEmpty {
-                Text("No AI members yet.")
+                Text(copy.noMembersYet)
                     .foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
@@ -451,10 +459,12 @@ struct DashboardScreen: View {
         }
     }
 
-    private func recentActivitySection(presentation: NativeDashboardPresentation) -> some View {
-        SectionCard(title: "Recent Activity") {
+    private func recentActivitySection(presentation: NativeDashboardPresentation, localeIdentifier: String) -> some View {
+        let copy = nativeDashboardCopy(localeIdentifier: localeIdentifier)
+
+        return SectionCard(title: copy.recentActivityTitle) {
             if presentation.activityRows.isEmpty {
-                Text("No recent activity.")
+                Text(copy.noRecentActivity)
                     .foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
@@ -466,8 +476,10 @@ struct DashboardScreen: View {
         }
     }
 
-    private func workspaceHealthSection(presentation: NativeDashboardPresentation) -> some View {
-        SectionCard(title: "Workspace Health") {
+    private func workspaceHealthSection(presentation: NativeDashboardPresentation, localeIdentifier: String) -> some View {
+        let copy = nativeDashboardCopy(localeIdentifier: localeIdentifier)
+
+        return SectionCard(title: copy.workspaceHealthTitle) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(presentation.healthItems, id: \.title) { item in
                     DashboardHealthRow(item: item)
@@ -1010,6 +1022,8 @@ struct ConfigurationScreen: View {
     @State private var selectedTab = 0
     @State private var showModelSheet = false
     @State private var showChannelSheet = false
+    @State private var selectedChannelEntry: ConfiguredChannelEntry?
+    @State private var channelSheetAction: NativeConfigurationChannelSheetAction = .save
 
     var body: some View {
         ScrollView {
@@ -1022,7 +1036,7 @@ struct ConfigurationScreen: View {
                     if selectedTab == 0 {
                         Button("Add Model") { showModelSheet = true }
                     } else {
-                        Button("Add Channel") { showChannelSheet = true }
+                        Button("Add Channel") { presentAddChannelSheet() }
                     }
                 }
 
@@ -1044,7 +1058,11 @@ struct ConfigurationScreen: View {
             ModelEntrySheet(appState: appState, existingEntry: nil)
         }
         .sheet(isPresented: $showChannelSheet) {
-            ChannelEntrySheet(appState: appState, existingEntry: nil)
+            ChannelEntrySheet(
+                appState: appState,
+                existingEntry: selectedChannelEntry,
+                preferredAction: channelSheetAction
+            )
         }
     }
 
@@ -1082,11 +1100,30 @@ struct ConfigurationScreen: View {
     private var channelsView: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(appState.channelConfig?.entries ?? []) { entry in
+                let capability = appState.channelConfig?.capabilities.first(where: { $0.id == entry.channelId })
+                let actionState = configurationChannelActionState(entry: entry, capability: capability)
+
                 SectionCard(title: entry.label, subtitle: entry.channelId.capitalized) {
                     HStack {
-                        Text(entry.summary)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(entry.summary)
+                                .foregroundStyle(.secondary)
+                            if entry.pairingRequired {
+                                Text("Pairing required")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+                        }
                         Spacer()
+                        if actionState.showApproveAction {
+                            Button("Approve Pairing") {
+                                presentChannelSheet(for: entry, action: .approvePairing)
+                            }
+                        }
+                        Button(actionState.primaryAction == .continueSetup ? "Continue Setup" : "Edit") {
+                            presentChannelSheet(for: entry, action: .save)
+                        }
                         Button("Remove", role: .destructive) {
                             Task {
                                 await removeChannel(entry)
@@ -1144,6 +1181,18 @@ struct ConfigurationScreen: View {
         } catch {
             appState.presentErrorUnlessCancelled(error)
         }
+    }
+
+    private func presentAddChannelSheet() {
+        selectedChannelEntry = nil
+        channelSheetAction = .save
+        showChannelSheet = true
+    }
+
+    private func presentChannelSheet(for entry: ConfiguredChannelEntry, action: NativeConfigurationChannelSheetAction) {
+        selectedChannelEntry = entry
+        channelSheetAction = action
+        showChannelSheet = true
     }
 }
 
@@ -1452,6 +1501,13 @@ struct SettingsScreen: View {
                     }
                 }
 
+                SectionCard(
+                    title: nativePermissionsCopy().settingsTitle,
+                    subtitle: nativePermissionsCopy().settingsBody
+                ) {
+                    NativePermissionsList(localeIdentifier: resolveNativeOnboardingLocaleIdentifier())
+                }
+
                 SectionCard(title: "Guided Setup") {
                     Text("Run the guided setup again without uninstalling SlackClaw.")
                     Button(isRedoingOnboarding ? "Resetting..." : "Redo onboarding") {
@@ -1554,18 +1610,33 @@ private struct ChannelEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var appState: SlackClawAppState
     let existingEntry: ConfiguredChannelEntry?
+    let preferredAction: NativeConfigurationChannelSheetAction
 
     @State private var channelId = ""
     @State private var values: [String: String] = [:]
+    @State private var busyAction: NativeConfigurationChannelSheetAction?
+    @State private var message = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add Channel")
+            Text(existingEntry == nil ? "Add Channel" : "Edit Channel")
                 .font(.title2)
                 .fontWeight(.semibold)
             Picker("Channel", selection: $channelId) {
                 ForEach(appState.channelConfig?.capabilities ?? []) { capability in
                     Text(capability.label).tag(capability.id)
+                }
+            }
+            if let existingEntry {
+                HStack(spacing: 10) {
+                    Text(existingEntry.summary)
+                        .foregroundStyle(.secondary)
+                    if existingEntry.pairingRequired {
+                        Text("Pairing required")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
             ForEach(currentCapability?.fieldDefs ?? []) { field in
@@ -1574,19 +1645,51 @@ private struct ChannelEntrySheet: View {
                     set: { values[field.id] = $0 }
                 ))
             }
+            if let activeSession, activeSession.channelId == channelId {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Active session")
+                        .font(.headline)
+                    Text(activeSession.message)
+                        .foregroundStyle(.secondary)
+                    if let prompt = activeSession.inputPrompt {
+                        Text(prompt)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            if !message.isEmpty {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button("Save") {
-                    Task { await save() }
+                Button(existingEntry == nil ? "Save Channel" : "Save Changes") {
+                    Task { await runAction(.save) }
                 }
                 .disabled(channelId.isEmpty)
+                if currentCapability?.supportsPairing == true {
+                    Button("Approve Pairing") {
+                        Task { await runAction(.approvePairing) }
+                    }
+                    .disabled(channelId.isEmpty || values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
         .padding(24)
         .frame(width: 520)
         .onAppear {
-            channelId = appState.channelConfig?.capabilities.first?.id ?? ""
+            channelId = existingEntry?.channelId ?? appState.channelConfig?.capabilities.first?.id ?? ""
+            values = defaultChannelValues.merging(existingEntry?.editableValues ?? [:], uniquingKeysWith: { _, new in new })
+            message = ""
+            if preferredAction == .approvePairing {
+                values["code"] = values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
     }
 
@@ -1594,14 +1697,38 @@ private struct ChannelEntrySheet: View {
         appState.channelConfig?.capabilities.first(where: { $0.id == channelId })
     }
 
-    private func save() async {
+    private var activeSession: ChannelSession? {
+        appState.channelConfig?.activeSession
+    }
+
+    private var defaultChannelValues: [String: String] {
+        [
+            "domain": "feishu",
+            "botName": "SlackClaw Assistant",
+            "pluginSpec": "@openclaw-china/wecom-app"
+        ]
+    }
+
+    private func runAction(_ action: NativeConfigurationChannelSheetAction) async {
+        guard busyAction == nil else { return }
+
+        busyAction = action
+        defer { busyAction = nil }
+
         do {
             let response = try await appState.client.saveChannelEntry(
                 entryId: existingEntry?.id,
-                request: SaveChannelEntryRequest(channelId: channelId, entryId: existingEntry?.id, values: values, action: "save")
+                request: buildConfigurationChannelRequest(
+                    channelId: channelId,
+                    entryId: existingEntry?.id,
+                    editableValues: values,
+                    action: action,
+                    pairingCode: values["code", default: ""]
+                )
             )
             appState.channelConfig = response.channelConfig
             appState.applyBanner(response.message)
+            message = response.message
             await appState.refreshAll()
             dismiss()
         } catch {
@@ -1664,17 +1791,42 @@ private struct MemberSheet: View {
     @Bindable var appState: SlackClawAppState
 
     @State private var name = ""
+    @State private var selectedPresetId = ""
     @State private var jobTitle = ""
     @State private var personality = ""
     @State private var soul = ""
     @State private var selectedBrain = ""
     @State private var workStyles = ""
+    @State private var skillIds: [String] = []
+    @State private var knowledgePackIds: [String] = []
+    @State private var memoryEnabled = true
+
+    private var memberPresets: [AIMemberPreset] {
+        appState.aiTeamOverview?.memberPresets ?? []
+    }
+
+    private var selectedPreset: AIMemberPreset? {
+        memberPresets.first(where: { $0.id == selectedPresetId })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Create AI Member")
                 .font(.title2)
                 .fontWeight(.semibold)
+            if !memberPresets.isEmpty {
+                Picker("Preset", selection: $selectedPresetId) {
+                    ForEach(memberPresets) { preset in
+                        Text(preset.label).tag(preset.id)
+                    }
+                }
+                .onChange(of: selectedPresetId) { _, nextPresetId in
+                    applyPreset(memberPresets.first(where: { $0.id == nextPresetId }))
+                }
+                Text(selectedPreset?.description ?? "Choose a preset to preload a useful starter setup.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             TextField("Name", text: $name)
             TextField("Job Title", text: $jobTitle)
             Picker("Brain", selection: $selectedBrain) {
@@ -1698,6 +1850,10 @@ private struct MemberSheet: View {
         .frame(width: 560)
         .onAppear {
             selectedBrain = appState.aiTeamOverview?.availableBrains.first?.id ?? ""
+            if selectedPresetId.isEmpty, let firstPreset = memberPresets.first {
+                selectedPresetId = firstPreset.id
+                applyPreset(firstPreset)
+            }
         }
     }
 
@@ -1706,14 +1862,14 @@ private struct MemberSheet: View {
             let request = SaveAIMemberRequest(
                 name: name,
                 jobTitle: jobTitle,
-                avatar: MemberAvatar(presetId: "operator", accent: "#4f46e5", emoji: "✨", theme: nil),
+                avatar: memberAvatar(for: selectedPreset?.avatarPresetId),
                 brainEntryId: selectedBrain,
                 personality: personality,
                 soul: soul,
                 workStyles: workStyles.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
-                skillIds: [],
-                knowledgePackIds: [],
-                capabilitySettings: MemberCapabilitySettings(memoryEnabled: true, contextWindow: 8000)
+                skillIds: skillIds,
+                knowledgePackIds: knowledgePackIds,
+                capabilitySettings: MemberCapabilitySettings(memoryEnabled: memoryEnabled, contextWindow: 8000)
             )
             let response = try await appState.client.saveMember(memberId: nil, request: request)
             appState.aiTeamOverview = response.overview
@@ -1722,6 +1878,28 @@ private struct MemberSheet: View {
             dismiss()
         } catch {
             appState.presentErrorUnlessCancelled(error)
+        }
+    }
+
+    private func applyPreset(_ preset: AIMemberPreset?) {
+        guard let preset else { return }
+        jobTitle = preset.jobTitle
+        personality = preset.personality
+        soul = preset.soul
+        workStyles = preset.workStyles.joined(separator: ", ")
+        skillIds = preset.skillIds
+        knowledgePackIds = preset.knowledgePackIds
+        memoryEnabled = preset.defaultMemoryEnabled ?? true
+    }
+
+    private func memberAvatar(for presetId: String?) -> MemberAvatar {
+        switch presetId {
+        case "analyst":
+            return MemberAvatar(presetId: "analyst", accent: "#97b5ea", emoji: "🧠", theme: "onboarding")
+        case "builder":
+            return MemberAvatar(presetId: "builder", accent: "#9ec1ef", emoji: "🛠️", theme: "onboarding")
+        default:
+            return MemberAvatar(presetId: "operator", accent: "#4f46e5", emoji: "✨", theme: nil)
         }
     }
 }

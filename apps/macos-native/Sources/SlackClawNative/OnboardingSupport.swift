@@ -23,7 +23,7 @@ let nativeOnboardingAvatarPresets: [NativeOnboardingAvatarPreset] = [
 ]
 
 let nativeOnboardingChannelIDs: Set<String> = ["wechat", "feishu", "telegram"]
-let nativeOnboardingStepOrder: [OnboardingStep] = [.welcome, .install, .model, .channel, .employee, .complete]
+let nativeOnboardingStepOrder: [OnboardingStep] = [.welcome, .install, .permissions, .model, .channel, .employee, .complete]
 let nativeOnboardingPreferredColorScheme: ColorScheme = .light
 let nativeOnboardingTextPrimary = Color(red: 0.09, green: 0.12, blue: 0.18)
 let nativeOnboardingTextSecondary = Color(red: 0.41, green: 0.45, blue: 0.54)
@@ -223,6 +223,16 @@ let nativeOnboardingLocaleOptions: [NativeOnboardingLocaleOption] = [
     .init(id: "es", label: "Español", flag: "🇪🇸"),
 ]
 
+func nativeLocalePickerSelectedOption(
+    localeIdentifier: String,
+    options: [NativeOnboardingLocaleOption] = nativeOnboardingLocaleOptions
+) -> NativeOnboardingLocaleOption {
+    let resolvedIdentifier = resolveNativeOnboardingLocaleIdentifier(localeIdentifier)
+    return options.first(where: { $0.id == resolvedIdentifier })
+        ?? nativeOnboardingLocaleOptions.first(where: { $0.id == "en" })
+        ?? NativeOnboardingLocaleOption(id: "en", label: "English", flag: "🇺🇸")
+}
+
 struct NativeResolvedOnboardingModelProvider: Identifiable, Sendable {
     let id: String
     let curated: OnboardingModelProviderPresentation
@@ -254,6 +264,7 @@ func resolveOnboardingEmployeePresets(
 }
 
 enum OnboardingRefreshResource {
+    case installContext
     case overview
     case model
     case channel
@@ -292,13 +303,38 @@ func buildExistingInstallAdvanceRequest(
     overview: ProductOverview?
 ) -> UpdateOnboardingStateRequest {
     .init(
-        currentStep: .model,
+        currentStep: .permissions,
         install: .init(
             installed: true,
             version: overview?.engine.version,
             disposition: "reused-existing"
         )
     )
+}
+
+func resolveNativeOnboardingInstallTarget(
+    overview: ProductOverview?,
+    deploymentTargets: DeploymentTargetsResponse?
+) -> DeploymentTargetStatus? {
+    guard overview?.engine.installed == true else {
+        return nil
+    }
+
+    let installedTargets = (deploymentTargets?.targets ?? []).filter { target in
+        target.installed && (target.id == "standard" || target.id == "managed-local")
+    }
+
+    if let activeTarget = installedTargets.first(where: { $0.active }) {
+        return activeTarget
+    }
+
+    if let version = overview?.engine.version,
+       let versionMatchedTarget = installedTargets.first(where: { $0.version == version })
+    {
+        return versionMatchedTarget
+    }
+
+    return installedTargets.first
 }
 
 func buildOnboardingMemberRequest(_ draft: NativeOnboardingEmployeeDraft) -> SaveAIMemberRequest {
@@ -481,10 +517,12 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: SlackCla
     case .install:
         switch event {
         case .deployCompleted, .gatewayStatus:
-            return .overview
+            return .installContext
         case .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
             return nil
         }
+    case .permissions:
+        return nil
     case .model:
         guard case let .configApplied(resource, _) = event, resource == .models else {
             return nil
@@ -540,6 +578,7 @@ struct NativeOnboardingInstallViewState: Sendable {
     var version: String?
     var progressPercent: Double?
     var stageLabel: String?
+    var isUpdating: Bool
 }
 
 enum NativeOnboardingModelScreenKind: Sendable {
@@ -612,7 +651,8 @@ func resolveNativeOnboardingInstallViewState(
             kind: .installing,
             version: nil,
             progressPercent: percent,
-            stageLabel: nativeOnboardingInstallStageLabel(progress: progress, copy: copy)
+            stageLabel: nativeOnboardingInstallStageLabel(progress: progress, copy: copy),
+            isUpdating: progress?.phase == .updating
         )
     }
 
@@ -621,7 +661,8 @@ func resolveNativeOnboardingInstallViewState(
             kind: .complete,
             version: install?.version ?? overview?.engine.version,
             progressPercent: nil,
-            stageLabel: nil
+            stageLabel: nil,
+            isUpdating: false
         )
     }
 
@@ -630,7 +671,8 @@ func resolveNativeOnboardingInstallViewState(
             kind: .found,
             version: overview?.engine.version,
             progressPercent: nil,
-            stageLabel: nil
+            stageLabel: nil,
+            isUpdating: false
         )
     }
 
@@ -638,7 +680,8 @@ func resolveNativeOnboardingInstallViewState(
         kind: .missing,
         version: overview?.engine.version,
         progressPercent: nil,
-        stageLabel: nil
+        stageLabel: nil,
+        isUpdating: false
     )
 }
 
@@ -767,9 +810,13 @@ struct NativeOnboardingCopy: Sendable {
     let installNotFoundBody: String
     let installInstallingTitle: String
     let installInstallingBody: String
+    let installUpdatingTitle: String
+    let installUpdatingBody: String
     let installCompleteTitle: String
     let installCompleteBody: String
     let installVersionLabel: String
+    let installUpdateAvailable: String
+    let installUpdateCta: String
     let installStageDetecting: String
     let installStageReusing: String
     let installStageInstalling: String
@@ -909,7 +956,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "跳过引导",
             progressStep: "第 {current} / {total} 步",
             progressComplete: "已完成",
-            stepLabels: ["欢迎", "安装", "模型", "渠道", "AI 员工", "完成"],
+            stepLabels: ["欢迎", "安装", "权限", "模型", "渠道", "AI 员工", "完成"],
             welcomeEyebrow: "开始使用",
             welcomeTitle: "欢迎来到 SlackClaw",
             welcomeBody: "几分钟内搭建你的 OpenClaw 数字员工工作区",
@@ -935,9 +982,13 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installNotFoundBody: "别担心！我们只需几次点击就能帮你安装完成。",
             installInstallingTitle: "正在安装 OpenClaw...",
             installInstallingBody: "这大约需要 2–3 分钟。请不要关闭此窗口。",
+            installUpdatingTitle: "正在更新 OpenClaw...",
+            installUpdatingBody: "SlackClaw 正在下载并应用最新可用版本。请不要关闭此窗口。",
             installCompleteTitle: "安装完成！",
             installCompleteBody: "OpenClaw 现在已经可以使用",
             installVersionLabel: "版本",
+            installUpdateAvailable: "有可用更新：{version}",
+            installUpdateCta: "更新 OpenClaw",
             installStageDetecting: "正在检查这台 Mac...",
             installStageReusing: "正在复用现有运行时...",
             installStageInstalling: "正在安装 OpenClaw...",
@@ -1053,7 +1104,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "オンボーディングをスキップ",
             progressStep: "ステップ {current} / {total}",
             progressComplete: "完了",
-            stepLabels: ["開始", "インストール", "モデル", "チャネル", "AI 社員", "完了"],
+            stepLabels: ["開始", "インストール", "権限", "モデル", "チャネル", "AI 社員", "完了"],
             welcomeEyebrow: "スタート",
             welcomeTitle: "SlackClaw へようこそ",
             welcomeBody: "数分で OpenClaw ベースのデジタル従業員ワークスペースを構築します",
@@ -1079,9 +1130,13 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installNotFoundBody: "ご安心ください。数回のクリックでインストールできます。",
             installInstallingTitle: "OpenClaw をインストールしています...",
             installInstallingBody: "2〜3 分ほどかかります。このウィンドウは閉じないでください。",
+            installUpdatingTitle: "OpenClaw を更新しています...",
+            installUpdatingBody: "SlackClaw が最新の利用可能バージョンをダウンロードして適用しています。このウィンドウは閉じないでください。",
             installCompleteTitle: "インストール完了！",
             installCompleteBody: "OpenClaw を使用する準備ができました",
             installVersionLabel: "バージョン",
+            installUpdateAvailable: "利用可能なアップデート: {version}",
+            installUpdateCta: "OpenClaw を更新",
             installStageDetecting: "この Mac を確認しています...",
             installStageReusing: "既存のランタイムを再利用しています...",
             installStageInstalling: "OpenClaw をインストールしています...",
@@ -1197,7 +1252,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "온보딩 건너뛰기",
             progressStep: "{current}/{total}단계",
             progressComplete: "완료",
-            stepLabels: ["시작", "설치", "모델", "채널", "AI 직원", "완료"],
+            stepLabels: ["시작", "설치", "권한", "모델", "채널", "AI 직원", "완료"],
             welcomeEyebrow: "시작하기",
             welcomeTitle: "SlackClaw에 오신 것을 환영합니다",
             welcomeBody: "몇 분 안에 OpenClaw 기반 디지털 직원 작업 공간을 만드세요",
@@ -1223,9 +1278,13 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installNotFoundBody: "걱정하지 마세요. 몇 번의 클릭만으로 설치해 드립니다.",
             installInstallingTitle: "OpenClaw 설치 중...",
             installInstallingBody: "2~3분 정도 걸립니다. 이 창을 닫지 마세요.",
+            installUpdatingTitle: "OpenClaw 업데이트 중...",
+            installUpdatingBody: "SlackClaw가 최신 사용 가능 버전을 내려받아 적용하고 있습니다. 이 창을 닫지 마세요.",
             installCompleteTitle: "설치 완료!",
             installCompleteBody: "이제 OpenClaw를 사용할 수 있습니다",
             installVersionLabel: "버전",
+            installUpdateAvailable: "사용 가능한 업데이트: {version}",
+            installUpdateCta: "OpenClaw 업데이트",
             installStageDetecting: "이 Mac을 확인하는 중...",
             installStageReusing: "기존 런타임을 재사용하는 중...",
             installStageInstalling: "OpenClaw를 설치하는 중...",
@@ -1341,7 +1400,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "Omitir onboarding",
             progressStep: "Paso {current} de {total}",
             progressComplete: "Completado",
-            stepLabels: ["Inicio", "Instalar", "Modelo", "Canal", "Empleado IA", "Completo"],
+            stepLabels: ["Inicio", "Instalar", "Permisos", "Modelo", "Canal", "Empleado IA", "Completo"],
             welcomeEyebrow: "Comenzar",
             welcomeTitle: "Bienvenido a SlackClaw",
             welcomeBody: "Construye en minutos tu espacio de trabajo de empleados digitales impulsado por OpenClaw",
@@ -1367,9 +1426,13 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installNotFoundBody: "No te preocupes. Lo instalaremos por ti en solo unos clics.",
             installInstallingTitle: "Instalando OpenClaw...",
             installInstallingBody: "Esto tardará 2–3 minutos. No cierres esta ventana.",
+            installUpdatingTitle: "Actualizando OpenClaw...",
+            installUpdatingBody: "SlackClaw está descargando y aplicando la última versión disponible. No cierres esta ventana.",
             installCompleteTitle: "¡Instalación completa!",
             installCompleteBody: "OpenClaw ya está listo para usarse",
             installVersionLabel: "Versión",
+            installUpdateAvailable: "Actualización disponible: {version}",
+            installUpdateCta: "Actualizar OpenClaw",
             installStageDetecting: "Comprobando este Mac...",
             installStageReusing: "Reutilizando el runtime existente...",
             installStageInstalling: "Instalando OpenClaw...",
@@ -1485,7 +1548,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "Skip onboarding",
             progressStep: "Step {current} of {total}",
             progressComplete: "Complete",
-            stepLabels: ["Welcome", "Install", "Model", "Channel", "AI Employee", "Complete"],
+            stepLabels: ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee", "Complete"],
             welcomeEyebrow: "Get started",
             welcomeTitle: "Welcome to SlackClaw",
             welcomeBody: "Build your OpenClaw-powered digital employee workspace in minutes",
@@ -1511,9 +1574,13 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installNotFoundBody: "Don't worry! We'll install it for you in just a few clicks.",
             installInstallingTitle: "Installing OpenClaw...",
             installInstallingBody: "This will take 2–3 minutes. Please don't close this window.",
+            installUpdatingTitle: "Updating OpenClaw...",
+            installUpdatingBody: "SlackClaw is downloading and applying the latest available version. Please keep this window open.",
             installCompleteTitle: "Installation Complete!",
             installCompleteBody: "OpenClaw is now ready to use",
             installVersionLabel: "Version",
+            installUpdateAvailable: "Update available: {version}",
+            installUpdateCta: "Update OpenClaw",
             installStageDetecting: "Checking this Mac...",
             installStageReusing: "Reusing existing runtime...",
             installStageInstalling: "Installing OpenClaw...",

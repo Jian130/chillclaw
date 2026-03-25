@@ -85,7 +85,7 @@ import {
   type OnboardingInstallProgressSnapshot
 } from "./helpers.js";
 
-const ONBOARDING_STEP_ORDER = ["welcome", "install", "model", "channel", "employee", "complete"] as const;
+const ONBOARDING_STEP_ORDER = ["welcome", "install", "permissions", "model", "channel", "employee", "complete"] as const;
 const ONBOARDING_AVATAR_PRESETS = memberAvatarPresets.filter((preset) => preset.id.startsWith("onboarding-"));
 
 function isCurrentOrLaterStep(step: OnboardingStateResponse["draft"]["currentStep"], target: typeof ONBOARDING_STEP_ORDER[number]) {
@@ -756,6 +756,11 @@ export default function OnboardingPage() {
     await persistDraft(buildExistingInstallAdvanceDraft(overview));
   }
 
+  async function handleAdvanceToPermissions() {
+    setPageError(undefined);
+    await persistDraft({ currentStep: "permissions" });
+  }
+
   async function handleAdvanceToModel() {
     setPageError(undefined);
     await persistDraft({ currentStep: "model" });
@@ -1114,7 +1119,7 @@ export default function OnboardingPage() {
           </div>
         </div>
 
-        {currentStep === "welcome" || currentStep === "install" || currentStep === "model" ? (
+        {currentStep === "welcome" || currentStep === "install" || currentStep === "permissions" || currentStep === "model" ? (
           <div className="onboarding-header onboarding-header--welcome">
             <p>{copy.subtitle}</p>
             <button className="onboarding-skip" onClick={() => void handleComplete("team")} type="button">
@@ -1269,7 +1274,7 @@ export default function OnboardingPage() {
 
                     {installViewState.kind === "complete" ? (
                       <div className="onboarding-install-actions">
-                        <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToModel()}>
+                        <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToPermissions()}>
                           {copy.installContinue}
                         </Button>
                         <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "welcome" })} type="button">
@@ -1279,6 +1284,34 @@ export default function OnboardingPage() {
                     ) : null}
                   </>
                 )}
+              </div>
+            ) : null}
+
+            {currentStep === "permissions" ? (
+              <div className="onboarding-step onboarding-step--install onboarding-step--install-figma">
+                <div className="onboarding-step__intro onboarding-step__intro--welcome onboarding-step__intro--model">
+                  <h2>{copy.permissionsTitle}</h2>
+                  <p>{copy.permissionsBody}</p>
+                </div>
+
+                <div className="onboarding-install-status onboarding-install-status--success">
+                  <div className="onboarding-install-status__icon">
+                    <Info size={28} />
+                  </div>
+                  <div className="onboarding-install-status__copy">
+                    <strong>{copy.permissionsNativeTitle}</strong>
+                    <p>{copy.permissionsNativeBody}</p>
+                  </div>
+                </div>
+
+                <div className="onboarding-install-actions">
+                  <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToModel()}>
+                    {copy.installContinue}
+                  </Button>
+                  <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "install" })} type="button">
+                    {common.back}
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -1326,7 +1359,7 @@ export default function OnboardingPage() {
                         ))}
                       </div>
                       <div className="onboarding-model-actions onboarding-model-actions--picker">
-                        <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "install" })} type="button">
+                        <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "permissions" })} type="button">
                           {common.back}
                         </button>
                       </div>

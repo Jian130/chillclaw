@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { ModelConfigOverview, ModelProviderConfig } from "@slackclaw/contracts";
+import type { ChannelCapability, ConfiguredChannelEntry, ModelConfigOverview, ModelProviderConfig } from "@slackclaw/contracts";
 
 import {
   activeSavedModelEntries,
   applyModelEntryRole,
   channelIcon,
   channelStatusTone,
+  configuredChannelActionState,
   defaultModelEntryRole,
   entryAuthLabel,
   feishuDirectLinks,
@@ -18,6 +19,7 @@ import {
   providerConfiguredModels,
   providerIcon,
   runtimeConfiguredModels,
+  shouldCloseChannelDialogAfterAction,
   showInactiveSavedEntries,
   resolveModelEntryRole,
   validateModelEntryDraft
@@ -80,6 +82,46 @@ const modelConfig: ModelConfigOverview = {
   savedEntries: [],
   defaultEntryId: undefined,
   fallbackEntryIds: []
+};
+
+const telegramCapability: ChannelCapability = {
+  id: "telegram",
+  label: "Telegram",
+  description: "Telegram bot setup.",
+  officialSupport: true,
+  iconKey: "telegram",
+  fieldDefs: [],
+  supportsEdit: true,
+  supportsRemove: true,
+  supportsPairing: true,
+  supportsLogin: false
+};
+
+const wechatCapability: ChannelCapability = {
+  id: "wechat",
+  label: "WeChat workaround",
+  description: "WeChat workaround setup.",
+  officialSupport: false,
+  iconKey: "wechat",
+  fieldDefs: [],
+  supportsEdit: true,
+  supportsRemove: true,
+  supportsPairing: false,
+  supportsLogin: false,
+  guidedSetupKind: "wechat"
+};
+
+const configuredTelegramEntry: ConfiguredChannelEntry = {
+  id: "telegram:default",
+  channelId: "telegram",
+  label: "Telegram Support",
+  status: "completed",
+  summary: "Telegram bot configured.",
+  detail: "Telegram bot configured.",
+  maskedConfigSummary: [],
+  editableValues: {},
+  pairingRequired: false,
+  lastUpdatedAt: "2026-03-25T00:00:00.000Z"
 };
 
 describe("ConfigPage helpers", () => {
@@ -222,6 +264,37 @@ describe("ConfigPage helpers", () => {
     expect(channelStatusTone("awaiting-pairing")).toBe("info");
     expect(channelStatusTone("failed")).toBe("warning");
     expect(channelStatusTone("not-started")).toBe("neutral");
+  });
+
+  it("shows a reusable approve action for pairing-capable configured channels", () => {
+    expect(configuredChannelActionState(configuredTelegramEntry, telegramCapability)).toEqual({
+      primaryAction: "edit",
+      showApproveAction: true
+    });
+
+    expect(
+      configuredChannelActionState(
+        {
+          ...configuredTelegramEntry,
+          pairingRequired: true
+        },
+        telegramCapability
+      )
+    ).toEqual({
+      primaryAction: "continue-setup",
+      showApproveAction: true
+    });
+
+    expect(configuredChannelActionState(configuredTelegramEntry, wechatCapability)).toEqual({
+      primaryAction: "edit",
+      showApproveAction: false
+    });
+  });
+
+  it("closes the channel dialog after successful approve pairing", () => {
+    expect(shouldCloseChannelDialogAfterAction("approve-pairing", "telegram", false)).toBe(true);
+    expect(shouldCloseChannelDialogAfterAction("save", "whatsapp", true)).toBe(false);
+    expect(shouldCloseChannelDialogAfterAction("login", "telegram", false)).toBe(false);
   });
 
   it("validates required API key inputs before save", () => {

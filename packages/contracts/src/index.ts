@@ -223,7 +223,7 @@ export interface FirstRunState {
   selectedProfileId?: string;
 }
 
-export type OnboardingStep = "welcome" | "install" | "model" | "channel" | "employee" | "complete";
+export type OnboardingStep = "welcome" | "install" | "permissions" | "model" | "channel" | "employee" | "complete";
 export type OnboardingDestination = "team" | "dashboard" | "chat";
 
 export interface OnboardingInstallState {
@@ -617,12 +617,27 @@ export interface AITeamActivityItem {
   tone: "completed" | "started" | "generated" | "updated" | "assigned";
 }
 
+export interface AIMemberPreset {
+  id: string;
+  label: string;
+  description: string;
+  avatarPresetId?: string;
+  jobTitle: string;
+  personality: string;
+  soul: string;
+  workStyles: string[];
+  skillIds: string[];
+  knowledgePackIds: string[];
+  defaultMemoryEnabled?: boolean;
+}
+
 export interface AITeamOverview {
   teamVision: string;
   members: AIMemberDetail[];
   teams: TeamDetail[];
   activity: AITeamActivityItem[];
   availableBrains: SavedModelEntry[];
+  memberPresets: AIMemberPreset[];
   knowledgePacks: KnowledgePack[];
   skillOptions: SkillOption[];
 }

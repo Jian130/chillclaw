@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { memberDeleteSummary, memberOriginLabel, memberOriginTone } from "./MembersPage.js";
+import { buildMemberPresetDraft, memberDeleteSummary, memberOriginLabel, memberOriginTone } from "./MembersPage.js";
 
 describe("MembersPage helpers", () => {
   it("labels detected and SlackClaw-managed members distinctly", () => {
@@ -17,5 +17,32 @@ describe("MembersPage helpers", () => {
         workspaceDir: "/Users/home/Library/Application Support/OpenClaw/agents/alex/workspace"
       })
     ).toContain("/Users/home/Library/Application Support/OpenClaw/agents/alex/workspace");
+  });
+
+  it("builds starter defaults from a daemon-owned member preset", () => {
+    expect(
+      buildMemberPresetDraft({
+        id: "general-assistant",
+        label: "General Assistant",
+        description: "Everyday default preset",
+        avatarPresetId: "operator",
+        jobTitle: "General Assistant",
+        personality: "Clear and dependable",
+        soul: "Turn requests into useful next steps.",
+        workStyles: ["Methodical", "Structured"],
+        skillIds: ["research-brief", "status-writer"],
+        knowledgePackIds: ["company-handbook"],
+        defaultMemoryEnabled: true
+      })
+    ).toEqual({
+      avatarPresetId: "operator",
+      jobTitle: "General Assistant",
+      personality: "Clear and dependable",
+      soul: "Turn requests into useful next steps.",
+      workStyles: ["Methodical", "Structured"],
+      skillIds: ["research-brief", "status-writer"],
+      knowledgePackIds: ["company-handbook"],
+      memoryEnabled: true
+    });
   });
 });

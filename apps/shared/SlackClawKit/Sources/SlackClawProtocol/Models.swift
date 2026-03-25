@@ -21,6 +21,7 @@ public struct FirstRunState: Codable, Sendable {
 public enum OnboardingStep: String, Codable, Sendable {
     case welcome
     case install
+    case permissions
     case model
     case channel
     case employee
@@ -958,12 +959,27 @@ public struct AITeamActivityItem: Codable, Sendable, Identifiable {
     public var tone: String
 }
 
+public struct AIMemberPreset: Codable, Sendable, Identifiable {
+    public var id: String
+    public var label: String
+    public var description: String
+    public var avatarPresetId: String?
+    public var jobTitle: String
+    public var personality: String
+    public var soul: String
+    public var workStyles: [String]
+    public var skillIds: [String]
+    public var knowledgePackIds: [String]
+    public var defaultMemoryEnabled: Bool?
+}
+
 public struct AITeamOverview: Codable, Sendable {
     public var teamVision: String
     public var members: [AIMemberDetail]
     public var teams: [TeamDetail]
     public var activity: [AITeamActivityItem]
     public var availableBrains: [SavedModelEntry]
+    public var memberPresets: [AIMemberPreset]
     public var knowledgePacks: [KnowledgePack]
     public var skillOptions: [SkillOption]
 }

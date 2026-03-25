@@ -52,7 +52,24 @@ test("AI team overview merges detected existing OpenClaw agents", async () => {
   assert.equal(overview.members[0]?.hasManagedMetadata, false);
   assert.equal(overview.members[0]?.avatar.emoji, "🧭");
   assert.equal(overview.members[0]?.bindingCount, 1);
+  assert.equal(overview.memberPresets.length > 0, true);
+  assert.equal(overview.memberPresets[0]?.skillIds.length > 0, true);
   assert.equal(state.aiTeam?.members[overview.members[0].id]?.agentId, "existing-agent");
+});
+
+test("AI team overview exposes daemon-owned member presets filtered to available skills", async () => {
+  const { service } = createService("ai-team-member-presets", new MockAdapter());
+  const overview = await service.getOverview();
+
+  assert.deepEqual(
+    overview.memberPresets.map((preset) => preset.id),
+    ["general-assistant", "research-analyst", "ops-coordinator"]
+  );
+  assert.equal(overview.skillOptions.some((skill) => skill.id === "research-brief"), true);
+  assert.equal(overview.skillOptions.some((skill) => skill.id === "status-writer"), true);
+  assert.deepEqual(overview.memberPresets[0]?.knowledgePackIds, ["company-handbook", "delivery-playbook"]);
+  assert.deepEqual(overview.memberPresets[1]?.skillIds, ["research-brief", "status-writer"]);
+  assert.equal(overview.memberPresets[2]?.defaultMemoryEnabled, true);
 });
 
 test("AI team delete passes keep-workspace mode through and removes team membership", async () => {

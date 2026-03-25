@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  Box,
   BookOpen,
   Brain,
   CheckCircle2,
@@ -21,7 +22,7 @@ import {
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { AIMemberDetail, DeleteAIMemberRequest, MemberBindingSummary, SaveAIMemberRequest } from "@slackclaw/contracts";
+import type { AIMemberDetail, AIMemberPreset, DeleteAIMemberRequest, MemberBindingSummary, SaveAIMemberRequest } from "@slackclaw/contracts";
 import { useNavigate } from "react-router-dom";
 
 import { useAITeam } from "../../app/providers/AITeamProvider.js";
@@ -172,15 +173,42 @@ function skillIconForLabel(label: string) {
   return Zap;
 }
 
+type MemberPresetDraft = {
+  avatarPresetId: string;
+  jobTitle: string;
+  personality: string;
+  soul: string;
+  workStyles: string[];
+  skillIds: string[];
+  knowledgePackIds: string[];
+  memoryEnabled: boolean;
+};
+
+export function buildMemberPresetDraft(preset?: AIMemberPreset): MemberPresetDraft {
+  return {
+    avatarPresetId: preset?.avatarPresetId || memberAvatarPresets[0].id,
+    jobTitle: preset?.jobTitle ?? "",
+    personality: preset?.personality ?? "",
+    soul: preset?.soul ?? "",
+    workStyles: preset?.workStyles ?? [],
+    skillIds: preset?.skillIds ?? [],
+    knowledgePackIds: preset?.knowledgePackIds ?? [],
+    memoryEnabled: preset?.defaultMemoryEnabled ?? true
+  };
+}
+
 function MemberDialog(props: {
   open: boolean;
   member?: AIMemberDetail;
   onClose: () => void;
 }) {
+  const { locale } = useLocale();
+  const copy = t(locale).members;
   const { overview, saveMember } = useAITeam();
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [jobTitle, setJobTitle] = useState("");
+  const [selectedPresetId, setSelectedPresetId] = useState("");
   const [avatarPresetId, setAvatarPresetId] = useState(memberAvatarPresets[0].id);
   const [brainEntryId, setBrainEntryId] = useState("");
   const [personality, setPersonality] = useState("");
@@ -197,25 +225,58 @@ function MemberDialog(props: {
       return;
     }
 
-    const preset = memberAvatarPresets.find((item) => item.id === props.member?.avatar.presetId) ?? memberAvatarPresets[0];
-    setName(props.member?.name ?? "");
-    setJobTitle(props.member?.jobTitle ?? "");
-    setAvatarPresetId(preset.id);
-    setBrainEntryId(props.member?.brain?.entryId ?? overview?.availableBrains[0]?.id ?? "");
-    setPersonality(props.member?.personality ?? "");
-    setSoul(props.member?.soul ?? "");
-    setWorkStyles(props.member?.workStyles ?? []);
-    setSkillIds(props.member?.skillIds ?? []);
-    setKnowledgePackIds(props.member?.knowledgePackIds ?? []);
-    setMemoryEnabled(props.member?.capabilitySettings.memoryEnabled ?? true);
+    if (props.member) {
+      const member = props.member;
+      const preset = memberAvatarPresets.find((item) => item.id === member.avatar.presetId) ?? memberAvatarPresets[0];
+      setSelectedPresetId("");
+      setName(member.name);
+      setJobTitle(member.jobTitle);
+      setAvatarPresetId(preset.id);
+      setBrainEntryId(member.brain?.entryId ?? overview?.availableBrains[0]?.id ?? "");
+      setPersonality(member.personality);
+      setSoul(member.soul);
+      setWorkStyles(member.workStyles);
+      setSkillIds(member.skillIds);
+      setKnowledgePackIds(member.knowledgePackIds);
+      setMemoryEnabled(member.capabilitySettings.memoryEnabled ?? true);
+    } else {
+      const preset = overview?.memberPresets[0];
+      const presetDraft = buildMemberPresetDraft(preset);
+      setSelectedPresetId(preset?.id ?? "");
+      setName("");
+      setJobTitle(presetDraft.jobTitle);
+      setAvatarPresetId(presetDraft.avatarPresetId);
+      setBrainEntryId(overview?.availableBrains[0]?.id ?? "");
+      setPersonality(presetDraft.personality);
+      setSoul(presetDraft.soul);
+      setWorkStyles(presetDraft.workStyles);
+      setSkillIds(presetDraft.skillIds);
+      setKnowledgePackIds(presetDraft.knowledgePackIds);
+      setMemoryEnabled(presetDraft.memoryEnabled);
+    }
     setContextWindow(String(props.member?.capabilitySettings.contextWindow ?? 128000));
     setError(undefined);
-  }, [overview?.availableBrains, props.member, props.open]);
+  }, [overview?.availableBrains, overview?.memberPresets, props.member, props.open]);
 
   const avatar = memberAvatarPresets.find((item) => item.id === avatarPresetId) ?? memberAvatarPresets[0];
+  const selectedPreset = overview?.memberPresets.find((preset) => preset.id === selectedPresetId);
 
   function toggle(list: string[], setter: (next: string[]) => void, value: string) {
     setter(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
+  }
+
+  function applyPreset(presetId: string) {
+    setSelectedPresetId(presetId);
+    const preset = overview?.memberPresets.find((item) => item.id === presetId);
+    const presetDraft = buildMemberPresetDraft(preset);
+    setAvatarPresetId(presetDraft.avatarPresetId);
+    setJobTitle(presetDraft.jobTitle);
+    setPersonality(presetDraft.personality);
+    setSoul(presetDraft.soul);
+    setWorkStyles(presetDraft.workStyles);
+    setSkillIds(presetDraft.skillIds);
+    setKnowledgePackIds(presetDraft.knowledgePackIds);
+    setMemoryEnabled(presetDraft.memoryEnabled);
   }
 
   async function handleSave() {
@@ -269,6 +330,28 @@ function MemberDialog(props: {
       <LoadingBlocker active={busy} label="Saving AI member" description="SlackClaw is creating the member and syncing the OpenClaw agent workspace.">
         <div className="panel-stack">
           {error ? <p className="card__description" style={{ color: "var(--danger)" }}>{error}</p> : null}
+          {!props.member ? (
+            <div className="field-grid">
+              <div>
+                <FieldLabel htmlFor="member-preset">{copy.memberPresetLabel ?? "Preset"}</FieldLabel>
+                <Select id="member-preset" value={selectedPresetId} onChange={(event) => applyPreset(event.target.value)}>
+                  {overview?.memberPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="members-detail-card" style={{ padding: "0.85rem 1rem" }}>
+                <div className="members-detail-card__eyebrow">
+                  <Box size={16} />
+                  <span>{copy.memberPresetSummaryLabel ?? "Preset summary"}</span>
+                </div>
+                <strong>{selectedPreset?.label ?? copy.memberPresetCustomLabel ?? "Custom setup"}</strong>
+                <p className="card__description">{selectedPreset?.description ?? copy.memberPresetSummaryBody ?? "Choose a preset to preload a useful starter setup."}</p>
+              </div>
+            </div>
+          ) : null}
           <div className="field-grid">
             <div>
               <FieldLabel htmlFor="member-name">Name</FieldLabel>

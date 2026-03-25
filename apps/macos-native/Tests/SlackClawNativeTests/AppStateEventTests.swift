@@ -309,6 +309,7 @@ private func emptyNativeAITeamOverview() -> AITeamOverview {
         teams: [],
         activity: [],
         availableBrains: [],
+        memberPresets: [],
         knowledgePacks: [],
         skillOptions: []
     )

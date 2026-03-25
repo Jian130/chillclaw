@@ -19,7 +19,9 @@ struct NativeDashboardEmployeeRow: Identifiable {
     let name: String
     let jobTitle: String
     let status: String
+    let statusTone: NativeDashboardTone
     let activeTaskCount: Int
+    let activeTaskLabel: String
     let currentStatus: String
     let avatar: MemberAvatar
 }
@@ -50,8 +52,10 @@ struct NativeDashboardPresentation {
 func makeDashboardPresentation(
     overview: ProductOverview,
     modelConfig: ModelConfigOverview?,
-    aiTeamOverview: AITeamOverview?
+    aiTeamOverview: AITeamOverview?,
+    localeIdentifier: String = resolveNativeOnboardingLocaleIdentifier()
 ) -> NativeDashboardPresentation {
+    let copy = nativeDashboardCopy(localeIdentifier: localeIdentifier)
     let readyCount = aiTeamOverview?.members.filter { $0.status == "ready" }.count ?? 0
     let busyCount = aiTeamOverview?.members.filter { $0.status == "busy" }.count ?? 0
     let activeTaskCount = aiTeamOverview?.members.reduce(0) { $0 + $1.activeTaskCount } ?? 0
@@ -60,19 +64,19 @@ func makeDashboardPresentation(
     }.count
 
     let connectedModelsDetail: String = {
-        guard overview.engine.installed else { return "OpenClaw is not installed." }
+        guard overview.engine.installed else { return copy.openClawNotInstalled }
         if let defaultModel = modelConfig?.defaultModel, !defaultModel.isEmpty {
             return defaultModel
         }
-        return "No configured models"
+        return copy.noConfiguredModels
     }()
 
     let metrics = [
-        NativeDashboardMetric(title: "Engine", value: overview.engine.installed ? "Installed" : "Missing", detail: overview.engine.summary),
-        NativeDashboardMetric(title: "Connected Models", value: "\(modelConfig?.configuredModelKeys.count ?? 0)", detail: connectedModelsDetail),
-        NativeDashboardMetric(title: "AI Members", value: "\(aiTeamOverview?.members.count ?? 0)", detail: "\(readyCount) ready / \(busyCount) busy"),
-        NativeDashboardMetric(title: "Active Tasks", value: "\(activeTaskCount)", detail: "In Progress"),
-        NativeDashboardMetric(title: "Channels Ready", value: "\(channelReadyCount)", detail: overview.channelSetup.gatewaySummary)
+        NativeDashboardMetric(title: copy.engineMetricTitle, value: overview.engine.installed ? copy.engineInstalled : copy.engineMissing, detail: overview.engine.summary),
+        NativeDashboardMetric(title: copy.connectedModelsMetricTitle, value: "\(modelConfig?.configuredModelKeys.count ?? 0)", detail: connectedModelsDetail),
+        NativeDashboardMetric(title: copy.aiMembersMetricTitle, value: "\(aiTeamOverview?.members.count ?? 0)", detail: copy.readyBusySummary(ready: readyCount, busy: busyCount)),
+        NativeDashboardMetric(title: copy.activeTasksMetricTitle, value: "\(activeTaskCount)", detail: copy.inProgress),
+        NativeDashboardMetric(title: copy.channelsReadyMetricTitle, value: "\(channelReadyCount)", detail: overview.channelSetup.gatewaySummary)
     ]
 
     let employeeRows = aiTeamOverview?.members.map { member in
@@ -80,8 +84,10 @@ func makeDashboardPresentation(
             id: member.id,
             name: member.name,
             jobTitle: member.jobTitle,
-            status: member.status,
+            status: copy.localizedMemberStatus(member.status),
+            statusTone: member.status == "ready" ? .success : member.status == "busy" ? .info : .neutral,
             activeTaskCount: member.activeTaskCount,
+            activeTaskLabel: copy.activeCountLabel(member.activeTaskCount),
             currentStatus: member.currentStatus,
             avatar: member.avatar
         )
@@ -90,7 +96,7 @@ func makeDashboardPresentation(
     let activityRows = aiTeamOverview?.activity.map { item in
         NativeDashboardActivityRow(
             id: item.id,
-            memberName: item.memberName ?? "SlackClaw",
+            memberName: item.memberName ?? copy.defaultActivityMemberName,
             action: item.action,
             description: item.description,
             timestamp: item.timestamp,
@@ -99,11 +105,11 @@ func makeDashboardPresentation(
     } ?? []
 
     let healthItems = [
-        NativeDashboardHealthItem(title: "OpenClaw deployed", status: overview.engine.installed ? "Active" : "Missing", tone: overview.engine.installed ? .success : .warning),
-        NativeDashboardHealthItem(title: "Gateway reachable", status: overview.engine.running ? "Running" : "Stopped", tone: overview.engine.running ? .success : .warning),
-        NativeDashboardHealthItem(title: "Channels configured", status: channelReadyCount > 0 ? "\(channelReadyCount) ready" : "Pending", tone: channelReadyCount > 0 ? .success : .warning),
-        NativeDashboardHealthItem(title: "Health blockers", status: overview.healthChecks.contains(where: { $0.severity == "error" }) ? "Review" : "Clear", tone: overview.healthChecks.contains(where: { $0.severity == "error" }) ? .warning : .success),
-        NativeDashboardHealthItem(title: "AI member roster", status: "\(aiTeamOverview?.members.count ?? 0) members", tone: .info)
+        NativeDashboardHealthItem(title: copy.openClawDeployedTitle, status: overview.engine.installed ? copy.healthActive : copy.healthMissing, tone: overview.engine.installed ? .success : .warning),
+        NativeDashboardHealthItem(title: copy.gatewayReachableTitle, status: overview.engine.running ? copy.healthRunning : copy.healthStopped, tone: overview.engine.running ? .success : .warning),
+        NativeDashboardHealthItem(title: copy.channelsConfiguredTitle, status: channelReadyCount > 0 ? copy.readyChannelLabel(channelReadyCount) : copy.healthPending, tone: channelReadyCount > 0 ? .success : .warning),
+        NativeDashboardHealthItem(title: copy.healthBlockersTitle, status: overview.healthChecks.contains(where: { $0.severity == "error" }) ? copy.healthReview : copy.healthClear, tone: overview.healthChecks.contains(where: { $0.severity == "error" }) ? .warning : .success),
+        NativeDashboardHealthItem(title: copy.aiMemberRosterTitle, status: copy.memberCountLabel(aiTeamOverview?.members.count ?? 0), tone: .info)
     ]
 
     return NativeDashboardPresentation(

@@ -21,6 +21,7 @@ function createService(testName: string) {
   const aiTeamService = new AITeamService(adapter, store);
 
   return {
+    adapter,
     store,
     service: new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService)
   };
@@ -93,6 +94,35 @@ test("onboarding completion clears the draft, marks setup completed, and returns
   assert.equal(state.onboarding, undefined);
   assert.equal(result.summary.channel?.channelId, "telegram");
   assert.equal(result.summary.employee?.name, "Alex Morgan");
+});
+
+test("onboarding service reuses install summary for step-only updates instead of rechecking engine status", async () => {
+  const { adapter, service } = createService("onboarding-service-step-only-summary");
+  let statusCalls = 0;
+  const originalStatus = adapter.instances.status.bind(adapter.instances);
+  adapter.instances.status = async () => {
+    statusCalls += 1;
+    return originalStatus();
+  };
+
+  await service.updateState({
+    currentStep: "install",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    }
+  });
+
+  assert.equal(statusCalls, 1);
+
+  const updated = await service.updateState({
+    currentStep: "permissions"
+  });
+
+  assert.equal(updated.summary.install?.installed, true);
+  assert.equal(updated.summary.install?.version, "2026.3.13");
+  assert.equal(statusCalls, 1);
 });
 
 test("redo onboarding clears completion state and resets the draft without wiping workspace data", async () => {

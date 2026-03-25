@@ -50,6 +50,20 @@ struct OnboardingTests {
     }
 
     @Test
+    func nativeLocalePickerResolvesSelectedOptionAndFallback() {
+        #expect(nativeLocalePickerSelectedOption(localeIdentifier: "ja").id == "ja")
+        #expect(nativeLocalePickerSelectedOption(localeIdentifier: "unknown").id == "en")
+    }
+
+    @Test
+    func nativeOnboardingInsertsPermissionsStepAfterInstall() {
+        #expect(nativeOnboardingStepOrder == [.welcome, .install, .permissions, .model, .channel, .employee, .complete])
+
+        let copy = nativeOnboardingCopy(localeIdentifier: "en")
+        #expect(copy.stepLabels == ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee", "Complete"])
+    }
+
+    @Test
     func nativeOnboardingUsesDocumentedWindowAndLayoutRatios() {
         #expect(nativeOnboardingDefaultWindowSize.width == 1280)
         #expect(nativeOnboardingDefaultWindowSize.height == 860)
@@ -65,6 +79,79 @@ struct OnboardingTests {
         #expect(abs(nativeOnboardingContentHeight(for: 1056) - 606.89) < 0.25)
         #expect(nativeOnboardingContentHeight(for: 1120) == 616)
         #expect(nativeOnboardingHeaderWidth(for: 1056) == 768)
+    }
+
+    @Test
+    func nativePermissionsCopyMatchesOpenClawCapabilitySurface() {
+        let copy = nativePermissionsCopy(localeIdentifier: "en")
+        let rows = nativePermissionMetadata(localeIdentifier: "en")
+
+        #expect(copy.onboardingTitle == "Grant permissions")
+        #expect(copy.sharedBody == "Allow these so ChillClaw can notify and capture when needed.")
+        #expect(copy.grantButton == "Grant")
+        #expect(copy.requestAccess == "Request access")
+
+        #expect(rows.map(\.capability) == [
+            .appleScript,
+            .notifications,
+            .accessibility,
+            .screenRecording,
+            .microphone,
+            .speechRecognition,
+            .camera,
+            .location,
+        ])
+        #expect(rows.map(\.title) == [
+            "Automation (AppleScript)",
+            "Notifications",
+            "Accessibility",
+            "Screen Recording",
+            "Microphone",
+            "Speech Recognition",
+            "Camera",
+            "Location",
+        ])
+    }
+
+    @Test
+    func nativeNotificationStatusReadsNotificationCenterOnMainActor() async {
+        let recorder = NotificationCenterThreadRecorder()
+        NativePermissionManager.overrideNotificationRuntimeAvailableProviderForTesting { true }
+        NativePermissionManager.overrideNotificationAuthorizationStatusProviderForTesting {
+            recorder.calledOnMainThread = true
+            return .authorized
+        }
+        defer {
+            NativePermissionManager.resetNotificationRuntimeAvailableProviderForTesting()
+            NativePermissionManager.resetNotificationAuthorizationStatusProviderForTesting()
+        }
+
+        _ = await Task.detached {
+            await NativePermissionManager.status([.notifications])
+        }.value
+
+        #expect(recorder.calledOnMainThread == true)
+    }
+
+    @Test
+    func nativeNotificationStatusSkipsUserNotificationsWithoutAppBundle() async {
+        let recorder = NotificationCenterThreadRecorder()
+        NativePermissionManager.overrideNotificationRuntimeAvailableProviderForTesting { false }
+        NativePermissionManager.overrideNotificationAuthorizationStatusProviderForTesting {
+            recorder.calledOnMainThread = true
+            return .authorized
+        }
+        defer {
+            NativePermissionManager.resetNotificationRuntimeAvailableProviderForTesting()
+            NativePermissionManager.resetNotificationAuthorizationStatusProviderForTesting()
+        }
+
+        let status = await Task.detached {
+            await NativePermissionManager.status([.notifications])
+        }.value
+
+        #expect(status[.notifications] == false)
+        #expect(recorder.calledOnMainThread == false)
     }
 
     @Test
@@ -122,15 +209,181 @@ struct OnboardingTests {
     }
 
     @Test
-    func existingInstallAdvanceDraftMovesStraightToModel() {
+    func existingInstallAdvanceDraftMovesToPermissions() {
         let request = buildExistingInstallAdvanceRequest(
             overview: makeOverview(setupCompleted: false, installed: true, running: false, version: "2026.3.13")
         )
 
-        #expect(request.currentStep == .model)
+        #expect(request.currentStep == .permissions)
         #expect(request.install?.installed == true)
         #expect(request.install?.version == "2026.3.13")
         #expect(request.install?.disposition == "reused-existing")
+    }
+
+    @Test
+    func advancePastInstallPersistsPermissionsStep() async throws {
+        let recorder = NativeRequestRecorder()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("PATCH", "/api/onboarding/state"):
+                let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .permissions))
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = SlackClawChatViewModel(transport: FakeChatTransport())
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+
+        await viewModel.advancePastInstall()
+        await waitForRecordedURLCount(recorder, expectedCount: 1)
+
+        let request = try #require(await recorder.recordedRequests().first)
+        let body = try #require(bodyData(for: request))
+        let payload = try JSONDecoder.slackClaw.decode(UpdateOnboardingStateRequest.self, from: body)
+
+        #expect(payload.currentStep == .permissions)
+    }
+
+    @Test
+    func advancePastPermissionsMarksNextButtonBusyWhilePersisting() async throws {
+        let recorder = NativeRequestRecorder()
+        let gate = AsyncGate()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("PATCH", "/api/onboarding/state"):
+                await gate.wait()
+                let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .model))
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = SlackClawChatViewModel(transport: FakeChatTransport())
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .permissions)
+
+        let task = Task {
+            await viewModel.advancePastPermissions()
+        }
+
+        await waitForRecordedURLCount(recorder, expectedCount: 1)
+        #expect(viewModel.permissionsNextBusy == true)
+
+        await gate.open()
+        await task.value
+
+        #expect(viewModel.permissionsNextBusy == false)
+        #expect(viewModel.currentStep == .model)
+    }
+
+    @Test
+    func onboardingInstallTargetPrefersTheActiveInstalledRuntime() {
+        let target = resolveNativeOnboardingInstallTarget(
+            overview: makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13"),
+            deploymentTargets: makeDeploymentTargetsResponse(
+                targets: [
+                    .init(
+                        id: "standard",
+                        title: "OpenClaw Standard",
+                        description: "Reuse an existing OpenClaw install when available.",
+                        installMode: "system",
+                        installed: true,
+                        installable: true,
+                        planned: false,
+                        recommended: true,
+                        active: true,
+                        version: "2026.3.13",
+                        desiredVersion: "latest",
+                        latestVersion: "2026.3.14",
+                        updateAvailable: true,
+                        summary: "System OpenClaw 2026.3.13 is installed and can be reused.",
+                        updateSummary: "OpenClaw 2026.3.14 is available.",
+                        requirements: ["macOS"],
+                        requirementsSourceUrl: nil
+                    ),
+                    .init(
+                        id: "managed-local",
+                        title: "OpenClaw Managed Local",
+                        description: "Managed runtime.",
+                        installMode: "managed-local",
+                        installed: true,
+                        installable: true,
+                        planned: false,
+                        recommended: false,
+                        active: false,
+                        version: "2026.3.12",
+                        desiredVersion: "latest",
+                        latestVersion: "2026.3.12",
+                        updateAvailable: false,
+                        summary: "Managed OpenClaw 2026.3.12 is installed.",
+                        updateSummary: nil,
+                        requirements: ["macOS"],
+                        requirementsSourceUrl: nil
+                    )
+                ]
+            )
+        )
+
+        #expect(target?.id == "standard")
+        #expect(target?.updateAvailable == true)
+        #expect(target?.latestVersion == "2026.3.14")
     }
 
     @Test
@@ -813,6 +1066,207 @@ struct OnboardingTests {
     }
 
     @Test
+    func onboardingBootstrapLoadsDeploymentTargetsForInstallStepWhenOpenClawExists() async throws {
+        let recorder = NativeRequestRecorder()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/onboarding/state":
+                let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .install))
+                return (jsonResponse(url: url), body)
+            case "/api/deploy/targets":
+                let body = try JSONEncoder.slackClaw.encode(
+                    makeDeploymentTargetsResponse(
+                        targets: [
+                            .init(
+                                id: "standard",
+                                title: "OpenClaw Standard",
+                                description: "Reuse an existing OpenClaw install when available.",
+                                installMode: "system",
+                                installed: true,
+                                installable: true,
+                                planned: false,
+                                recommended: true,
+                                active: true,
+                                version: "2026.3.13",
+                                desiredVersion: "latest",
+                                latestVersion: "2026.3.14",
+                                updateAvailable: true,
+                                summary: "System OpenClaw 2026.3.13 is installed and can be reused.",
+                                updateSummary: "OpenClaw 2026.3.14 is available.",
+                                requirements: ["macOS"],
+                                requirementsSourceUrl: nil
+                            )
+                        ]
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = SlackClawChatViewModel(transport: FakeChatTransport())
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchDeploymentTargets: { makeDeploymentTargetsResponse(targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13")
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+
+        await viewModel.bootstrap()
+
+        let urls = await recorder.recordedURLs()
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets?fresh=1"))
+        #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.id == "standard")
+    }
+
+    @Test
+    func updateExistingInstallUsesTheActiveTargetAndRefreshesInstallContext() async throws {
+        let recorder = NativeRequestRecorder()
+        let initialTargets = makeDeploymentTargetsResponse(
+            targets: [
+                .init(
+                    id: "standard",
+                    title: "OpenClaw Standard",
+                    description: "Reuse an existing OpenClaw install when available.",
+                    installMode: "system",
+                    installed: true,
+                    installable: true,
+                    planned: false,
+                    recommended: true,
+                    active: true,
+                    version: "2026.3.13",
+                    desiredVersion: "latest",
+                    latestVersion: "2026.3.14",
+                    updateAvailable: true,
+                    summary: "System OpenClaw 2026.3.13 is installed and can be reused.",
+                    updateSummary: "OpenClaw 2026.3.14 is available.",
+                    requirements: ["macOS"],
+                    requirementsSourceUrl: nil
+                )
+            ]
+        )
+        let refreshedTargets = makeDeploymentTargetsResponse(
+            targets: [
+                .init(
+                    id: "standard",
+                    title: "OpenClaw Standard",
+                    description: "Reuse an existing OpenClaw install when available.",
+                    installMode: "system",
+                    installed: true,
+                    installable: true,
+                    planned: false,
+                    recommended: true,
+                    active: true,
+                    version: "2026.3.14",
+                    desiredVersion: "latest",
+                    latestVersion: "2026.3.14",
+                    updateAvailable: false,
+                    summary: "System OpenClaw 2026.3.14 is installed and can be reused.",
+                    updateSummary: nil,
+                    requirements: ["macOS"],
+                    requirementsSourceUrl: nil
+                )
+            ]
+        )
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("GET", "/api/onboarding/state"):
+                let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .install))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/deploy/targets"):
+                let query = url.query ?? ""
+                let body = try JSONEncoder.slackClaw.encode(query.contains("fresh=1") ? refreshedTargets : initialTargets)
+                return (jsonResponse(url: url), body)
+            case ("POST", "/api/deploy/targets/standard/update"):
+                let body = try JSONEncoder.slackClaw.encode(
+                    DeploymentTargetActionResponse(
+                        targetId: "standard",
+                        status: "completed",
+                        message: "System OpenClaw updated from 2026.3.13 to 2026.3.14.",
+                        engineStatus: makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14").engine
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let body = try JSONEncoder.slackClaw.encode(
+                    makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14")
+                )
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = SlackClawChatViewModel(transport: FakeChatTransport())
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchDeploymentTargets: { initialTargets },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13")
+        appState.deploymentTargets = initialTargets
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .install)
+
+        await viewModel.updateExistingInstall()
+
+        let urls = await recorder.recordedURLs()
+        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets/standard/update"))
+        #expect(appState.overview?.engine.version == "2026.3.14")
+        #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.updateAvailable == false)
+        #expect(viewModel.pageError == nil)
+        #expect(viewModel.installBusy == false)
+    }
+
+    @Test
     func onboardingRefreshResourceMapsDaemonEventsByStep() {
         let installEvent = SlackClawEvent.deployCompleted(
             correlationId: "deploy-1",
@@ -838,7 +1292,7 @@ struct OnboardingTests {
         let employeeEvent = SlackClawEvent.configApplied(resource: .aiEmployees, summary: "AI employees saved.")
         let unrelatedEvent = SlackClawEvent.taskProgress(taskId: "task-1", status: .running, message: "Working")
 
-        #expect(onboardingRefreshResourceForEvent(.install, installEvent) == .overview)
+        #expect(onboardingRefreshResourceForEvent(.install, installEvent) == .installContext)
         #expect(onboardingRefreshResourceForEvent(.model, modelEvent) == .model)
         #expect(onboardingRefreshResourceForEvent(.channel, channelEvent) == .channel)
         #expect(onboardingRefreshResourceForEvent(.employee, employeeEvent) == .team)
@@ -1079,9 +1533,14 @@ private func emptyAITeamOverview() -> AITeamOverview {
         teams: [],
         activity: [],
         availableBrains: [],
+        memberPresets: [],
         knowledgePacks: [],
         skillOptions: []
     )
+}
+
+private func makeDeploymentTargetsResponse(targets: [DeploymentTargetStatus]) -> DeploymentTargetsResponse {
+    .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: targets)
 }
 
 private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStateResponse {
@@ -1218,6 +1677,37 @@ private func waitForRecordedURLCount(_ recorder: NativeRequestRecorder, expected
     }
 }
 
+private func bodyData(for request: URLRequest) -> Data? {
+    if let body = request.httpBody {
+        return body
+    }
+
+    guard let stream = request.httpBodyStream else {
+        return nil
+    }
+
+    stream.open()
+    defer { stream.close() }
+
+    let bufferSize = 4096
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    var data = Data()
+    while stream.hasBytesAvailable {
+        let read = stream.read(buffer, maxLength: bufferSize)
+        if read < 0 {
+            return nil
+        }
+        if read == 0 {
+            break
+        }
+        data.append(buffer, count: read)
+    }
+
+    return data
+}
+
 private actor NativeLoadRecorder {
     private var recorded: [String] = []
 
@@ -1252,6 +1742,31 @@ private actor NativeRequestRecorder {
 
     func recordedURLs() -> [String] {
         requests.compactMap { $0.url?.absoluteString }
+    }
+
+    func recordedRequests() -> [URLRequest] {
+        requests
+    }
+}
+
+private actor AsyncGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 
@@ -1306,6 +1821,11 @@ private actor FakeLaunchAgentController: LaunchAgentControlling {
     func status() async -> LaunchAgentStatus {
         .init(installed: true, running: true, detail: "fake")
     }
+}
+
+@MainActor
+private final class NotificationCenterThreadRecorder {
+    var calledOnMainThread = false
 }
 
 private final class NativeRecordingURLProtocol: URLProtocol, @unchecked Sendable {

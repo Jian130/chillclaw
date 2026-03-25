@@ -41,6 +41,7 @@ final class NativeOnboardingViewModel {
     var pageLoading = true
     var pageError: String?
     var installBusy = false
+    var permissionsNextBusy = false
     var installProgress = NativeOnboardingInstallProgressSnapshot()
     var modelBusy = ""
     var channelBusy = false
@@ -97,6 +98,10 @@ final class NativeOnboardingViewModel {
 
     var currentStepIndex: Int {
         onboardingStepIndex(currentStep)
+    }
+
+    var installTarget: DeploymentTargetStatus? {
+        resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)
     }
 
     var modelPickerProviders: [OnboardingModelProviderPresentation] {
@@ -222,6 +227,14 @@ final class NativeOnboardingViewModel {
             onboardingState = state
             applyDraft(state.draft)
 
+            if shouldLoadInstallDeploymentTargets(
+                step: state.draft.currentStep,
+                overview: appState.overview,
+                install: state.draft.install
+            ) {
+                _ = try await readFreshDeploymentTargets()
+            }
+
             if !(state.draft.activeModelAuthSessionId ?? "").isEmpty || state.draft.model?.entryId != nil {
                 _ = try await readFreshModelConfig()
             }
@@ -280,7 +293,40 @@ final class NativeOnboardingViewModel {
         }
     }
 
+    func updateExistingInstall() async {
+        guard let target = installTarget, target.updateAvailable else { return }
+
+        pageError = nil
+        installBusy = true
+        installProgress = .init(phase: .updating, percent: 10, message: nil)
+        defer { installBusy = false }
+
+        do {
+            let result = try await appState.client.updateTarget(target.id)
+            async let overview = readFreshOverview()
+            async let deploymentTargets = readFreshDeploymentTargets()
+            _ = try await overview
+            _ = try await deploymentTargets
+
+            guard result.status == "completed" else {
+                throw NativeClientError.runtime(result.message)
+            }
+
+            appState.applyBanner(result.message)
+        } catch {
+            presentErrorUnlessCancelled(error)
+        }
+    }
+
     func advancePastInstall() async {
+        await persistDraftSafely(.init(currentStep: .permissions))
+    }
+
+    func advancePastPermissions() async {
+        pageError = nil
+        permissionsNextBusy = true
+        defer { permissionsNextBusy = false }
+
         await persistDraftSafely(.init(currentStep: .model))
     }
 
@@ -906,6 +952,12 @@ final class NativeOnboardingViewModel {
         return overview
     }
 
+    private func readFreshDeploymentTargets() async throws -> DeploymentTargetsResponse {
+        let deploymentTargets = try await appState.client.fetchDeploymentTargets()
+        appState.deploymentTargets = deploymentTargets
+        return deploymentTargets
+    }
+
     private func readFreshModelConfig() async throws -> ModelConfigOverview {
         let modelConfig = try await appState.client.fetchModelConfig()
         appState.modelConfig = modelConfig
@@ -951,6 +1003,11 @@ final class NativeOnboardingViewModel {
 
         do {
             switch resource {
+            case .installContext:
+                async let overview = readFreshOverview()
+                async let deploymentTargets = readFreshDeploymentTargets()
+                _ = try await overview
+                _ = try await deploymentTargets
             case .overview:
                 _ = try await readFreshOverview()
             case .model:
@@ -1030,4 +1087,12 @@ final class NativeOnboardingViewModel {
 
         return .init(mutation: mutation, state: latestState, settled: false)
     }
+}
+
+private func shouldLoadInstallDeploymentTargets(
+    step: OnboardingStep,
+    overview: ProductOverview?,
+    install: OnboardingInstallState?
+) -> Bool {
+    step == .install && (overview?.engine.installed == true || install?.installed == true)
 }

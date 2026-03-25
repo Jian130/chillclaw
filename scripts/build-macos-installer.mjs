@@ -284,6 +284,24 @@ function infoPlist() {
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSUserNotificationUsageDescription</key>
+  <string>ChillClaw needs notification permission to show alerts for agent activity.</string>
+  <key>NSScreenCaptureDescription</key>
+  <string>ChillClaw captures the screen when the agent needs screenshots for context.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>ChillClaw can capture photos or short video clips when requested by the agent.</string>
+  <key>NSLocationUsageDescription</key>
+  <string>ChillClaw can share your location when requested by the agent.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>ChillClaw can share your location when requested by the agent.</string>
+  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+  <string>ChillClaw can share your location when requested by the agent.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>ChillClaw needs microphone access for Voice Wake and audio capture.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>ChillClaw uses on-device speech recognition to detect your Voice Wake trigger phrase.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>ChillClaw needs Automation (AppleScript) permission to drive Terminal and other apps for agent actions.</string>
 </dict>
 </plist>
 `;

@@ -8,9 +8,12 @@
 - added `apps/shared/SlackClawKit` with shared Swift protocol, daemon client, and chat UI packages
 - changed the macOS installer build so the packaged app launches the native SwiftUI client by default while still bundling the React UI as an explicit fallback
 - added `npm run build:mac-native` and `npm run test:mac-native` for native-client development
-- added the same daemon-backed six-step onboarding flow to the native macOS client, including first-run gating, draft resume, settled install/model/channel/employee mutations, and native onboarding avatar resources
+- added the same daemon-backed seven-step onboarding flow to the native macOS client, including first-run gating, draft resume, settled install/permissions/model/channel/employee mutations, and native onboarding avatar resources
 - aligned onboarding step 1 in both React and native clients to the shared macOS welcome-screen design baseline, including a responsive `70%` content canvas, a flatter welcome-card height on normal desktop windows, native window defaults, system-font typography, and an onboarding-wide language selector
 - rebuilt onboarding step 2 in both React and native clients to the single-card Figma install flow, including the slim shared header/progress row, missing/installing/found/complete states, daemon-backed install progress, version badge, and explicit next-step confirmation instead of auto-advancing past install
+- added a reusable native macOS permissions surface for onboarding and Settings, covering Automation, Notifications, Accessibility, Screen Recording, Microphone, Speech Recognition, Camera, and Location with live status refresh and localized copy
+- moved the native locale picker into the lower-left sidebar footer, localized the dashboard/sidebar shell strings in English, Chinese, Japanese, Korean, and Spanish, and aligned dashboard metric cards to a shared row height
+- added reusable configured-channel approve-pairing actions to the native Configuration screen so pairing-capable channels can reopen the same channel sheet for code approval
 
 ### Engine architecture
 
@@ -71,6 +74,7 @@
 - added config-backed fallback recovery for known OpenClaw CLI drift on safe channel mutations such as Telegram, Feishu, and WeChat config writes and removals
 - restored the Feishu setup guide in-product with direct links to the official OpenClaw and platform docs
 - changed channel management to detect and show existing live OpenClaw channel accounts in addition to SlackClaw-managed entries
+- added reusable approve-pairing actions for configured channels in the React Configuration page and fixed the dialog so successful pairing approval closes cleanly instead of leaving the modal open
 
 ### AI members and teams
 
@@ -79,6 +83,7 @@
 - added member create, edit, remove, bind, and retention-aware delete flows
 - generate richer per-agent workspaces with identity, soul, user, brain, tools, memory, bootstrap, knowledge, and skill files
 - switched new member agent ids to readable `name + datetime` identifiers
+- added daemon-owned AI member presets to shared contracts, service responses, onboarding, and the native member creation flow so curated starter roles and avatar presets stay aligned across clients
 
 ### Skills
 
@@ -125,15 +130,16 @@
 
 - moved the language selector into the bottom-left sidebar under the status card
 - hid inactive saved-model records from the main Configuration models view whenever live runtime models already exist, so the page stays closer to `openclaw models list`
-- replaced the old intro/check onboarding with a daemon-backed six-step onboarding flow for welcome, install, model, channel, AI employee, and completion
+- replaced the old intro/check onboarding with a daemon-backed seven-step onboarding flow for welcome, install, permissions, model, channel, AI employee, and completion
 - added daemon-persisted onboarding draft state and completion summary routes so onboarding progress survives refreshes
 - added onboarding avatar presets and shared avatar rendering so the new preset images also render in members, team, dashboard, and chat surfaces
-- changed onboarding step 3 to use a daemon-owned curated provider config so React and native now guide users through the same three-provider model setup path instead of exposing the full runtime provider catalog during onboarding
-- changed onboarding step 3 curated-provider metadata to use `platformUrl` and optional `tutorialVideoUrl`, and wired MiniMax tutorial playback into in-app web/native modal flows instead of opening an external link
-- changed onboarding step 4 to use the same daemon-owned config pattern for curated channels, so React and native now guide users through WeChat Work, Feishu, and Telegram setup from one shared source of truth
+- changed onboarding step 4 to use a daemon-owned curated provider config so React and native now guide users through the same three-provider model setup path instead of exposing the full runtime provider catalog during onboarding
+- changed onboarding step 4 curated-provider metadata to use `platformUrl` and optional `tutorialVideoUrl`, and wired MiniMax tutorial playback into in-app web/native modal flows instead of opening an external link
+- changed onboarding step 5 to use the same daemon-owned config pattern for curated channels, so React and native now guide users through WeChat Work, Feishu, and Telegram setup from one shared source of truth
 - added a daemon-backed `Redo onboarding` action so web and native Settings can restart the guided setup without wiping the existing workspace
-- rebuilt onboarding steps 1 through 5 to match the current Figma/React flow more closely across both the web app and the native macOS app, including curated provider/channel selection, guided setup cards, tighter responsive layout rules, and config-driven tutorial/platform links
-- replaced the onboarding step 5 personality editor with curated employee presets and wired the new portrait avatar assets into both the web and native onboarding flows
+- rebuilt onboarding steps 1 through 6 to match the current Figma/React flow more closely across both the web app and the native macOS app, including curated provider/channel selection, guided setup cards, tighter responsive layout rules, and config-driven tutorial/platform links
+- replaced the onboarding step 6 personality editor with curated employee presets and wired the new portrait avatar assets into both the web and native onboarding flows
+- inserted a shared onboarding permissions step after install in both web and native clients, with step metadata, copy, and draft progression owned by shared contracts and daemon state
 - refreshed the native macOS shell to use the lighter branded sidebar/status layout instead of the older dark developer-style chrome, so dashboard and deploy now sit much closer to the React/Figma product design
 - rebuilt the native macOS Deploy page around the React/Figma hierarchy with the one-click deployment hero, grouped variant cards, badges, feature lists, requirements, and summary cards
 - changed the native macOS client to gate startup on overview first and lazily load the active section afterward, avoiding cold-start failures caused by blasting every `fresh=1` page endpoint at once

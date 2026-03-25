@@ -88,41 +88,6 @@ private struct OnboardingHighlightCard: View {
     }
 }
 
-private struct OnboardingLocalePicker: View {
-    let selected: NativeOnboardingLocaleOption
-    let options: [NativeOnboardingLocaleOption]
-    let onSelect: (String) -> Void
-
-    var body: some View {
-        Menu {
-            ForEach(options) { option in
-                Button("\(option.flag) \(option.label)") {
-                    onSelect(option.id)
-                }
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "globe")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("\(selected.flag) \(selected.label)")
-                    .font(.system(size: 14, weight: .medium))
-            }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.88))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.black.opacity(0.08))
-                    )
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-    }
-}
-
 private struct OnboardingSelectCard<Content: View>: View {
     let selected: Bool
     let action: () -> Void
@@ -342,8 +307,11 @@ struct NativeOnboardingView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
         .overlay(alignment: .topTrailing) {
-            OnboardingLocalePicker(
-                selected: viewModel.localeOptions.first(where: { $0.id == viewModel.selectedLocaleIdentifier }) ?? viewModel.localeOptions[0],
+            NativeLocalePicker(
+                selected: nativeLocalePickerSelectedOption(
+                    localeIdentifier: viewModel.selectedLocaleIdentifier,
+                    options: viewModel.localeOptions
+                ),
                 options: viewModel.localeOptions,
                 onSelect: viewModel.updateLocale
             )
@@ -426,6 +394,8 @@ struct NativeOnboardingView: View {
                 welcomeStep
             case .install:
                 installStep
+            case .permissions:
+                permissionsStep
             case .model:
                 modelStep
             case .channel:
@@ -513,6 +483,7 @@ struct NativeOnboardingView: View {
             progress: viewModel.installProgress,
             copy: viewModel.copy
         )
+        let installTarget = viewModel.installTarget
         let installHeadline: String = switch installViewState.kind {
         case .missing:
             viewModel.copy.installNotFoundTitle
@@ -521,7 +492,7 @@ struct NativeOnboardingView: View {
         case .complete:
             viewModel.copy.installCompleteTitle
         case .installing:
-            viewModel.copy.installInstallingTitle
+            installViewState.isUpdating ? viewModel.copy.installUpdatingTitle : viewModel.copy.installInstallingTitle
         }
         let installBodyCopy: String = switch installViewState.kind {
         case .missing:
@@ -531,7 +502,7 @@ struct NativeOnboardingView: View {
         case .complete:
             viewModel.copy.installCompleteBody
         case .installing:
-            viewModel.copy.installInstallingBody
+            installViewState.isUpdating ? viewModel.copy.installUpdatingBody : viewModel.copy.installInstallingBody
         }
 
         return VStack(alignment: .leading, spacing: 24) {
@@ -557,10 +528,10 @@ struct NativeOnboardingView: View {
                             .foregroundStyle(Color(red: 0.15, green: 0.34, blue: 0.95))
                     }
 
-                    Text(viewModel.copy.installInstallingTitle)
+                    Text(installHeadline)
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(nativeOnboardingTextPrimary)
-                    Text(viewModel.copy.installInstallingBody)
+                    Text(installBodyCopy)
                         .font(.system(size: 16, weight: .regular))
                         .lineSpacing(6)
                         .foregroundStyle(nativeOnboardingTextSecondary)
@@ -688,6 +659,55 @@ struct NativeOnboardingView: View {
                         )
                     } else {
                         VStack(spacing: 16) {
+                            if installViewState.kind == .found, let installTarget, installTarget.updateAvailable {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text(
+                                        installTarget.updateSummary
+                                            ?? viewModel.copy.installUpdateAvailable.replacingOccurrences(
+                                                of: "{version}",
+                                                with: installTarget.latestVersion ?? installTarget.version ?? ""
+                                            )
+                                    )
+                                    .font(.system(size: 14, weight: .medium))
+                                    .lineSpacing(4)
+                                    .foregroundStyle(nativeOnboardingTextPrimary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    Button {
+                                        Task { await viewModel.updateExistingInstall() }
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "arrow.triangle.2.circlepath.circle")
+                                                .font(.system(size: 16, weight: .semibold))
+                                            Text(viewModel.copy.installUpdateCta)
+                                                .font(.system(size: 15, weight: .semibold))
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: nativeOnboardingCTAHeight)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(nativeOnboardingTextPrimary)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                            .fill(Color.white.opacity(0.82))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                                    .strokeBorder(Color.black.opacity(0.08))
+                                            )
+                                    )
+                                }
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 18)
+                                .background(
+                                    RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                        .fill(Color(red: 0.95, green: 0.97, blue: 1.0))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                                .strokeBorder(Color(red: 0.78, green: 0.84, blue: 0.98), lineWidth: 1)
+                                        )
+                                )
+                            }
+
                             Button {
                                 Task {
                                     if installViewState.kind == .found {
@@ -1174,6 +1194,54 @@ struct NativeOnboardingView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private var permissionsStep: some View {
+        let permissionsCopy = nativePermissionsCopy(localeIdentifier: viewModel.selectedLocaleIdentifier)
+
+        return VStack(alignment: .leading, spacing: 24) {
+            headerBlock(title: permissionsCopy.onboardingTitle, body: permissionsCopy.sharedBody)
+
+            OnboardingGlassPanel {
+                NativePermissionsList(localeIdentifier: viewModel.selectedLocaleIdentifier, compact: false)
+            }
+
+            HStack(spacing: 16) {
+                Button(viewModel.copy.back) {
+                    Task { await viewModel.persistDraftSafely(.init(currentStep: .install)) }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(nativeOnboardingTextPrimary)
+                .disabled(viewModel.permissionsNextBusy)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    Task { await viewModel.advancePastPermissions() }
+                } label: {
+                    HStack(spacing: 10) {
+                        if viewModel.permissionsNextBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        }
+
+                        Text(viewModel.copy.next)
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                        .frame(minWidth: 180)
+                        .frame(height: nativeOnboardingCTAHeight)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .background(
+                    RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                        .fill(Color(red: 0.03, green: 0.02, blue: 0.07))
+                )
+                .disabled(viewModel.permissionsNextBusy)
             }
         }
     }

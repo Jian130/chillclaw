@@ -22,10 +22,10 @@ struct NativeLocalePicker: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: NativeUI.iconCornerRadius, style: .continuous)
                     .fill(Color.white.opacity(0.88))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: NativeUI.iconCornerRadius, style: .continuous)
                             .strokeBorder(Color.black.opacity(0.08))
                     )
             )

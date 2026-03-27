@@ -907,7 +907,7 @@ struct OnboardingTests {
                 avatarPresetId: "onboarding-analyst",
                 presetId: "research-analyst",
                 personalityTraits: [],
-                skillIds: ["research-brief", "status-writer"],
+                presetSkillIds: ["research-brief", "status-writer"],
                 knowledgePackIds: ["company-handbook", "delivery-playbook"],
                 workStyles: ["Analytical", "Concise"],
                 memoryEnabled: true,
@@ -924,6 +924,8 @@ struct OnboardingTests {
         #expect(request.personality == "Analytical, Concise")
         #expect(request.soul == "Analytical, Concise")
         #expect(request.workStyles == ["Analytical", "Concise"])
+        #expect(request.presetSkillIds == ["research-brief", "status-writer"])
+        #expect(request.skillIds.isEmpty)
         #expect(request.knowledgePackIds == ["company-handbook", "delivery-playbook"])
         #expect(request.capabilitySettings.memoryEnabled == true)
         #expect(request.capabilitySettings.contextWindow == 128000)
@@ -944,6 +946,63 @@ struct OnboardingTests {
         #expect(presets[0].starterSkillLabels == ["Research Brief", "Status Writer"])
         #expect(presets[1].toolLabels == ["Customer voice", "Memory"])
         #expect(presets[2].knowledgePackIds == ["delivery-playbook", "company-handbook"])
+    }
+
+    @Test
+    func resolvesPresetSkillReadinessFromOnboardingState() {
+        let onboardingState = makeOnboardingStateResponse(step: .employee)
+        let preset = try! #require(onboardingState.config.employeePresets.first)
+
+        let ready = resolveOnboardingEmployeePresetReadiness(preset: preset, onboardingState: onboardingState)
+        #expect(ready.status == .ready)
+        #expect(ready.blocking == false)
+
+        let syncingState = OnboardingStateResponse(
+            firstRun: onboardingState.firstRun,
+            draft: onboardingState.draft,
+            config: onboardingState.config,
+            summary: onboardingState.summary,
+            presetSkillSync: .init(
+                targetMode: .managedLocal,
+                entries: [
+                    .init(
+                        presetSkillId: "research-brief",
+                        runtimeSlug: "research-brief",
+                        targetMode: .managedLocal,
+                        status: .installing,
+                        updatedAt: "2026-03-27T00:00:00.000Z"
+                    )
+                ],
+                summary: "1 preset skill is syncing on the managed-local runtime.",
+                repairRecommended: true
+            )
+        )
+        #expect(resolveOnboardingEmployeePresetReadiness(preset: preset, onboardingState: syncingState).status == .syncing)
+
+        let failedState = OnboardingStateResponse(
+            firstRun: onboardingState.firstRun,
+            draft: onboardingState.draft,
+            config: onboardingState.config,
+            summary: onboardingState.summary,
+            presetSkillSync: .init(
+                targetMode: .managedLocal,
+                entries: [
+                    .init(
+                        presetSkillId: "research-brief",
+                        runtimeSlug: "research-brief",
+                        targetMode: .managedLocal,
+                        status: .failed,
+                        lastError: "Missing skill install.",
+                        updatedAt: "2026-03-27T00:00:00.000Z"
+                    )
+                ],
+                summary: "1 preset skill needs repair on the managed-local runtime.",
+                repairRecommended: true
+            )
+        )
+        let failed = resolveOnboardingEmployeePresetReadiness(preset: preset, onboardingState: failedState)
+        #expect(failed.status == .repair)
+        #expect(failed.detail == "Missing skill install.")
     }
 
     @Test
@@ -1025,7 +1084,7 @@ struct OnboardingTests {
         await appState.refreshAll()
 
         #expect(appState.errorMessage == nil)
-        #expect(await loadRecorder.events() == ["overview", "models", "team"])
+        #expect(await loadRecorder.events().sorted() == ["models", "overview", "team"])
     }
 
     @Test
@@ -1297,7 +1356,13 @@ struct OnboardingTests {
             message: "Installed.",
             engineStatus: makeOverview(setupCompleted: true).engine
         )
-        let modelEvent = SlackClawEvent.configApplied(resource: .models, summary: "Models saved.")
+        let modelEvent = SlackClawEvent.modelConfigUpdated(
+            snapshot: .init(
+                epoch: "epoch-1",
+                revision: 1,
+                data: emptyModelConfig()
+            )
+        )
         let channelEvent = SlackClawEvent.channelSessionUpdated(
             channelId: "wechat",
             session: .init(
@@ -1311,14 +1376,33 @@ struct OnboardingTests {
                 inputPrompt: nil
             )
         )
-        let employeeEvent = SlackClawEvent.configApplied(resource: .aiEmployees, summary: "AI employees saved.")
+        let employeeEvent = SlackClawEvent.aiTeamUpdated(
+            snapshot: .init(
+                epoch: "epoch-1",
+                revision: 2,
+                data: emptyAITeamOverview()
+            )
+        )
+        let presetSyncEvent = SlackClawEvent.presetSkillSyncUpdated(
+            snapshot: .init(
+                epoch: "epoch-1",
+                revision: 1,
+                data: .init(
+                    targetMode: .managedLocal,
+                    entries: [],
+                    summary: "No preset skills selected.",
+                    repairRecommended: false
+                )
+            )
+        )
         let unrelatedEvent = SlackClawEvent.taskProgress(taskId: "task-1", status: .running, message: "Working")
 
         #expect(onboardingRefreshResourceForEvent(.install, installEvent) == .installContext)
-        #expect(onboardingRefreshResourceForEvent(.model, modelEvent) == .model)
+        #expect(onboardingRefreshResourceForEvent(.model, modelEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.channel, channelEvent) == .channel)
-        #expect(onboardingRefreshResourceForEvent(.employee, employeeEvent) == .team)
-        #expect(onboardingRefreshResourceForEvent(.complete, employeeEvent) == .team)
+        #expect(onboardingRefreshResourceForEvent(.employee, employeeEvent) == nil)
+        #expect(onboardingRefreshResourceForEvent(.complete, employeeEvent) == nil)
+        #expect(onboardingRefreshResourceForEvent(.employee, presetSyncEvent) == .onboarding)
         #expect(onboardingRefreshResourceForEvent(.welcome, unrelatedEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.model, unrelatedEvent) == nil)
     }
@@ -1372,7 +1456,15 @@ struct OnboardingTests {
         appState.overview = makeOverview(setupCompleted: false)
 
         let eventStream = AsyncStream<SlackClawEvent> { continuation in
-            continuation.yield(.configApplied(resource: .models, summary: "Models saved."))
+            continuation.yield(
+                .modelConfigUpdated(
+                    snapshot: .init(
+                        epoch: "epoch-1",
+                        revision: 1,
+                        data: emptyModelConfig()
+                    )
+                )
+            )
             continuation.finish()
         }
 
@@ -1382,12 +1474,11 @@ struct OnboardingTests {
         )
 
         await viewModel.bootstrap()
-        await waitForRecordedURLCount(recorder, expectedCount: 3)
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         #expect(
             await recorder.recordedURLs() == [
-                "http://127.0.0.1:4545/api/onboarding/state?fresh=1",
-                "http://127.0.0.1:4545/api/models/config?fresh=1"
+                "http://127.0.0.1:4545/api/onboarding/state?fresh=1"
             ]
         )
     }
@@ -1544,7 +1635,8 @@ private func emptySkillConfig() -> SkillCatalogOverview {
         marketplaceSummary: "Ready",
         installedSkills: [],
         readiness: .init(total: 0, eligible: 0, disabled: 0, blocked: 0, missing: 0, warnings: [], summary: "Ready"),
-        marketplacePreview: []
+        marketplacePreview: [],
+        presetSkillSync: nil
     )
 }
 
@@ -1557,7 +1649,8 @@ private func emptyAITeamOverview() -> AITeamOverview {
         availableBrains: [],
         memberPresets: [],
         knowledgePacks: [],
-        skillOptions: []
+        skillOptions: [],
+        presetSkillSync: nil
     )
 }
 
@@ -1645,7 +1738,7 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     theme: "analyst",
                     starterSkillLabels: ["Research Brief", "Status Writer"],
                     toolLabels: ["Company handbook", "Delivery playbook"],
-                    skillIds: ["research-brief", "status-writer"],
+                    presetSkillIds: ["research-brief", "status-writer"],
                     knowledgePackIds: ["company-handbook", "delivery-playbook"],
                     workStyles: ["Analytical", "Concise"],
                     defaultMemoryEnabled: true
@@ -1657,7 +1750,7 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     theme: "support",
                     starterSkillLabels: ["Status Writer"],
                     toolLabels: ["Customer voice", "Memory"],
-                    skillIds: ["status-writer"],
+                    presetSkillIds: ["status-writer"],
                     knowledgePackIds: ["customer-voice"],
                     workStyles: ["Calm", "Supportive"],
                     defaultMemoryEnabled: true
@@ -1669,14 +1762,35 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     theme: "operator",
                     starterSkillLabels: ["Research Brief"],
                     toolLabels: ["Delivery playbook", "Company handbook"],
-                    skillIds: ["research-brief"],
+                    presetSkillIds: ["research-brief"],
                     knowledgePackIds: ["delivery-playbook", "company-handbook"],
                     workStyles: ["Methodical", "Action-oriented"],
                     defaultMemoryEnabled: true
                 )
             ]
         ),
-        summary: .init()
+        summary: .init(),
+        presetSkillSync: .init(
+            targetMode: .managedLocal,
+            entries: [
+                .init(
+                    presetSkillId: "research-brief",
+                    runtimeSlug: "research-brief",
+                    targetMode: .managedLocal,
+                    status: .verified,
+                    updatedAt: "2026-03-27T00:00:00.000Z"
+                ),
+                .init(
+                    presetSkillId: "status-writer",
+                    runtimeSlug: "status-writer",
+                    targetMode: .managedLocal,
+                    status: .verified,
+                    updatedAt: "2026-03-27T00:00:00.000Z"
+                )
+            ],
+            summary: "2 preset skills verified on the managed-local runtime.",
+            repairRecommended: false
+        )
     )
 }
 

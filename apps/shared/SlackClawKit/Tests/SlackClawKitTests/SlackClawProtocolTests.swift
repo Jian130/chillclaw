@@ -156,12 +156,27 @@ struct SlackClawProtocolTests {
                 "theme": "analyst",
                 "starterSkillLabels": ["Research Brief", "Status Writer"],
                 "toolLabels": ["Company handbook", "Delivery playbook"],
-                "skillIds": ["research-brief", "status-writer"],
+                "presetSkillIds": ["research-brief", "status-writer"],
                 "knowledgePackIds": ["company-handbook", "delivery-playbook"],
                 "workStyles": [],
                 "defaultMemoryEnabled": true
               }
             ]
+          },
+          "presetSkillSync": {
+            "targetMode": "managed-local",
+            "entries": [
+              {
+                "presetSkillId": "research-brief",
+                "runtimeSlug": "research-brief",
+                "targetMode": "managed-local",
+                "status": "verified",
+                "installedVersion": "1.0.0",
+                "updatedAt": "2026-03-27T00:00:00.000Z"
+              }
+            ],
+            "summary": "1 preset skill verified on the managed-local runtime.",
+            "repairRecommended": false
           },
           "summary": {
             "install": {
@@ -189,8 +204,10 @@ struct SlackClawProtocolTests {
         #expect(response.config.modelProviders[2].authMethods.map(\.id) == ["openai-api-key", "openai-codex"])
         #expect(response.config.channels.map(\.id) == ["wechat", "feishu", "telegram"])
         #expect(response.config.channels[1].platformUrl == "https://open.feishu.cn/app")
+        #expect(response.config.employeePresets.first?.presetSkillIds == ["research-brief", "status-writer"])
         #expect(response.draft.install?.disposition == "reused-existing")
         #expect(response.draft.activeModelAuthSessionId == "session-1")
+        #expect(response.presetSkillSync?.entries.first?.status == .verified)
         #expect(response.summary.model?.entryId == "entry-1")
     }
 
@@ -301,6 +318,55 @@ struct SlackClawProtocolTests {
         #expect(threadId == "thread-1")
         #expect(detail.messages.count == 1)
         #expect(detail.messages.first?.text == "hello")
+    }
+
+    @Test
+    func chatStreamEventDecodesConnectionStateAndToolStatusPayloads() throws {
+        let connectionData = """
+        {
+          "type": "connection-state",
+          "threadId": "thread-1",
+          "state": "reconnecting",
+          "detail": "Waiting for the socket to reconnect."
+        }
+        """.data(using: .utf8)!
+        let toolData = """
+        {
+          "type": "assistant-tool-status",
+          "threadId": "thread-1",
+          "sessionKey": "agent:main:test",
+          "runId": "run-1",
+          "activityLabel": "Inspecting workspace",
+          "toolActivity": {
+            "id": "tool-1",
+            "label": "Inspecting workspace",
+            "status": "running",
+            "detail": "Reading files."
+          }
+        }
+        """.data(using: .utf8)!
+
+        let connectionEvent = try JSONDecoder.slackClaw.decode(ChatStreamEvent.self, from: connectionData)
+        let toolEvent = try JSONDecoder.slackClaw.decode(ChatStreamEvent.self, from: toolData)
+
+        guard case let .connectionState(threadId, state, detail) = connectionEvent else {
+            Issue.record("Expected connectionState event")
+            return
+        }
+        guard case let .assistantToolStatus(toolThreadId, sessionKey, runId, activityLabel, toolActivity) = toolEvent else {
+            Issue.record("Expected assistantToolStatus event")
+            return
+        }
+
+        #expect(threadId == "thread-1")
+        #expect(state == .reconnecting)
+        #expect(detail == "Waiting for the socket to reconnect.")
+        #expect(toolThreadId == "thread-1")
+        #expect(sessionKey == "agent:main:test")
+        #expect(runId == "run-1")
+        #expect(activityLabel == "Inspecting workspace")
+        #expect(toolActivity.label == "Inspecting workspace")
+        #expect(toolActivity.status == .running)
     }
 
     @Test
@@ -470,5 +536,38 @@ struct SlackClawProtocolTests {
         }
         #expect(payloadThreadId == "thread-1")
         #expect(message.text == "hello")
+
+        let presetSkillEventData = """
+        {
+          "type": "preset-skill-sync.updated",
+          "snapshot": {
+            "epoch": "epoch-1",
+            "revision": 3,
+            "data": {
+              "targetMode": "managed-local",
+              "entries": [
+                {
+                  "presetSkillId": "research-brief",
+                  "runtimeSlug": "research-brief",
+                  "targetMode": "managed-local",
+                  "status": "verified",
+                  "updatedAt": "2026-03-27T00:00:00.000Z"
+                }
+              ],
+              "summary": "1 preset skill verified on the managed-local runtime.",
+              "repairRecommended": false
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let presetSkillEvent = try JSONDecoder.slackClaw.decode(SlackClawEvent.self, from: presetSkillEventData)
+        guard case let .presetSkillSyncUpdated(snapshot) = presetSkillEvent else {
+            Issue.record("Expected presetSkillSyncUpdated event")
+            return
+        }
+        #expect(snapshot.epoch == "epoch-1")
+        #expect(snapshot.revision == 3)
+        #expect(snapshot.data.entries.first?.presetSkillId == "research-brief")
     }
 }

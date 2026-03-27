@@ -11,6 +11,7 @@ import { Badge } from "../../shared/ui/Badge.js";
 import { Button } from "../../shared/ui/Button.js";
 import { Card, CardContent } from "../../shared/ui/Card.js";
 import { Dialog } from "../../shared/ui/Dialog.js";
+import { ErrorState } from "../../shared/ui/ErrorState.js";
 import { FieldLabel, Input, Textarea } from "../../shared/ui/Field.js";
 import { LoadingBlocker } from "../../shared/ui/LoadingBlocker.js";
 import { LoadingPanel } from "../../shared/ui/LoadingPanel.js";
@@ -74,7 +75,7 @@ function TeamDialog(props: {
     >
       <LoadingBlocker active={busy} label="Saving AI team" description="ChillClaw is saving the team configuration.">
         <div className="panel-stack">
-          {error ? <p className="card__description" style={{ color: "var(--danger)" }}>{error}</p> : null}
+          {error ? <ErrorState compact title="Could not save AI team" description={error} /> : null}
           <div className="field-grid">
             <div>
               <FieldLabel htmlFor="team-name">Team name</FieldLabel>
@@ -185,12 +186,14 @@ export default function TeamPage() {
 
   if (error && !overview) {
     return (
-      <EmptyState
-        title="ChillClaw could not load AI teams"
-        description={error}
-        actionLabel="Retry"
-        onAction={() => window.location.reload()}
-      />
+      <WorkspaceScaffold title={copy.title} subtitle={copy.subtitle}>
+        <ErrorState
+          title="ChillClaw could not load AI teams"
+          description={error}
+          actionLabel="Retry"
+          onAction={() => window.location.reload()}
+        />
+      </WorkspaceScaffold>
     );
   }
 

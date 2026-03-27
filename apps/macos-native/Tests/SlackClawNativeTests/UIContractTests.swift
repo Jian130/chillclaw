@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import SlackClawNative
 
@@ -25,5 +26,56 @@ struct UIContractTests {
         #expect(nativeOperationsSummaryColumnCount(for: 1400) == 3)
         #expect(nativeOperationsSummaryColumnCount(for: 980) == 2)
         #expect(nativeOperationsSummaryColumnCount(for: 720) == 1)
+    }
+
+    @Test
+    func workspaceCollectionCardsUseSharedMinimumHeight() {
+        #expect(nativeWorkspaceCollectionCardMinHeight == 132)
+    }
+
+    @Test
+    func pageContentWidthModesMapToSharedMaxWidth() {
+        #expect(nativePageContentMaxWidth(.centered) == nativeCenteredPageMaxWidth)
+        #expect(nativePageContentMaxWidth(.full) == nil)
+    }
+
+    @Test
+    func onboardingProgressAndSelectionStatesMapToSharedSemantics() {
+        #expect(nativeOnboardingProgressState(active: true, complete: false) == .active)
+        #expect(nativeOnboardingProgressState(active: false, complete: true) == .complete)
+        #expect(nativeOnboardingProgressState(active: false, complete: false) == .inactive)
+
+        #expect(nativeOnboardingSelectionState(selected: true) == .selected)
+        #expect(nativeOnboardingSelectionState(selected: false) == .default)
+    }
+
+    @Test
+    func shellNavigationSelectionMapsToSharedSemantics() {
+        #expect(nativeShellNavigationState(selected: true) == .selected)
+        #expect(nativeShellNavigationState(selected: false) == .default)
+    }
+
+    @Test
+    func auditedNativeViewsUseSharedCornerRadiusConstants() throws {
+        let sourceFiles = [
+            "Sources/SlackClawNative/UI/NativeUIPrimitives.swift",
+            "Sources/SlackClawNative/OnboardingView.swift",
+            "Sources/SlackClawNative/Screens.swift",
+            "Sources/SlackClawNative/LocalePicker.swift",
+        ]
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let rawCornerRadiusPattern = /cornerRadius:\s*\d+/
+
+        for relativePath in sourceFiles {
+            let fileURL = packageRoot.appendingPathComponent(relativePath)
+            let source = try String(contentsOf: fileURL, encoding: .utf8)
+            #expect(
+                source.firstMatch(of: rawCornerRadiusPattern) == nil,
+                "\(relativePath) should use NativeUI or onboarding radius constants"
+            )
+        }
     }
 }

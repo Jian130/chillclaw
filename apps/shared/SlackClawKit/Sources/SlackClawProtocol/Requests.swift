@@ -209,6 +209,7 @@ public struct SaveAIMemberRequest: Codable, Sendable {
     public var personality: String
     public var soul: String
     public var workStyles: [String]
+    public var presetSkillIds: [String]?
     public var skillIds: [String]
     public var knowledgePackIds: [String]
     public var capabilitySettings: MemberCapabilitySettings
@@ -221,6 +222,7 @@ public struct SaveAIMemberRequest: Codable, Sendable {
         personality: String,
         soul: String,
         workStyles: [String],
+        presetSkillIds: [String]? = nil,
         skillIds: [String],
         knowledgePackIds: [String],
         capabilitySettings: MemberCapabilitySettings
@@ -232,6 +234,7 @@ public struct SaveAIMemberRequest: Codable, Sendable {
         self.personality = personality
         self.soul = soul
         self.workStyles = workStyles
+        self.presetSkillIds = presetSkillIds
         self.skillIds = skillIds
         self.knowledgePackIds = knowledgePackIds
         self.capabilitySettings = capabilitySettings

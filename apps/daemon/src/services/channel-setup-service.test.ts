@@ -151,7 +151,7 @@ test("channel setup removes a configured entry through the generic path", async 
   assert.equal(state.channelOnboarding?.channels.telegram.status, "not-started");
 });
 
-test("channel setup publishes config and session events for save and input flows", async () => {
+test("channel setup publishes snapshot and session events for save and input flows", async () => {
   class InteractiveMockAdapter extends MockAdapter {
     override async submitChannelSessionInput(sessionId: string) {
       return {
@@ -180,7 +180,7 @@ test("channel setup publishes config and session events for save and input flows
   });
 
   assert.equal(save.status, "interactive");
-  assert.equal(eventTypes.includes("config.applied"), true);
+  assert.equal(eventTypes.includes("channel-config.updated"), true);
   assert.equal(eventTypes.includes("channel.session.updated"), true);
 
   eventTypes.length = 0;

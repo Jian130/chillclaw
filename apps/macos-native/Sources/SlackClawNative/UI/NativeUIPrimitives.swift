@@ -7,6 +7,7 @@ struct SurfaceCard<Content: View>: View {
     let tone: SurfaceCardTone
     let padding: CGFloat
     let spacing: CGFloat
+    let minimumHeight: CGFloat?
     @ViewBuilder let content: Content
 
     init(
@@ -15,6 +16,7 @@ struct SurfaceCard<Content: View>: View {
         tone: SurfaceCardTone = .standard,
         padding: CGFloat = 20,
         spacing: CGFloat = 12,
+        minimumHeight: CGFloat? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -22,6 +24,7 @@ struct SurfaceCard<Content: View>: View {
         self.tone = tone
         self.padding = padding
         self.spacing = spacing
+        self.minimumHeight = minimumHeight
         self.content = content()
     }
 
@@ -45,6 +48,7 @@ struct SurfaceCard<Content: View>: View {
             content
         }
         .padding(padding)
+        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: NativeUI.cardCornerRadius, style: .continuous)
                 .fill(palette.fill)
@@ -393,11 +397,11 @@ struct NativeActionButtonStyle: ButtonStyle {
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: NativeUI.controlCornerRadius, style: .continuous)
                     .fill(palette.background.opacity(configuration.isPressed ? palette.pressedOpacity : 1))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: NativeUI.controlCornerRadius, style: .continuous)
                     .stroke(palette.stroke, lineWidth: palette.stroke == .clear ? 0 : 1)
             )
             .foregroundStyle(palette.foreground)

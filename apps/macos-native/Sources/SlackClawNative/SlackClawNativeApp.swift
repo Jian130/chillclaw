@@ -133,6 +133,8 @@ private struct NativeSidebar: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(NativeSection.allCases) { section in
+                    let palette = nativeShellNavigationPalette(nativeShellNavigationState(selected: appState.selectedSection == section))
+
                     Button {
                         appState.selectedSection = section
                     } label: {
@@ -144,12 +146,12 @@ private struct NativeSidebar: View {
                                 .font(.system(size: 17, weight: .semibold))
                             Spacer(minLength: 0)
                         }
-                        .foregroundStyle(appState.selectedSection == section ? Color.blue : Color(red: 0.22, green: 0.28, blue: 0.4))
+                        .foregroundStyle(palette.foreground)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 16)
                         .background(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(appState.selectedSection == section ? Color.blue.opacity(0.12) : Color.clear)
+                                .fill(palette.fill)
                         )
                     }
                     .buttonStyle(.plain)
@@ -173,7 +175,7 @@ private struct NativeSidebar: View {
                     StatusBadge(sidebarStatusLabel(copy: copy), tone: sidebarStatusTone)
                     Text(sidebarStatusSummary(copy: copy))
                         .font(.system(size: 15))
-                        .foregroundStyle(Color(red: 0.34, green: 0.41, blue: 0.54))
+                        .foregroundStyle(nativeOnboardingTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -188,13 +190,7 @@ private struct NativeSidebar: View {
         HStack(spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.18, green: 0.39, blue: 1.0), Color(red: 0.42, green: 0.24, blue: 1.0)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(nativeBrandMarkGradient())
                 Image(systemName: "sparkles")
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(.white)
@@ -206,7 +202,7 @@ private struct NativeSidebar: View {
                     .font(.system(size: 26, weight: .bold))
                 Text(copy.brandSubtitle)
                     .font(.system(size: 15))
-                    .foregroundStyle(Color(red: 0.38, green: 0.46, blue: 0.6))
+                    .foregroundStyle(nativeOnboardingTextSecondary)
             }
         }
         .padding(.horizontal, 24)

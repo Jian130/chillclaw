@@ -189,6 +189,14 @@ final class NativeOnboardingViewModel {
         return employeePresets.first(where: { $0.id == selectedEmployeePresetId }) ?? employeePresets.first
     }
 
+    var selectedEmployeePresetReadiness: NativeOnboardingPresetReadiness? {
+        guard let selectedEmployeePreset else {
+            return nil
+        }
+
+        return resolveOnboardingEmployeePresetReadiness(preset: selectedEmployeePreset, onboardingState: onboardingState)
+    }
+
     func selectProvider(_ provider: OnboardingModelProviderPresentation) {
         providerId = provider.id
         methodId = provider.authMethods.first?.id ?? ""
@@ -357,7 +365,9 @@ final class NativeOnboardingViewModel {
                     avatarPresetId: employeeAvatarPresetId,
                     presetId: selectedEmployeePreset?.id,
                     personalityTraits: [],
-                    skillIds: selectedEmployeePreset?.skillIds ?? [],
+                    presetSkillIds: selectedEmployeePreset.map { preset in
+                        resolveOnboardingPresetSkillIDs(presetSkillIDs: preset.presetSkillIds)
+                    },
                     knowledgePackIds: selectedEmployeePreset?.knowledgePackIds ?? [],
                     workStyles: selectedEmployeePreset?.workStyles ?? [],
                     memoryEnabled: memoryEnabled
@@ -569,6 +579,12 @@ final class NativeOnboardingViewModel {
             return
         }
 
+        if let selectedEmployeePresetReadiness, selectedEmployeePresetReadiness.blocking {
+            pageError = selectedEmployeePresetReadiness.detail
+                ?? "ChillClaw is still preparing this preset's managed skills in the active OpenClaw runtime."
+            return
+        }
+
         pageError = nil
         employeeBusy = true
         defer { employeeBusy = false }
@@ -579,7 +595,7 @@ final class NativeOnboardingViewModel {
             avatarPresetId: employeeAvatarPresetId,
             presetId: selectedEmployeePreset.id,
             personalityTraits: [],
-            skillIds: selectedEmployeePreset.skillIds,
+            presetSkillIds: resolveOnboardingPresetSkillIDs(presetSkillIDs: selectedEmployeePreset.presetSkillIds),
             knowledgePackIds: selectedEmployeePreset.knowledgePackIds,
             workStyles: selectedEmployeePreset.workStyles,
             memoryEnabled: memoryEnabled,
@@ -614,7 +630,7 @@ final class NativeOnboardingViewModel {
                         avatarPresetId: createdMember?.avatar.presetId ?? draft.avatarPresetId,
                         presetId: draft.presetId,
                         personalityTraits: [],
-                        skillIds: draft.skillIds,
+                        presetSkillIds: draft.presetSkillIds,
                         knowledgePackIds: draft.knowledgePackIds,
                         workStyles: draft.workStyles,
                         memoryEnabled: memoryEnabled
@@ -998,6 +1014,29 @@ final class NativeOnboardingViewModel {
             installProgress = .init(phase: phase, percent: percent.map(Double.init), message: message)
         }
 
+        switch event {
+        case let .overviewUpdated(snapshot):
+            appState.overview = snapshot.data
+        case let .modelConfigUpdated(snapshot):
+            appState.modelConfig = snapshot.data
+        case let .channelConfigUpdated(snapshot):
+            appState.channelConfig = snapshot.data
+        case let .aiTeamUpdated(snapshot):
+            appState.aiTeamOverview = snapshot.data
+        case let .presetSkillSyncUpdated(snapshot):
+            if let currentOnboardingState = onboardingState {
+                onboardingState = OnboardingStateResponse(
+                    firstRun: currentOnboardingState.firstRun,
+                    draft: currentOnboardingState.draft,
+                    config: currentOnboardingState.config,
+                    summary: currentOnboardingState.summary,
+                    presetSkillSync: snapshot.data
+                )
+            }
+        case .skillCatalogUpdated, .deployProgress, .deployCompleted, .gatewayStatus, .taskProgress, .chatStream, .channelSessionUpdated, .configApplied:
+            break
+        }
+
         guard let currentStep = onboardingState?.draft.currentStep else { return }
         guard let resource = onboardingRefreshResourceForEvent(currentStep, event) else { return }
 
@@ -1016,6 +1055,8 @@ final class NativeOnboardingViewModel {
                 _ = try await readFreshChannelConfig()
             case .team:
                 _ = try await readFreshAITeamOverview()
+            case .onboarding:
+                onboardingState = try await appState.client.fetchOnboardingState(fresh: true)
             }
             pageError = nil
         } catch {

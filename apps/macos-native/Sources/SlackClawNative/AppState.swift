@@ -27,11 +27,15 @@ struct SlackClawAppDataLoader {
 
 func shouldRefreshNativeOverviewForEvent(_ event: SlackClawEvent) -> Bool {
     switch event {
-    case .deployCompleted, .gatewayStatus, .configApplied:
+    case .overviewUpdated:
+        return false
+    case .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+        return false
+    case .deployCompleted, .gatewayStatus:
         return true
     case let .taskProgress(_, status, _):
         return status != .running
-    case .chatStream, .channelSessionUpdated, .deployProgress:
+    case .chatStream, .channelSessionUpdated, .configApplied, .deployProgress:
         return false
     }
 }
@@ -40,15 +44,21 @@ func shouldRefreshNativeSectionForEvent(_ event: SlackClawEvent, selectedSection
     switch selectedSection {
     case .dashboard:
         switch event {
-        case .deployCompleted, .gatewayStatus, .configApplied:
+        case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated:
+            return false
+        case .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+            return false
+        case .deployCompleted, .gatewayStatus:
             return true
         case let .taskProgress(_, status, _):
             return status != .running
-        case .chatStream, .channelSessionUpdated, .deployProgress:
+        case .chatStream, .channelSessionUpdated, .configApplied, .deployProgress:
             return false
         }
     case .deploy:
         switch event {
+        case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+            return false
         case .deployCompleted, .gatewayStatus:
             return true
         case .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
@@ -56,23 +66,37 @@ func shouldRefreshNativeSectionForEvent(_ event: SlackClawEvent, selectedSection
         }
     case .configuration:
         switch event {
+        case .modelConfigUpdated, .channelConfigUpdated:
+            return false
+        case .overviewUpdated, .aiTeamUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+            return false
         case .channelSessionUpdated:
             return true
-        case let .configApplied(resource, _):
-            return resource == .models || resource == .channels || resource == .gateway
-        case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
+        case .configApplied, .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return false
         }
     case .skills:
-        guard case let .configApplied(resource, _) = event else {
+        switch event {
+        case .skillCatalogUpdated:
+            return false
+        case .configApplied:
+            return false
+        case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .presetSkillSyncUpdated:
+            return false
+        case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated:
             return false
         }
-        return resource == .skills
     case .members, .team, .chat:
-        guard case let .configApplied(resource, _) = event else {
+        switch event {
+        case .aiTeamUpdated, .modelConfigUpdated:
+            return false
+        case .configApplied:
+            return false
+        case .overviewUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+            return false
+        case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated:
             return false
         }
-        return resource == .aiEmployees || resource == .models || resource == .skills
     case .settings:
         return false
     }
@@ -243,6 +267,24 @@ final class SlackClawAppState {
 
     func applyDaemonEvent(_ event: SlackClawEvent) async {
         guard hasBootstrapped else { return }
+
+        switch event {
+        case let .overviewUpdated(snapshot):
+            overview = snapshot.data
+        case let .aiTeamUpdated(snapshot):
+            aiTeamOverview = snapshot.data
+            updateSelectedMemberForChat()
+        case let .modelConfigUpdated(snapshot):
+            modelConfig = snapshot.data
+        case let .channelConfigUpdated(snapshot):
+            channelConfig = snapshot.data
+        case let .skillCatalogUpdated(snapshot):
+            skillConfig = snapshot.data
+        case .presetSkillSyncUpdated:
+            break
+        case .deployProgress, .deployCompleted, .gatewayStatus, .taskProgress, .chatStream, .channelSessionUpdated, .configApplied:
+            break
+        }
 
         if shouldRefreshNativeOverviewForEvent(event) {
             do {

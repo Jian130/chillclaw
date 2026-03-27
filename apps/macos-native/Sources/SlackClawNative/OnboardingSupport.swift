@@ -44,9 +44,13 @@ let nativeOnboardingOuterPanelPadding: CGFloat = 28
 let nativeOnboardingInnerCardPadding: CGFloat = 24
 let nativeOnboardingSectionGap: CGFloat = 24
 let nativeOnboardingFeatureGap: CGFloat = 16
-let nativeOnboardingOuterRadius: CGFloat = 24
-let nativeOnboardingFeatureRadius: CGFloat = 16
-let nativeOnboardingIconTileRadius: CGFloat = 12
+let nativeOnboardingOuterRadius: CGFloat = NativeUI.cardCornerRadius
+let nativeOnboardingSectionRadius: CGFloat = NativeUI.panelCornerRadius
+let nativeOnboardingStandardRadius: CGFloat = NativeUI.standardCornerRadius
+let nativeOnboardingFeatureRadius: CGFloat = NativeUI.compactCornerRadius
+let nativeOnboardingControlRadius: CGFloat = NativeUI.controlCornerRadius
+let nativeOnboardingIconTileRadius: CGFloat = NativeUI.iconCornerRadius
+let nativeOnboardingDisplayRadius: CGFloat = NativeUI.heroCornerRadius
 let nativeOnboardingCTAHeight: CGFloat = 50
 
 enum NativeOnboardingActionButtonVariant: Sendable {
@@ -144,8 +148,19 @@ func nativeOnboardingActionButtonLayout(
         expandsToContainer: true,
         minHeight: nativeOnboardingCTAHeight,
         usesFullHitShape: true,
-        cornerRadius: nativeOnboardingFeatureRadius
+        cornerRadius: nativeOnboardingControlRadius
     )
+}
+
+func nativeOnboardingActionButtonVariant(_ variant: NativeOnboardingActionButtonVariant) -> ActionButtonVariant {
+    switch variant {
+    case .accent:
+        return .primary
+    case .primary:
+        return .outline
+    case .secondary:
+        return .secondary
+    }
 }
 
 func nativeOnboardingChannelPresentationTheme(_ theme: String) -> LinearGradient {
@@ -293,12 +308,94 @@ func resolveOnboardingEmployeePresets(
     onboardingState?.config.employeePresets ?? []
 }
 
+enum NativeOnboardingPresetReadinessStatus: Sendable {
+    case ready
+    case syncing
+    case repair
+    case install
+}
+
+struct NativeOnboardingPresetReadiness: Sendable {
+    let status: NativeOnboardingPresetReadinessStatus
+    let label: String
+    let detail: String?
+    let blocking: Bool
+}
+
+func nativeOnboardingPresetStatusTone(_ status: NativeOnboardingPresetReadinessStatus) -> NativeStatusTone {
+    switch status {
+    case .ready:
+        return .success
+    case .syncing:
+        return .info
+    case .repair:
+        return .warning
+    case .install:
+        return .neutral
+    }
+}
+
+func resolveOnboardingPresetSkillIDs(
+    presetSkillIDs: [String]?
+) -> [String] {
+    (presetSkillIDs ?? []).filter { !$0.isEmpty }
+}
+
+func resolveOnboardingEmployeePresetReadiness(
+    preset: OnboardingEmployeePresetPresentation,
+    onboardingState: OnboardingStateResponse?
+) -> NativeOnboardingPresetReadiness {
+    let presetSkillIDs = resolveOnboardingPresetSkillIDs(presetSkillIDs: preset.presetSkillIds)
+    if presetSkillIDs.isEmpty {
+        return .init(status: .ready, label: "Ready", detail: "This preset does not need any managed skills.", blocking: false)
+    }
+
+    let entries = presetSkillIDs.compactMap { presetSkillID in
+        onboardingState?.presetSkillSync?.entries.first(where: { $0.presetSkillId == presetSkillID })
+    }
+
+    if entries.count == presetSkillIDs.count, entries.allSatisfy({ $0.status == .verified }) {
+        return .init(
+            status: .ready,
+            label: "Ready",
+            detail: onboardingState?.presetSkillSync?.summary ?? "Preset skills are verified in the active runtime.",
+            blocking: false
+        )
+    }
+
+    if let failedEntry = entries.first(where: { $0.status == .failed }) {
+        return .init(
+            status: .repair,
+            label: "Repair needed",
+            detail: failedEntry.lastError ?? onboardingState?.presetSkillSync?.summary ?? "ChillClaw could not verify every preset skill.",
+            blocking: true
+        )
+    }
+
+    if entries.contains(where: { $0.status != .verified }) {
+        return .init(
+            status: .syncing,
+            label: "Syncing",
+            detail: onboardingState?.presetSkillSync?.summary ?? "ChillClaw is syncing preset skills for this employee.",
+            blocking: true
+        )
+    }
+
+    return .init(
+        status: .install,
+        label: "Install on select",
+        detail: "Choose this preset and ChillClaw will install its guided skills.",
+        blocking: true
+    )
+}
+
 enum OnboardingRefreshResource {
     case installContext
     case overview
     case model
     case channel
     case team
+    case onboarding
 }
 
 struct NativeOnboardingEmployeeDraft: Sendable {
@@ -307,7 +404,7 @@ struct NativeOnboardingEmployeeDraft: Sendable {
     var avatarPresetId: String
     var presetId: String
     var personalityTraits: [String]
-    var skillIds: [String]
+    var presetSkillIds: [String]
     var knowledgePackIds: [String]
     var workStyles: [String]
     var memoryEnabled: Bool
@@ -386,7 +483,8 @@ func buildOnboardingMemberRequest(_ draft: NativeOnboardingEmployeeDraft) -> Sav
         personality: personality,
         soul: personality,
         workStyles: draft.workStyles,
-        skillIds: draft.skillIds,
+        presetSkillIds: draft.presetSkillIds,
+        skillIds: [],
         knowledgePackIds: draft.knowledgePackIds,
         capabilitySettings: .init(memoryEnabled: draft.memoryEnabled, contextWindow: 128000)
     )
@@ -548,33 +646,34 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: SlackCla
         switch event {
         case .deployCompleted, .gatewayStatus:
             return .installContext
-        case .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
+        case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
+             .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
             return nil
         }
     case .permissions:
         return nil
     case .model:
-        guard case let .configApplied(resource, _) = event, resource == .models else {
+        switch event {
+        case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
+             .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
         }
-        return .model
     case .channel:
         switch event {
-        case let .configApplied(resource, _):
-            return resource == .channels ? .channel : nil
         case .channelSessionUpdated:
             return .channel
-        case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
+        case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
+             .chatStream, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
         }
     case .employee, .complete:
-        guard case let .configApplied(resource, _) = event else {
+        switch event {
+        case .presetSkillSyncUpdated:
+            return .onboarding
+        case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated,
+             .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
         }
-        if resource == .aiEmployees || resource == .models || resource == .skills {
-            return .team
-        }
-        return nil
     }
 }
 

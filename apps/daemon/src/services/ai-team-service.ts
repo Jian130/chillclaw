@@ -18,7 +18,10 @@ import type {
 import type { EngineAdapter } from "../engine/adapter.js";
 import type { AIMemberRuntimeCandidate } from "../engine/adapter.js";
 import { aiMemberPresets, defaultAIMemberSkillOptions } from "../config/ai-member-presets.js";
+import { normalizePresetSkillIds } from "../config/preset-skill-definitions.js";
 import { EventPublisher } from "./event-publisher.js";
+import { fallbackMutationSyncMeta } from "./mutation-sync.js";
+import { PresetSkillService } from "./preset-skill-service.js";
 import { StateStore, type AITeamState } from "./state-store.js";
 
 const DEFAULT_TEAM_VISION =
@@ -183,6 +186,7 @@ function resolveMemberPresets(
 
   return aiMemberPresets.map((preset) => ({
     ...preset,
+    presetSkillIds: normalizePresetSkillIds(preset.presetSkillIds),
     skillIds: preset.skillIds.filter((skillId) => availableSkillIds.has(skillId)),
     knowledgePackIds: preset.knowledgePackIds.filter((packId) => availableKnowledgePackIds.has(packId))
   }));
@@ -206,7 +210,8 @@ export class AITeamService {
   constructor(
     private readonly adapter: EngineAdapter,
     private readonly store: StateStore,
-    private readonly eventPublisher?: EventPublisher
+    private readonly eventPublisher?: EventPublisher,
+    private readonly presetSkillService?: PresetSkillService
   ) {}
 
   async getOverview(): Promise<AITeamOverview> {
@@ -283,7 +288,8 @@ export class AITeamService {
       availableBrains: modelConfig.savedEntries,
       memberPresets,
       knowledgePacks: DEFAULT_KNOWLEDGE_PACKS,
-      skillOptions: baseOverview.skillOptions
+      skillOptions: baseOverview.skillOptions,
+      presetSkillSync: this.presetSkillService ? await this.presetSkillService.getOverview() : undefined
     };
   }
 
@@ -299,9 +305,20 @@ export class AITeamService {
     const overview = await this.getOverview();
     const id = memberId ?? randomUUID();
     const current = overview.members.find((member) => member.id === id);
+    const normalizedPresetSkillIds = normalizePresetSkillIds(request.presetSkillIds);
     const brain = buildBrainAssignment(overview.availableBrains, request.brainEntryId);
     const knowledgePacks = DEFAULT_KNOWLEDGE_PACKS.filter((pack) => request.knowledgePackIds.includes(pack.id));
-    const selectedSkills = overview.skillOptions.filter((skill) => request.skillIds.includes(skill.id));
+    const requestedSkillIds = normalizedPresetSkillIds.length
+      ? await this.resolvePresetSkillRequest(normalizedPresetSkillIds)
+      : [...new Set(request.skillIds)];
+    const selectedSkills = overview.skillOptions.filter((skill) => requestedSkillIds.includes(skill.id));
+    const selectedSkillIds = selectedSkills.map((skill) => skill.id);
+    const missingSkillIds = requestedSkillIds.filter((skillId) => !selectedSkillIds.includes(skillId));
+    if (missingSkillIds.length > 0) {
+      throw new Error(
+        `Selected skills are not verified in the active OpenClaw runtime: ${missingSkillIds.join(", ")}. Repair the runtime skills and try again.`
+      );
+    }
     const runtime = await this.adapter.aiEmployees.saveAIMemberRuntime({
       memberId: id,
       existingAgentId: current?.agentId,
@@ -311,7 +328,7 @@ export class AITeamService {
       personality: request.personality.trim(),
       soul: request.soul.trim(),
       workStyles: request.workStyles,
-      skillIds: request.skillIds,
+      skillIds: selectedSkillIds,
       selectedSkills,
       capabilitySettings: request.capabilitySettings,
       knowledgePacks,
@@ -339,7 +356,8 @@ export class AITeamService {
         personality: request.personality.trim(),
         soul: request.soul.trim(),
         workStyles: request.workStyles,
-        skillIds: request.skillIds,
+        presetSkillIds: normalizedPresetSkillIds.length > 0 ? normalizedPresetSkillIds : undefined,
+        skillIds: selectedSkillIds,
         knowledgePackIds: request.knowledgePackIds,
         capabilitySettings: request.capabilitySettings,
         agentDir: runtime.agentDir,
@@ -370,15 +388,14 @@ export class AITeamService {
       };
     });
 
-    this.eventPublisher?.publishConfigApplied({
-      resource: "ai-employees",
-      summary: current ? `${request.name.trim()} was updated.` : `${request.name.trim()} was created.`
-    });
+    const nextOverview = await this.getOverview();
+    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
 
     return {
+      ...sync,
       status: "completed",
       message: current ? `${request.name.trim()} was updated.` : `${request.name.trim()} was created.`,
-      overview: await this.getOverview(),
+      overview: nextOverview,
       requiresGatewayApply: runtime.requiresGatewayApply
     };
   }
@@ -433,21 +450,17 @@ export class AITeamService {
       };
     });
 
-    this.eventPublisher?.publishConfigApplied({
-      resource: "ai-employees",
-      summary:
-        request.deleteMode === "keep-workspace"
-          ? `${member.name} was removed and the workspace/history was kept.`
-          : `${member.name} was removed.`
-    });
+    const nextOverview = await this.getOverview();
+    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
 
     return {
+      ...sync,
       status: "completed",
       message:
         request.deleteMode === "keep-workspace"
           ? `${member.name} was removed and the workspace/history was kept.`
           : `${member.name} was removed.`,
-      overview: await this.getOverview(),
+      overview: nextOverview,
       requiresGatewayApply: result.requiresGatewayApply
     };
   }
@@ -484,11 +497,6 @@ export class AITeamService {
           }
         }
       };
-    });
-
-    this.eventPublisher?.publishConfigApplied({
-      resource: "ai-employees",
-      summary: `${member.name} bindings were refreshed.`
     });
 
     return {
@@ -531,15 +539,14 @@ export class AITeamService {
       };
     });
 
-    this.eventPublisher?.publishConfigApplied({
-      resource: "ai-employees",
-      summary: `${member.name} is now bound to ${request.binding}.`
-    });
+    const nextOverview = await this.getOverview();
+    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
 
     return {
+      ...sync,
       status: "completed",
       message: `${member.name} is now bound to ${request.binding}.`,
-      overview: await this.getOverview(),
+      overview: nextOverview,
       requiresGatewayApply: result.requiresGatewayApply
     };
   }
@@ -578,15 +585,14 @@ export class AITeamService {
       };
     });
 
-    this.eventPublisher?.publishConfigApplied({
-      resource: "ai-employees",
-      summary: `${member.name} is no longer bound to ${request.binding}.`
-    });
+    const nextOverview = await this.getOverview();
+    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
 
     return {
+      ...sync,
       status: "completed",
       message: `${member.name} is no longer bound to ${request.binding}.`,
-      overview: await this.getOverview(),
+      overview: nextOverview,
       requiresGatewayApply: result.requiresGatewayApply
     };
   }
@@ -623,15 +629,14 @@ export class AITeamService {
       };
     });
 
-    this.eventPublisher?.publishConfigApplied({
-      resource: "ai-employees",
-      summary: "Team was removed."
-    });
+    const nextOverview = await this.getOverview();
+    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
 
     return {
+      ...sync,
       status: "completed",
       message: `${request.name.trim()} was saved.`,
-      overview: await this.getOverview()
+      overview: nextOverview
     };
   }
 
@@ -664,10 +669,22 @@ export class AITeamService {
       };
     });
 
+    const nextOverview = await this.getOverview();
+    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
+
     return {
+      ...sync,
       status: "completed",
       message: "Team was removed.",
-      overview: await this.getOverview()
+      overview: nextOverview
     };
+  }
+
+  private async resolvePresetSkillRequest(presetSkillIds: string[]): Promise<string[]> {
+    if (this.presetSkillService) {
+      return this.presetSkillService.resolveVerifiedRuntimeSkillIds(presetSkillIds);
+    }
+
+    throw new Error("Preset skills cannot be resolved because preset skill sync is unavailable.");
   }
 }

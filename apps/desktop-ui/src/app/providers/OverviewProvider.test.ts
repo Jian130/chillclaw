@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { shouldRefreshOverviewForEvent } from "./OverviewProvider.js";
 
 describe("OverviewProvider helpers", () => {
-  it("refreshes overview for deploy, gateway, and config events", () => {
+  it("refreshes overview for deploy and gateway events but ignores pushed snapshots", () => {
     expect(
       shouldRefreshOverviewForEvent({
         type: "deploy.completed",
@@ -32,11 +32,19 @@ describe("OverviewProvider helpers", () => {
 
     expect(
       shouldRefreshOverviewForEvent({
-        type: "config.applied",
-        resource: "channels",
-        summary: "Channel settings saved."
+        type: "channel-config.updated",
+        snapshot: {
+          epoch: "epoch-1",
+          revision: 2,
+          data: {
+            baseOnboardingCompleted: false,
+            capabilities: [],
+            entries: [],
+            gatewaySummary: "Ready"
+          }
+        }
       })
-    ).toBe(true);
+    ).toBe(false);
 
     expect(
       shouldRefreshOverviewForEvent({

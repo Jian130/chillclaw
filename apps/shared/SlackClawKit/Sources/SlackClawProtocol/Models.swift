@@ -18,6 +18,18 @@ public struct FirstRunState: Codable, Sendable {
     }
 }
 
+public struct RevisionedSnapshot<Payload: Codable & Sendable>: Codable, Sendable {
+    public var epoch: String
+    public var revision: Int
+    public var data: Payload
+
+    public init(epoch: String, revision: Int, data: Payload) {
+        self.epoch = epoch
+        self.revision = revision
+        self.data = data
+    }
+}
+
 public enum OnboardingStep: String, Codable, Sendable {
     case welcome
     case install
@@ -77,7 +89,7 @@ public struct OnboardingEmployeeState: Codable, Sendable {
     public var avatarPresetId: String
     public var presetId: String?
     public var personalityTraits: [String]?
-    public var skillIds: [String]?
+    public var presetSkillIds: [String]?
     public var knowledgePackIds: [String]?
     public var workStyles: [String]?
     public var memoryEnabled: Bool?
@@ -89,7 +101,7 @@ public struct OnboardingEmployeeState: Codable, Sendable {
         avatarPresetId: String,
         presetId: String? = nil,
         personalityTraits: [String]? = nil,
-        skillIds: [String]? = nil,
+        presetSkillIds: [String]? = nil,
         knowledgePackIds: [String]? = nil,
         workStyles: [String]? = nil,
         memoryEnabled: Bool? = nil
@@ -100,7 +112,7 @@ public struct OnboardingEmployeeState: Codable, Sendable {
         self.avatarPresetId = avatarPresetId
         self.presetId = presetId
         self.personalityTraits = personalityTraits
-        self.skillIds = skillIds
+        self.presetSkillIds = presetSkillIds
         self.knowledgePackIds = knowledgePackIds
         self.workStyles = workStyles
         self.memoryEnabled = memoryEnabled
@@ -226,7 +238,7 @@ public struct OnboardingEmployeePresetPresentation: Codable, Sendable, Identifia
     public var theme: String
     public var starterSkillLabels: [String]
     public var toolLabels: [String]
-    public var skillIds: [String]
+    public var presetSkillIds: [String]?
     public var knowledgePackIds: [String]
     public var workStyles: [String]
     public var defaultMemoryEnabled: Bool?
@@ -238,7 +250,7 @@ public struct OnboardingEmployeePresetPresentation: Codable, Sendable, Identifia
         theme: String,
         starterSkillLabels: [String],
         toolLabels: [String],
-        skillIds: [String],
+        presetSkillIds: [String]? = nil,
         knowledgePackIds: [String],
         workStyles: [String],
         defaultMemoryEnabled: Bool? = nil
@@ -249,7 +261,7 @@ public struct OnboardingEmployeePresetPresentation: Codable, Sendable, Identifia
         self.theme = theme
         self.starterSkillLabels = starterSkillLabels
         self.toolLabels = toolLabels
-        self.skillIds = skillIds
+        self.presetSkillIds = presetSkillIds
         self.knowledgePackIds = knowledgePackIds
         self.workStyles = workStyles
         self.defaultMemoryEnabled = defaultMemoryEnabled
@@ -277,12 +289,20 @@ public struct OnboardingStateResponse: Codable, Sendable {
     public var draft: OnboardingDraftState
     public var config: OnboardingUIConfig
     public var summary: OnboardingCompletionSummary
+    public var presetSkillSync: PresetSkillSyncOverview?
 
-    public init(firstRun: FirstRunState, draft: OnboardingDraftState, config: OnboardingUIConfig, summary: OnboardingCompletionSummary) {
+    public init(
+        firstRun: FirstRunState,
+        draft: OnboardingDraftState,
+        config: OnboardingUIConfig,
+        summary: OnboardingCompletionSummary,
+        presetSkillSync: PresetSkillSyncOverview? = nil
+    ) {
         self.firstRun = firstRun
         self.draft = draft
         self.config = config
         self.summary = summary
+        self.presetSkillSync = presetSkillSync
     }
 }
 
@@ -829,6 +849,54 @@ public struct SkillReadinessSummary: Codable, Sendable {
     public var summary: String
 }
 
+public enum PresetSkillInstallSource: String, Codable, Sendable {
+    case bundled
+    case clawhub
+}
+
+public enum PresetSkillTargetMode: String, Codable, Sendable {
+    case managedLocal = "managed-local"
+    case reusedInstall = "reused-install"
+}
+
+public enum PresetSkillSyncStatus: String, Codable, Sendable {
+    case pending
+    case installing
+    case installed
+    case verified
+    case failed
+}
+
+public struct PresetSkillDefinition: Codable, Sendable, Identifiable {
+    public var id: String
+    public var label: String
+    public var description: String
+    public var onboardingSafe: Bool
+    public var runtimeSlug: String
+    public var installSource: PresetSkillInstallSource
+    public var pinnedVersion: String?
+    public var bundledAssetPath: String?
+}
+
+public struct PresetSkillSyncEntry: Codable, Sendable, Identifiable {
+    public var presetSkillId: String
+    public var runtimeSlug: String
+    public var targetMode: PresetSkillTargetMode
+    public var status: PresetSkillSyncStatus
+    public var installedVersion: String?
+    public var lastError: String?
+    public var updatedAt: String
+
+    public var id: String { presetSkillId }
+}
+
+public struct PresetSkillSyncOverview: Codable, Sendable {
+    public var targetMode: PresetSkillTargetMode
+    public var entries: [PresetSkillSyncEntry]
+    public var summary: String
+    public var repairRecommended: Bool
+}
+
 public struct SkillCatalogOverview: Codable, Sendable {
     public var managedSkillsDir: String?
     public var workspaceDir: String?
@@ -837,6 +905,7 @@ public struct SkillCatalogOverview: Codable, Sendable {
     public var installedSkills: [InstalledSkillEntry]
     public var readiness: SkillReadinessSummary
     public var marketplacePreview: [SkillMarketplaceEntry]
+    public var presetSkillSync: PresetSkillSyncOverview?
 }
 
 public struct SkillCatalogActionResponse: Codable, Sendable {
@@ -932,6 +1001,7 @@ public struct AIMemberDetail: Codable, Sendable, Identifiable {
     public var personality: String
     public var soul: String
     public var workStyles: [String]
+    public var presetSkillIds: [String]?
     public var skillIds: [String]
     public var knowledgePackIds: [String]
     public var capabilitySettings: MemberCapabilitySettings
@@ -968,6 +1038,7 @@ public struct AIMemberPreset: Codable, Sendable, Identifiable {
     public var personality: String
     public var soul: String
     public var workStyles: [String]
+    public var presetSkillIds: [String]?
     public var skillIds: [String]
     public var knowledgePackIds: [String]
     public var defaultMemoryEnabled: Bool?
@@ -982,6 +1053,7 @@ public struct AITeamOverview: Codable, Sendable {
     public var memberPresets: [AIMemberPreset]
     public var knowledgePacks: [KnowledgePack]
     public var skillOptions: [SkillOption]
+    public var presetSkillSync: PresetSkillSyncOverview?
 }
 
 public struct MemberBindingsResponse: Codable, Sendable {
@@ -996,19 +1068,59 @@ public struct AITeamActionResponse: Codable, Sendable {
     public var requiresGatewayApply: Bool?
 }
 
+public enum ChatBridgeState: String, Codable, Sendable {
+    case connected
+    case reconnecting
+    case polling
+    case disconnected
+}
+
+public enum ChatToolActivityStatus: String, Codable, Sendable {
+    case queued
+    case running
+    case completed
+    case failed
+}
+
+public struct ChatToolActivity: Codable, Sendable {
+    public var id: String
+    public var label: String
+    public var status: ChatToolActivityStatus
+    public var detail: String?
+
+    public init(id: String, label: String, status: ChatToolActivityStatus, detail: String? = nil) {
+        self.id = id
+        self.label = label
+        self.status = status
+        self.detail = detail
+    }
+}
+
 public struct ChatComposerState: Codable, Sendable {
     public var status: String
     public var canSend: Bool
     public var canAbort: Bool
     public var activityLabel: String?
     public var error: String?
+    public var bridgeState: ChatBridgeState?
+    public var toolActivities: [ChatToolActivity]?
 
-    public init(status: String, canSend: Bool, canAbort: Bool, activityLabel: String? = nil, error: String? = nil) {
+    public init(
+        status: String,
+        canSend: Bool,
+        canAbort: Bool,
+        activityLabel: String? = nil,
+        error: String? = nil,
+        bridgeState: ChatBridgeState? = nil,
+        toolActivities: [ChatToolActivity]? = nil
+    ) {
         self.status = status
         self.canSend = canSend
         self.canAbort = canAbort
         self.activityLabel = activityLabel
         self.error = error
+        self.bridgeState = bridgeState
+        self.toolActivities = toolActivities
     }
 }
 
@@ -1164,7 +1276,8 @@ public enum ChatStreamEvent: Codable, Sendable {
     case messageCreated(threadId: String, message: ChatMessage)
     case runStarted(threadId: String, message: ChatMessage, activityLabel: String?)
     case assistantThinking(threadId: String, activityLabel: String?)
-    case assistantToolStatus(threadId: String, activityLabel: String)
+    case connectionState(threadId: String, state: ChatBridgeState, detail: String?)
+    case assistantToolStatus(threadId: String, sessionKey: String, runId: String?, activityLabel: String, toolActivity: ChatToolActivity)
     case assistantDelta(threadId: String, message: ChatMessage, activityLabel: String?)
     case assistantCompleted(threadId: String, detail: ChatThreadDetail, activityLabel: String?)
     case assistantAborted(threadId: String, detail: ChatThreadDetail, activityLabel: String?)
@@ -1177,7 +1290,11 @@ public enum ChatStreamEvent: Codable, Sendable {
         case threadId
         case detail
         case message
+        case sessionKey
+        case runId
+        case state
         case activityLabel
+        case toolActivity
         case error
     }
 
@@ -1208,10 +1325,19 @@ public enum ChatStreamEvent: Codable, Sendable {
                 threadId: try container.decode(String.self, forKey: .threadId),
                 activityLabel: try container.decodeIfPresent(String.self, forKey: .activityLabel)
             )
+        case "connection-state":
+            self = .connectionState(
+                threadId: try container.decode(String.self, forKey: .threadId),
+                state: try container.decode(ChatBridgeState.self, forKey: .state),
+                detail: try container.decodeIfPresent(String.self, forKey: .detail)
+            )
         case "assistant-tool-status":
             self = .assistantToolStatus(
                 threadId: try container.decode(String.self, forKey: .threadId),
-                activityLabel: try container.decode(String.self, forKey: .activityLabel)
+                sessionKey: try container.decode(String.self, forKey: .sessionKey),
+                runId: try container.decodeIfPresent(String.self, forKey: .runId),
+                activityLabel: try container.decode(String.self, forKey: .activityLabel),
+                toolActivity: try container.decode(ChatToolActivity.self, forKey: .toolActivity)
             )
         case "assistant-delta":
             self = .assistantDelta(
@@ -1272,10 +1398,18 @@ public enum ChatStreamEvent: Codable, Sendable {
             try container.encode("assistant-thinking", forKey: .type)
             try container.encode(threadId, forKey: .threadId)
             try container.encodeIfPresent(activityLabel, forKey: .activityLabel)
-        case let .assistantToolStatus(threadId, activityLabel):
+        case let .connectionState(threadId, state, detail):
+            try container.encode("connection-state", forKey: .type)
+            try container.encode(threadId, forKey: .threadId)
+            try container.encode(state, forKey: .state)
+            try container.encodeIfPresent(detail, forKey: .detail)
+        case let .assistantToolStatus(threadId, sessionKey, runId, activityLabel, toolActivity):
             try container.encode("assistant-tool-status", forKey: .type)
             try container.encode(threadId, forKey: .threadId)
+            try container.encode(sessionKey, forKey: .sessionKey)
+            try container.encodeIfPresent(runId, forKey: .runId)
             try container.encode(activityLabel, forKey: .activityLabel)
+            try container.encode(toolActivity, forKey: .toolActivity)
         case let .assistantDelta(threadId, message, activityLabel):
             try container.encode("assistant-delta", forKey: .type)
             try container.encode(threadId, forKey: .threadId)

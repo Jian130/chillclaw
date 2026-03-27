@@ -2390,6 +2390,76 @@ function buildCustomSkillMarkdown(
   return `${lines.join("\n").trim()}\n`;
 }
 
+function bundledManagedSkillMarkdown(slug: string): string | undefined {
+  if (slug === "research-brief") {
+    return `---
+name: "Research Brief"
+slug: research-brief
+version: "1.0.0"
+description: "Create concise research summaries with findings, risks, and next steps."
+---
+
+## When to Use
+
+Use this skill when the user needs a grounded research summary that separates facts, risks, and recommended follow-up work.
+
+## Instructions
+
+Start by restating the question in one sentence. Gather the strongest available evidence, call out uncertainty directly, and separate confirmed findings from inference. End with a short list of risks, open questions, and concrete next steps.
+`;
+  }
+
+  if (slug === "status-writer") {
+    return `---
+name: "Status Writer"
+slug: status-writer
+version: "1.0.0"
+description: "Turn progress into crisp status updates with blockers and recommended follow-ups."
+---
+
+## When to Use
+
+Use this skill when the user needs a progress update, standup note, or delivery status summary.
+
+## Instructions
+
+Write in plain language. Start with what changed, then list what is complete, what is blocked, and what should happen next. Keep the update short, concrete, and action-oriented.
+`;
+  }
+
+  return undefined;
+}
+
+async function readBundledManagedSkillMarkdown(slug: string, assetPath?: string): Promise<string | undefined> {
+  const candidates = new Set<string>();
+  const appRoot = getAppRootDir();
+
+  if (assetPath?.trim()) {
+    const normalized = assetPath.trim();
+    candidates.add(normalized);
+    candidates.add(resolve(process.cwd(), normalized));
+    if (appRoot) {
+      candidates.add(resolve(appRoot, normalized));
+      candidates.add(resolve(appRoot, "app", normalized));
+      if (normalized.startsWith("apps/daemon/")) {
+        candidates.add(resolve(appRoot, "app", normalized.replace(/^apps\/daemon\//, "")));
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) {
+      return readFile(candidate, "utf8");
+    }
+  }
+
+  return bundledManagedSkillMarkdown(slug);
+}
+
+function isUsableManagedSkillEntry(entry: SkillRuntimeEntry | undefined): entry is SkillRuntimeEntry {
+  return Boolean(entry && entry.eligible && !entry.disabled && !entry.blockedByAllowlist);
+}
+
 export function parseClawHubSearchOutput(output: string): SkillMarketplaceEntry[] {
   return output
     .split("\n")
@@ -3895,7 +3965,9 @@ export class OpenClawAdapter implements EngineAdapter {
       installMarketplaceSkill: (request) => this.installMarketplaceSkill(request),
       updateMarketplaceSkill: (slug, request) => this.updateMarketplaceSkill(slug, request),
       saveCustomSkill: (skillId, request) => this.saveCustomSkill(skillId, request),
-      removeInstalledSkill: (slug, request) => this.removeInstalledSkill(slug, request)
+      removeInstalledSkill: (slug, request) => this.removeInstalledSkill(slug, request),
+      installManagedSkill: (request) => this.installManagedSkill(request),
+      verifyManagedSkill: (slug) => this.verifyManagedSkill(slug)
     }, {
       secrets: this.secrets,
       resolveModelAuthSecretFieldIds: (providerId, methodId) =>
@@ -3929,9 +4001,46 @@ export class OpenClawAdapter implements EngineAdapter {
     });
   }
 
-  invalidateReadCaches(): void {
-    invalidateReadCache();
-    invalidateCommandResolutionCache();
+  invalidateReadCaches(resources?: import("./adapter.js").EngineReadCacheResource[]): void {
+    if (!resources || resources.length === 0) {
+      invalidateReadCache();
+      invalidateCommandResolutionCache();
+      return;
+    }
+
+    const cachePrefixes = new Set<string>();
+    const commandKeys = new Set<string>();
+
+    for (const resource of resources) {
+      if (resource === "engine") {
+        cachePrefixes.add("engine:");
+        commandKeys.add("command:version:");
+        commandKeys.add("command:update:");
+      }
+      if (resource === "models") {
+        cachePrefixes.add("models:");
+      }
+      if (resource === "channels") {
+        cachePrefixes.add("channels:");
+      }
+      if (resource === "skills") {
+        cachePrefixes.add("skills:");
+      }
+      if (resource === "ai-members") {
+        cachePrefixes.add("agents:");
+      }
+    }
+
+    invalidateReadCache(...cachePrefixes);
+    invalidateCommandResolutionCache(...commandKeys);
+  }
+
+  private mutationSyncMeta(settled = true) {
+    return {
+      epoch: "daemon-local",
+      revision: 0,
+      settled
+    } as const;
   }
 
   private async readOpenClawConfigSnapshot(): Promise<{
@@ -4865,6 +4974,7 @@ export class OpenClawAdapter implements EngineAdapter {
       nextState = await this.syncRuntimeModelChain(nextState);
       await this.markGatewayApplyPending();
       return {
+        ...this.mutationSyncMeta(),
         status: "completed",
         message: appendGatewayApplyMessage(`${nextEntry.label} was updated.`),
         modelConfig: await this.getModelConfig(),
@@ -4874,6 +4984,7 @@ export class OpenClawAdapter implements EngineAdapter {
 
     await writeAdapterState(nextState);
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: `${nextEntry.label} was added to SlackClaw. OpenClaw will only configure it when you set it as default or fallback.`,
       modelConfig: await this.getModelConfig(),
@@ -4930,6 +5041,7 @@ export class OpenClawAdapter implements EngineAdapter {
     await this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage(`${nextEntry.label} is ready.`),
       modelConfig: await this.getModelConfig(),
@@ -5584,6 +5696,65 @@ export class OpenClawAdapter implements EngineAdapter {
     return { requiresGatewayApply: true };
   }
 
+  async installManagedSkill(request: import("./adapter.js").ManagedSkillInstallRequest): Promise<import("./adapter.js").ManagedSkillInstallResult> {
+    const verified = await this.verifyManagedSkill(request.slug);
+    if (verified) {
+      return {
+        runtimeSkillId: verified.id,
+        version: verified.version,
+        requiresGatewayApply: false
+      };
+    }
+
+    if (request.installSource === "bundled") {
+      const bundledMarkdown = await readBundledManagedSkillMarkdown(request.slug, request.bundledAssetPath);
+      if (!bundledMarkdown) {
+        throw new Error(`SlackClaw could not resolve bundled assets for ${request.slug}.`);
+      }
+
+      const list = await this.readOpenClawSkillsList();
+      const skillsDir = await this.resolveSharedSkillsDir(list);
+
+      if (!skillsDir) {
+        throw new Error("SlackClaw could not resolve the shared OpenClaw skills directory.");
+      }
+
+      const baseDir = join(skillsDir, request.slug);
+      await mkdir(baseDir, { recursive: true });
+      await writeFile(join(baseDir, "SKILL.md"), bundledMarkdown);
+
+      await this.markGatewayApplyPending();
+      invalidateReadCache("skills:");
+      const installed = await this.verifyManagedSkill(request.slug);
+
+      return {
+        runtimeSkillId: installed?.id,
+        version: installed?.version ?? request.version,
+        requiresGatewayApply: true
+      };
+    }
+
+    if (request.installSource === "clawhub") {
+      const result = await this.installMarketplaceSkill({
+        slug: request.slug,
+        version: request.version
+      });
+      const installed = await this.verifyManagedSkill(request.slug);
+
+      return {
+        runtimeSkillId: installed?.id,
+        version: installed?.version,
+        requiresGatewayApply: result.requiresGatewayApply
+      };
+    }
+
+    return {
+      runtimeSkillId: undefined,
+      version: request.version,
+      requiresGatewayApply: false
+    };
+  }
+
   async updateMarketplaceSkill(slug: string, request: UpdateSkillRequest): Promise<{ requiresGatewayApply?: boolean }> {
     const context = await this.resolveClawHubContext();
 
@@ -5660,6 +5831,11 @@ export class OpenClawAdapter implements EngineAdapter {
     await this.markGatewayApplyPending();
     invalidateReadCache("skills:");
     return { requiresGatewayApply: true };
+  }
+
+  async verifyManagedSkill(slug: string): Promise<SkillRuntimeEntry | undefined> {
+    const catalog = await this.getSkillRuntimeCatalog();
+    return catalog.skills.find((entry) => entry.slug === slug && isUsableManagedSkillEntry(entry));
   }
 
   private async getModelConfig(): Promise<ModelConfigOverview> {
@@ -5820,6 +5996,7 @@ export class OpenClawAdapter implements EngineAdapter {
     });
 
     return {
+      ...this.mutationSyncMeta(false),
       status: "interactive",
       message: `SlackClaw started the ${provider.label} ${method.label} flow.`,
       modelConfig: await this.getModelConfig(),
@@ -5931,6 +6108,7 @@ export class OpenClawAdapter implements EngineAdapter {
       await this.markGatewayApplyPending();
 
       return {
+        ...this.mutationSyncMeta(),
         status: "completed",
         message: appendGatewayApplyMessage(`${entry.label} was removed.`),
         modelConfig: await this.getModelConfig(),
@@ -5940,6 +6118,7 @@ export class OpenClawAdapter implements EngineAdapter {
 
     await writeAdapterState(nextState);
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: `${entry.label} was removed from SlackClaw.`,
       modelConfig: await this.getModelConfig(),
@@ -5963,6 +6142,7 @@ export class OpenClawAdapter implements EngineAdapter {
     await this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage("Default AI model updated."),
       modelConfig: await this.getModelConfig(),
@@ -5981,6 +6161,7 @@ export class OpenClawAdapter implements EngineAdapter {
     await this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage("Fallback AI models updated."),
       modelConfig: await this.getModelConfig(),
@@ -6112,6 +6293,7 @@ export class OpenClawAdapter implements EngineAdapter {
     message = appendGatewayApplyMessage(message);
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message,
       modelConfig: await this.getModelConfig(),
@@ -6141,6 +6323,7 @@ export class OpenClawAdapter implements EngineAdapter {
 
     await this.markGatewayApplyPending();
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage(`Default model set to ${modelKey}.`),
       modelConfig: await this.getModelConfig(),

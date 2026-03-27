@@ -392,15 +392,28 @@ export class OpenClawGatewaySocketAdapter {
 
           if (envelope.event === "agent") {
             const activityLabel = formatOpenClawGatewayToolActivity(payload);
+            const sessionKey = payload.sessionKey?.trim();
 
-            if (!activityLabel) {
+            if (!activityLabel || !sessionKey) {
               return;
             }
 
             this.emit({
               type: "assistant-tool-status",
+              sessionKey,
               runId: payload.runId,
-              activityLabel
+              activityLabel,
+              toolActivity: {
+                id: payload.data?.name?.trim() || `${sessionKey}:tool`,
+                label: payload.data?.name?.trim() || activityLabel,
+                status:
+                  payload.data?.isError || payload.data?.phase === "error"
+                    ? "failed"
+                    : payload.data?.phase === "result" || payload.data?.phase === "end"
+                      ? "completed"
+                      : "running",
+                detail: payload.data?.error?.trim() || undefined
+              }
             });
           }
         };

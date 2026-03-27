@@ -2,6 +2,18 @@ export type EngineKind = "openclaw" | "zeroclaw" | "ironclaw";
 
 export type Severity = "ok" | "info" | "warning" | "error";
 export type RecoverySafety = "safe" | "review" | "destructive";
+export interface RevisionedSnapshot<T> {
+  epoch: string;
+  revision: number;
+  data: T;
+}
+
+export interface MutationSyncMeta {
+  epoch: string;
+  revision: number;
+  settled: boolean;
+}
+
 export type RecoveryActionType =
   | "restart-engine"
   | "repair-config"
@@ -251,7 +263,7 @@ export interface OnboardingEmployeeState {
   avatarPresetId: string;
   presetId?: string;
   personalityTraits?: string[];
-  skillIds?: string[];
+  presetSkillIds?: string[];
   knowledgePackIds?: string[];
   workStyles?: string[];
   memoryEnabled?: boolean;
@@ -309,7 +321,7 @@ export interface OnboardingEmployeePresetPresentation {
   theme: OnboardingEmployeePresetTheme;
   starterSkillLabels: string[];
   toolLabels: string[];
-  skillIds: string[];
+  presetSkillIds?: string[];
   knowledgePackIds: string[];
   workStyles: string[];
   defaultMemoryEnabled?: boolean;
@@ -326,6 +338,7 @@ export interface OnboardingStateResponse {
   draft: OnboardingDraftState;
   config: OnboardingUiConfig;
   summary: OnboardingCompletionSummary;
+  presetSkillSync?: PresetSkillSyncOverview;
 }
 
 export interface UpdateOnboardingStateRequest {
@@ -487,6 +500,38 @@ export interface SkillRequirementSummary {
   os: string[];
 }
 
+export type PresetSkillInstallSource = "bundled" | "clawhub";
+export type PresetSkillTargetMode = "managed-local" | "reused-install";
+export type PresetSkillSyncStatus = "pending" | "installing" | "installed" | "verified" | "failed";
+
+export interface PresetSkillDefinition {
+  id: string;
+  label: string;
+  description: string;
+  onboardingSafe: boolean;
+  runtimeSlug: string;
+  installSource: PresetSkillInstallSource;
+  pinnedVersion?: string;
+  bundledAssetPath?: string;
+}
+
+export interface PresetSkillSyncEntry {
+  presetSkillId: string;
+  runtimeSlug: string;
+  targetMode: PresetSkillTargetMode;
+  status: PresetSkillSyncStatus;
+  installedVersion?: string;
+  lastError?: string;
+  updatedAt: string;
+}
+
+export interface PresetSkillSyncOverview {
+  targetMode: PresetSkillTargetMode;
+  entries: PresetSkillSyncEntry[];
+  summary: string;
+  repairRecommended: boolean;
+}
+
 export type InstalledSkillSource = "bundled" | "workspace" | "extra" | "clawhub" | "custom";
 export type SkillManagerKind = "openclaw" | "clawhub" | "slackclaw-custom";
 
@@ -559,6 +604,7 @@ export interface SkillCatalogOverview {
   installedSkills: InstalledSkillEntry[];
   readiness: SkillReadinessSummary;
   marketplacePreview: SkillMarketplaceEntry[];
+  presetSkillSync?: PresetSkillSyncOverview;
 }
 
 export interface MemberBindingSummary {
@@ -588,6 +634,7 @@ export interface AIMemberDetail extends AIMemberSummary {
   personality: string;
   soul: string;
   workStyles: string[];
+  presetSkillIds?: string[];
   skillIds: string[];
   knowledgePackIds: string[];
   capabilitySettings: MemberCapabilitySettings;
@@ -626,6 +673,7 @@ export interface AIMemberPreset {
   personality: string;
   soul: string;
   workStyles: string[];
+  presetSkillIds?: string[];
   skillIds: string[];
   knowledgePackIds: string[];
   defaultMemoryEnabled?: boolean;
@@ -640,6 +688,7 @@ export interface AITeamOverview {
   memberPresets: AIMemberPreset[];
   knowledgePacks: KnowledgePack[];
   skillOptions: SkillOption[];
+  presetSkillSync?: PresetSkillSyncOverview;
 }
 
 export interface MemberBindingsResponse {
@@ -650,6 +699,14 @@ export interface MemberBindingsResponse {
 export type ChatThreadStatus = "idle" | "sending" | "thinking" | "streaming" | "aborting" | "error";
 export type ChatHistoryStatus = "ready" | "unavailable";
 export type ChatMessageStatus = "pending" | "sent" | "streaming" | "failed";
+export type ChatBridgeState = "connected" | "reconnecting" | "polling" | "disconnected";
+
+export interface ChatToolActivity {
+  id: string;
+  label: string;
+  status: "queued" | "running" | "completed" | "failed";
+  detail?: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -671,6 +728,8 @@ export interface ChatComposerState {
   canAbort: boolean;
   activityLabel?: string;
   error?: string;
+  bridgeState?: ChatBridgeState;
+  toolActivities?: ChatToolActivity[];
 }
 
 export interface ChatThreadSummary {
@@ -712,6 +771,12 @@ export interface AbortChatRequest {}
 
 export type ChatStreamEvent =
   | {
+      type: "connection-state";
+      threadId: string;
+      state: ChatBridgeState;
+      detail?: string;
+    }
+  | {
       type: "thread-created";
       thread: ChatThreadSummary;
     }
@@ -739,7 +804,10 @@ export type ChatStreamEvent =
   | {
       type: "assistant-tool-status";
       threadId: string;
+      sessionKey: string;
+      runId?: string;
       activityLabel: string;
+      toolActivity: ChatToolActivity;
     }
   | {
       type: "assistant-delta";
@@ -782,6 +850,30 @@ export type SlackClawDeployPhase =
 export type SlackClawConfigResource = "models" | "channels" | "skills" | "ai-employees" | "onboarding" | "gateway";
 
 export type SlackClawEvent =
+  | {
+      type: "overview.updated";
+      snapshot: RevisionedSnapshot<ProductOverview>;
+    }
+  | {
+      type: "ai-team.updated";
+      snapshot: RevisionedSnapshot<AITeamOverview>;
+    }
+  | {
+      type: "model-config.updated";
+      snapshot: RevisionedSnapshot<ModelConfigOverview>;
+    }
+  | {
+      type: "channel-config.updated";
+      snapshot: RevisionedSnapshot<ChannelConfigOverview>;
+    }
+  | {
+      type: "skill-catalog.updated";
+      snapshot: RevisionedSnapshot<SkillCatalogOverview>;
+    }
+  | {
+      type: "preset-skill-sync.updated";
+      snapshot: RevisionedSnapshot<PresetSkillSyncOverview>;
+    }
   | {
       type: "deploy.progress";
       correlationId: string;
@@ -912,7 +1004,7 @@ export interface ReplaceFallbackModelEntriesRequest {
   entryIds: string[];
 }
 
-export interface ModelConfigActionResponse {
+export interface ModelConfigActionResponse extends MutationSyncMeta {
   status: "completed" | "failed" | "interactive";
   message: string;
   modelConfig: ModelConfigOverview;
@@ -1003,7 +1095,7 @@ export interface ChannelSessionInputRequest {
   value: string;
 }
 
-export interface ChannelConfigActionResponse {
+export interface ChannelConfigActionResponse extends MutationSyncMeta {
   status: "completed" | "failed" | "interactive";
   message: string;
   channelConfig: ChannelConfigOverview;
@@ -1024,6 +1116,7 @@ export interface SaveAIMemberRequest {
   personality: string;
   soul: string;
   workStyles: string[];
+  presetSkillIds?: string[];
   skillIds: string[];
   knowledgePackIds: string[];
   capabilitySettings: MemberCapabilitySettings;
@@ -1068,21 +1161,21 @@ export interface UpdateSkillRequest {
 
 export interface RemoveSkillRequest {}
 
-export interface AITeamActionResponse {
+export interface AITeamActionResponse extends MutationSyncMeta {
   status: "completed" | "failed";
   message: string;
   overview: AITeamOverview;
   requiresGatewayApply?: boolean;
 }
 
-export interface ChatActionResponse {
+export interface ChatActionResponse extends MutationSyncMeta {
   status: "completed" | "failed";
   message: string;
   overview: ChatOverview;
   thread?: ChatThreadDetail;
 }
 
-export interface SkillCatalogActionResponse {
+export interface SkillCatalogActionResponse extends MutationSyncMeta {
   status: "completed" | "failed";
   message: string;
   skillConfig: SkillCatalogOverview;

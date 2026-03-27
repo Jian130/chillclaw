@@ -11,17 +11,18 @@ struct AppStateEventTests {
     func overviewRefreshHelperMatchesDashboardEvents() {
         #expect(
             shouldRefreshNativeOverviewForEvent(
-                SlackClawEvent.configApplied(resource: .models, summary: "Models saved.")
-            ) == true
-        )
-        #expect(
-            shouldRefreshNativeOverviewForEvent(
                 SlackClawEvent.gatewayStatus(reachable: true, pendingGatewayApply: false, summary: "Ready")
             ) == true
         )
         #expect(
             shouldRefreshNativeOverviewForEvent(
-                SlackClawEvent.taskProgress(taskId: "task-1", status: .running, message: "Working")
+                SlackClawEvent.modelConfigUpdated(
+                    snapshot: .init(
+                        epoch: "epoch-1",
+                        revision: 1,
+                        data: emptyNativeModelConfig()
+                    )
+                )
             ) == false
         )
         #expect(
@@ -29,26 +30,46 @@ struct AppStateEventTests {
                 SlackClawEvent.taskProgress(taskId: "task-1", status: .completed, message: "Done")
             ) == true
         )
+        #expect(
+            shouldRefreshNativeOverviewForEvent(
+                SlackClawEvent.taskProgress(taskId: "task-1", status: .running, message: "Working")
+            ) == false
+        )
     }
 
     @Test
-    func sectionRefreshHelperScopesConfigEvents() {
+    func sectionRefreshHelperScopesLiveEvents() {
         #expect(
             shouldRefreshNativeSectionForEvent(
-                SlackClawEvent.configApplied(resource: .aiEmployees, summary: "AI employees saved."),
-                selectedSection: .team
+                SlackClawEvent.channelSessionUpdated(
+                    channelId: "wechat",
+                    session: .init(id: "session-1", channelId: "wechat", entryId: nil, status: "ready", message: "Ready", logs: [])
+                ),
+                selectedSection: .configuration
             ) == true
         )
         #expect(
             shouldRefreshNativeSectionForEvent(
-                SlackClawEvent.configApplied(resource: .skills, summary: "Skills saved."),
+                SlackClawEvent.aiTeamUpdated(
+                    snapshot: .init(
+                        epoch: "epoch-1",
+                        revision: 2,
+                        data: emptyNativeAITeamOverview()
+                    )
+                ),
+                selectedSection: .team
+            ) == false
+        )
+        #expect(
+            shouldRefreshNativeSectionForEvent(
+                SlackClawEvent.skillCatalogUpdated(
+                    snapshot: .init(
+                        epoch: "epoch-1",
+                        revision: 3,
+                        data: emptyNativeSkillConfig()
+                    )
+                ),
                 selectedSection: .members
-            ) == true
-        )
-        #expect(
-            shouldRefreshNativeSectionForEvent(
-                SlackClawEvent.configApplied(resource: .channels, summary: "Channels saved."),
-                selectedSection: .team
             ) == false
         )
         #expect(
@@ -100,10 +121,10 @@ struct AppStateEventTests {
         )
 
         await appState.applyDaemonEvent(
-            SlackClawEvent.configApplied(resource: .aiEmployees, summary: "AI employees saved.")
+            SlackClawEvent.gatewayStatus(reachable: true, pendingGatewayApply: false, summary: "Gateway ready")
         )
 
-        #expect(await loadRecorder.events() == ["overview", "team"])
+        #expect(await loadRecorder.events() == ["overview"])
         #expect(appState.errorMessage == nil)
     }
 
@@ -142,7 +163,7 @@ struct AppStateEventTests {
             daemonEventStreamFactory: {
                 AsyncStream { continuation in
                     continuation.yield(
-                        SlackClawEvent.configApplied(resource: .aiEmployees, summary: "AI employees saved.")
+                        SlackClawEvent.gatewayStatus(reachable: true, pendingGatewayApply: false, summary: "Gateway ready")
                     )
                     continuation.finish()
                 }
@@ -151,9 +172,9 @@ struct AppStateEventTests {
         appState.hasBootstrapped = false
 
         await appState.bootstrap()
-        await waitForRecordedEventCount(loadRecorder, expectedCount: 3)
+        await waitForRecordedEventCount(loadRecorder, expectedCount: 2)
 
-        #expect(await loadRecorder.events() == ["overview", "overview", "team"])
+        #expect(await loadRecorder.events() == ["overview", "overview"])
     }
 
     @Test
@@ -298,7 +319,8 @@ private func emptyNativeSkillConfig() -> SkillCatalogOverview {
         marketplaceSummary: "Ready",
         installedSkills: [],
         readiness: .init(total: 0, eligible: 0, disabled: 0, blocked: 0, missing: 0, warnings: [], summary: "Ready"),
-        marketplacePreview: []
+        marketplacePreview: [],
+        presetSkillSync: nil
     )
 }
 
@@ -311,7 +333,8 @@ private func emptyNativeAITeamOverview() -> AITeamOverview {
         availableBrains: [],
         memberPresets: [],
         knowledgePacks: [],
-        skillOptions: []
+        skillOptions: [],
+        presetSkillSync: nil
     )
 }
 

@@ -1,5 +1,7 @@
 import type { OnboardingUiConfig } from "@slackclaw/contracts";
 
+import { presetSkillDefinitions } from "./preset-skill-definitions.js";
+
 export const onboardingUiConfig: OnboardingUiConfig = {
   modelProviders: [
     {
@@ -104,7 +106,7 @@ export const onboardingUiConfig: OnboardingUiConfig = {
       theme: "analyst",
       starterSkillLabels: ["Research Brief", "Status Writer"],
       toolLabels: ["Company handbook", "Delivery playbook"],
-      skillIds: ["research-brief", "status-writer"],
+      presetSkillIds: presetSkillDefinitions.map((definition) => definition.id),
       knowledgePackIds: ["company-handbook", "delivery-playbook"],
       workStyles: ["Analytical", "Concise"],
       defaultMemoryEnabled: true
@@ -116,7 +118,7 @@ export const onboardingUiConfig: OnboardingUiConfig = {
       theme: "support",
       starterSkillLabels: ["Status Writer"],
       toolLabels: ["Customer voice", "Memory"],
-      skillIds: ["status-writer"],
+      presetSkillIds: ["status-writer"],
       knowledgePackIds: ["customer-voice"],
       workStyles: ["Calm", "Supportive"],
       defaultMemoryEnabled: true
@@ -128,7 +130,7 @@ export const onboardingUiConfig: OnboardingUiConfig = {
       theme: "operator",
       starterSkillLabels: ["Research Brief"],
       toolLabels: ["Delivery playbook", "Company handbook"],
-      skillIds: ["research-brief"],
+      presetSkillIds: ["research-brief"],
       knowledgePackIds: ["delivery-playbook", "company-handbook"],
       workStyles: ["Methodical", "Action-oriented"],
       defaultMemoryEnabled: true

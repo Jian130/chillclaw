@@ -3,6 +3,7 @@ import type {
   BindAIMemberChannelRequest,
   BrainAssignment,
   ChatMessage,
+  ChatToolActivity,
   ChatThreadDetail,
   DeleteAIMemberRequest,
   InstallSkillRequest,
@@ -81,9 +82,26 @@ export type EngineChatLiveEvent =
     }
   | {
       type: "assistant-tool-status";
+      sessionKey: string;
       runId?: string;
       activityLabel: string;
+      toolActivity: ChatToolActivity;
     };
+
+export type EngineReadCacheResource = "engine" | "models" | "channels" | "skills" | "ai-members";
+
+export interface ManagedSkillInstallRequest {
+  slug: string;
+  installSource: "bundled" | "clawhub";
+  version?: string;
+  bundledAssetPath?: string;
+}
+
+export interface ManagedSkillInstallResult {
+  runtimeSkillId?: string;
+  version?: string;
+  requiresGatewayApply?: boolean;
+}
 
 export interface AIMemberRuntimeRequest {
   memberId: string;
@@ -196,6 +214,8 @@ export interface ConfigManager {
     slug: string,
     request: RemoveSkillRequest & { managedBy: "clawhub" | "slackclaw-custom" }
   ): Promise<{ requiresGatewayApply?: boolean }>;
+  installManagedSkill(request: ManagedSkillInstallRequest): Promise<ManagedSkillInstallResult>;
+  verifyManagedSkill(slug: string): Promise<SkillRuntimeEntry | undefined>;
 }
 
 export interface AIEmployeeManager {
@@ -240,5 +260,5 @@ export interface EngineAdapter {
   readonly aiEmployees: AIEmployeeManager;
   readonly gateway: GatewayManager;
 
-  invalidateReadCaches(): void;
+  invalidateReadCaches(resources?: EngineReadCacheResource[]): void;
 }

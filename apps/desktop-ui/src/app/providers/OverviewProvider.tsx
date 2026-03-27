@@ -15,11 +15,22 @@ interface OverviewContextValue {
 const OverviewContext = createContext<OverviewContextValue | null>(null);
 
 export function shouldRefreshOverviewForEvent(event: SlackClawEvent): boolean {
+  if (
+    event.type === "overview.updated" ||
+    event.type === "ai-team.updated" ||
+    event.type === "model-config.updated" ||
+    event.type === "channel-config.updated" ||
+    event.type === "skill-catalog.updated" ||
+    event.type === "preset-skill-sync.updated"
+  ) {
+    return false;
+  }
+
   if (event.type === "task.progress") {
     return event.status !== "running";
   }
 
-  return event.type === "deploy.completed" || event.type === "gateway.status" || event.type === "config.applied";
+  return event.type === "deploy.completed" || event.type === "gateway.status";
 }
 
 export function OverviewProvider(props: PropsWithChildren) {
@@ -48,11 +59,18 @@ export function OverviewProvider(props: PropsWithChildren) {
 
   useEffect(() => {
     return subscribeToDaemonEvents((event) => {
+      if (event.type === "overview.updated") {
+        setOverviewState(event.snapshot.data);
+        setLoading(false);
+        setError(undefined);
+        return;
+      }
+
       if (!shouldRefreshOverviewForEvent(event)) {
         return;
       }
 
-      void refresh({ fresh: true });
+      void refresh();
     });
   }, [refresh]);
 

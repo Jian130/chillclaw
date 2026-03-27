@@ -67,8 +67,11 @@ import type {
   AIMemberRuntimeRequest,
   AIMemberRuntimeState,
   EngineChatLiveEvent,
+  EngineReadCacheResource,
   GatewayManager,
   InstanceManager,
+  ManagedSkillInstallRequest,
+  ManagedSkillInstallResult,
   ConfigManager,
   SkillRuntimeCatalog,
   SkillRuntimeEntry
@@ -111,7 +114,7 @@ export class MockAdapter implements EngineAdapter {
     futureLocalModelFamilies: ["qwen", "minimax", "llama", "mistral", "custom-openai-compatible"]
   };
 
-  invalidateReadCaches(): void {}
+  invalidateReadCaches(_resources?: EngineReadCacheResource[]): void {}
 
   private installed = true;
   private pendingGatewayApply = false;
@@ -387,7 +390,9 @@ export class MockAdapter implements EngineAdapter {
       installMarketplaceSkill: (request) => this.installMarketplaceSkill(request),
       updateMarketplaceSkill: (slug, request) => this.updateMarketplaceSkill(slug, request),
       saveCustomSkill: (skillId, request) => this.saveCustomSkill(skillId, request),
-      removeInstalledSkill: (slug, request) => this.removeInstalledSkill(slug, request)
+      removeInstalledSkill: (slug, request) => this.removeInstalledSkill(slug, request),
+      installManagedSkill: (request) => this.installManagedSkill(request),
+      verifyManagedSkill: (slug) => this.verifyManagedSkill(slug)
     });
     this.aiEmployees = new OpenClawAIEmployeeManager({
       listAIMemberRuntimeCandidates: () => this.listAIMemberRuntimeCandidates(),
@@ -423,6 +428,14 @@ export class MockAdapter implements EngineAdapter {
   private clearGatewayApplyPending(): void {
     this.pendingGatewayApply = false;
     this.pendingGatewayApplySummary = undefined;
+  }
+
+  private mutationSyncMeta(settled = true) {
+    return {
+      epoch: "mock-daemon",
+      revision: 0,
+      settled
+    } as const;
   }
 
   async install(_autoConfigure = true, _options?: { forceLocal?: boolean }): Promise<InstallResponse> {
@@ -641,6 +654,70 @@ export class MockAdapter implements EngineAdapter {
     return { requiresGatewayApply: true };
   }
 
+  async installManagedSkill(request: ManagedSkillInstallRequest): Promise<ManagedSkillInstallResult> {
+    const existing = this.skillRuntimeCatalog.skills.find((entry) => entry.slug === request.slug);
+    if (existing) {
+      return {
+        runtimeSkillId: existing.id,
+        version: existing.version,
+        requiresGatewayApply: false
+      };
+    }
+
+    if (request.installSource === "bundled") {
+      const bundledSkill: SkillRuntimeEntry = {
+        id: request.slug,
+        slug: request.slug,
+        name: request.slug
+          .split("-")
+          .map((segment) => `${segment.slice(0, 1).toUpperCase()}${segment.slice(1)}`)
+          .join(" "),
+        description: `Bundled managed skill ${request.slug}.`,
+        source: "openclaw-workspace",
+        bundled: true,
+        eligible: true,
+        disabled: false,
+        blockedByAllowlist: false,
+        missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+        version: request.version ?? "1.0.0",
+        filePath: `/mock/openclaw/workspace/skills/${request.slug}/SKILL.md`,
+        baseDir: `/mock/openclaw/workspace/skills/${request.slug}`
+      };
+
+      this.skillRuntimeCatalog = {
+        ...this.skillRuntimeCatalog,
+        skills: [...this.skillRuntimeCatalog.skills, bundledSkill],
+        readiness: {
+          ...this.skillRuntimeCatalog.readiness,
+          total: this.skillRuntimeCatalog.readiness.total + 1,
+          eligible: this.skillRuntimeCatalog.readiness.eligible + 1
+        }
+      };
+      this.markGatewayApplyPending();
+      return {
+        runtimeSkillId: bundledSkill.id,
+        version: bundledSkill.version,
+        requiresGatewayApply: true
+      };
+    }
+
+    await this.installMarketplaceSkill({
+      slug: request.slug,
+      version: request.version
+    });
+    const installed = this.skillRuntimeCatalog.skills.find((entry) => entry.slug === request.slug);
+
+    return {
+      runtimeSkillId: installed?.id,
+      version: installed?.version,
+      requiresGatewayApply: true
+    };
+  }
+
+  async verifyManagedSkill(slug: string): Promise<SkillRuntimeEntry | undefined> {
+    return this.skillRuntimeCatalog.skills.find((entry) => entry.slug === slug && entry.eligible && !entry.disabled && !entry.blockedByAllowlist);
+  }
+
   private async getModelConfig(): Promise<ModelConfigOverview> {
     const defaultEntry = this.savedEntries.find((entry) => entry.isDefault) ?? this.savedEntries[0];
     return {
@@ -700,6 +777,7 @@ export class MockAdapter implements EngineAdapter {
     this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: "Mock saved model entry created.",
       modelConfig: await this.getModelConfig(),
@@ -730,6 +808,7 @@ export class MockAdapter implements EngineAdapter {
     this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: "Mock saved model entry updated.",
       modelConfig: await this.getModelConfig(),
@@ -768,6 +847,7 @@ export class MockAdapter implements EngineAdapter {
     this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: "Mock saved model entry removed.",
       modelConfig: await this.getModelConfig(),
@@ -785,6 +865,7 @@ export class MockAdapter implements EngineAdapter {
     this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: "Mock default entry updated.",
       modelConfig: await this.getModelConfig(),
@@ -801,6 +882,7 @@ export class MockAdapter implements EngineAdapter {
     this.markGatewayApplyPending();
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: "Mock fallback entries updated.",
       modelConfig: await this.getModelConfig(),
@@ -811,6 +893,7 @@ export class MockAdapter implements EngineAdapter {
   async authenticateModelProvider(_request: ModelAuthRequest): Promise<ModelConfigActionResponse> {
     this.markGatewayApplyPending();
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: "Mock provider authentication completed.",
       modelConfig: await this.getModelConfig(),
@@ -843,6 +926,7 @@ export class MockAdapter implements EngineAdapter {
     }
 
     return {
+      ...this.mutationSyncMeta(),
       status: "completed",
       message: `Mock default model set to ${modelKey}.`,
       modelConfig: await this.getModelConfig(),
@@ -1301,8 +1385,14 @@ export class MockAdapter implements EngineAdapter {
       setTimeout(() => {
         this.emitChatEvent({
           type: "assistant-tool-status",
+          sessionKey: request.sessionKey,
           runId,
-          activityLabel: "Using tools: mock-search"
+          activityLabel: "Using tools: mock-search",
+          toolActivity: {
+            id: "mock-search",
+            label: "mock-search",
+            status: "running"
+          }
         });
       }, 5),
       setTimeout(() => {

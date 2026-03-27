@@ -9,17 +9,21 @@ import { MockAdapter } from "../engine/mock-adapter.js";
 import { EventBusService } from "./event-bus-service.js";
 import { EventPublisher } from "./event-publisher.js";
 import { AITeamService } from "./ai-team-service.js";
+import { PresetSkillService } from "./preset-skill-service.js";
 import { StateStore } from "./state-store.js";
 
 function createService(testName: string, adapter = new MockAdapter(), options?: { withEvents?: boolean }) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
   const store = new StateStore(filePath);
   const bus = options?.withEvents ? new EventBusService() : undefined;
+  const eventPublisher = bus ? new EventPublisher(bus) : undefined;
+  const presetSkillService = new PresetSkillService(adapter, store, eventPublisher);
 
   return {
     adapter,
     store,
-    service: new AITeamService(adapter, store, bus ? new EventPublisher(bus) : undefined),
+    service: new AITeamService(adapter, store, eventPublisher, presetSkillService),
+    presetSkillService,
     bus
   };
 }
@@ -124,13 +128,11 @@ test("AI team delete passes keep-workspace mode through and removes team members
   assert.equal(state.aiTeam?.teams[Object.keys(state.aiTeam?.teams ?? {})[0]]?.memberIds.length, 0);
 });
 
-test("AI team service publishes config events for member and team mutations", async () => {
+test("AI team service publishes snapshot events for member and team mutations", async () => {
   const { service, bus } = createService("ai-team-events", new MockAdapter(), { withEvents: true });
   const events: string[] = [];
   bus?.subscribe((event) => {
-    if (event.type === "config.applied") {
-      events.push(`${event.type}:${event.resource}`);
-    }
+    events.push(event.type);
   });
 
   const created = await service.saveMember(undefined, {
@@ -163,8 +165,108 @@ test("AI team service publishes config events for member and team mutations", as
   await service.deleteMember(member.id, { deleteMode: "keep-workspace" });
 
   assert.deepEqual(events, [
-    "config.applied:ai-employees",
-    "config.applied:ai-employees",
-    "config.applied:ai-employees"
+    "ai-team.updated",
+    "ai-team.updated",
+    "ai-team.updated"
   ]);
+});
+
+test("AI team save rejects skill ids that are not verified in the active runtime", async () => {
+  const { service } = createService("ai-team-missing-skills", new MockAdapter());
+
+  await assert.rejects(
+    () =>
+      service.saveMember(undefined, {
+        name: "Jordan Lee",
+        jobTitle: "Support Lead",
+        avatar: {
+          presetId: "operator",
+          accent: "var(--avatar-1)",
+          emoji: "🦊",
+          theme: "sunrise"
+        },
+        brainEntryId: "mock-openai-gpt-4o-mini",
+        personality: "Calm",
+        soul: "Help clearly.",
+        workStyles: [],
+        skillIds: ["research-brief", "missing-skill"],
+        knowledgePackIds: [],
+        capabilitySettings: {
+          memoryEnabled: true,
+          contextWindow: 128000
+        }
+      }),
+    /not verified in the active OpenClaw runtime/i
+  );
+});
+
+test("AI team save resolves preset skill ids through daemon-owned preset verification", async () => {
+  class PresetSkillReadyAdapter extends MockAdapter {
+    private presetReady = false;
+
+    override async installManagedSkill(_request: import("../engine/adapter.js").ManagedSkillInstallRequest) {
+      this.presetReady = true;
+      return {
+        runtimeSkillId: "research-brief",
+        version: "1.0.0",
+        requiresGatewayApply: false
+      };
+    }
+
+    override async verifyManagedSkill(slug: string) {
+      if (!this.presetReady || slug !== "research-brief") {
+        return undefined;
+      }
+
+      return {
+        id: "research-brief",
+        slug,
+        name: "Research Brief",
+        description: "Create concise research summaries with findings, risks, and next steps.",
+        source: "openclaw-workspace",
+        bundled: true,
+        eligible: true,
+        disabled: false,
+        blockedByAllowlist: false,
+        missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+        version: "1.0.0"
+      };
+    }
+  }
+
+  const { service, presetSkillService } = createService("ai-team-preset-skill-request", new PresetSkillReadyAdapter());
+  await presetSkillService.setDesiredPresetSkillIds("test", ["research-brief"]);
+
+  const created = await service.saveMember(undefined, {
+    name: "Jordan Lee",
+    jobTitle: "Support Lead",
+    avatar: {
+      presetId: "operator",
+      accent: "var(--avatar-1)",
+      emoji: "🦊",
+      theme: "sunrise"
+    },
+    brainEntryId: "mock-openai-gpt-4o-mini",
+    personality: "Calm",
+    soul: "Help clearly.",
+    workStyles: [],
+    presetSkillIds: ["research-brief"],
+    skillIds: [],
+    knowledgePackIds: [],
+    capabilitySettings: {
+      memoryEnabled: true,
+      contextWindow: 128000
+    }
+  });
+
+  assert.deepEqual(created.overview.members[0]?.skillIds, ["research-brief"]);
+  assert.deepEqual(created.overview.members[0]?.presetSkillIds, ["research-brief"]);
+});
+
+test("AI team member presets preserve curated preset skill ids alongside runtime skill ids", async () => {
+  const { service } = createService("ai-team-member-preset-provenance", new MockAdapter());
+  const overview = await service.getOverview();
+
+  assert.deepEqual(overview.memberPresets[0]?.presetSkillIds, ["research-brief", "status-writer"]);
+  assert.deepEqual(overview.memberPresets[0]?.skillIds, ["research-brief", "status-writer"]);
 });

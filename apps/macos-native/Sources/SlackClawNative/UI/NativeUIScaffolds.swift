@@ -26,17 +26,20 @@ private struct NativePageHeader<Actions: View>: View {
 struct WorkspaceScaffold<Actions: View, Content: View>: View {
     let title: String
     let subtitle: String
+    let contentWidth: NativePageContentWidth
     @ViewBuilder let actions: Actions
     @ViewBuilder let content: Content
 
     init(
         title: String,
         subtitle: String,
+        contentWidth: NativePageContentWidth = .centered,
         @ViewBuilder actions: () -> Actions = { EmptyView() },
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.contentWidth = contentWidth
         self.actions = actions()
         self.content = content()
     }
@@ -49,7 +52,8 @@ struct WorkspaceScaffold<Actions: View, Content: View>: View {
                 }
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: nativePageContentMaxWidth(contentWidth) ?? .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: contentWidth == .centered ? .center : .leading)
             .padding(NativeUI.pagePadding)
         }
     }
@@ -58,6 +62,7 @@ struct WorkspaceScaffold<Actions: View, Content: View>: View {
 struct OperationsScaffold<Actions: View, Activity: View, Hero: View, Content: View>: View {
     let title: String
     let subtitle: String
+    let contentWidth: NativePageContentWidth
     @ViewBuilder let actions: Actions
     @ViewBuilder let activity: Activity
     @ViewBuilder let hero: Hero
@@ -66,6 +71,7 @@ struct OperationsScaffold<Actions: View, Activity: View, Hero: View, Content: Vi
     init(
         title: String,
         subtitle: String,
+        contentWidth: NativePageContentWidth = .centered,
         @ViewBuilder actions: () -> Actions = { EmptyView() },
         @ViewBuilder activity: () -> Activity = { EmptyView() },
         @ViewBuilder hero: () -> Hero,
@@ -73,6 +79,7 @@ struct OperationsScaffold<Actions: View, Activity: View, Hero: View, Content: Vi
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.contentWidth = contentWidth
         self.actions = actions()
         self.activity = activity()
         self.hero = hero()
@@ -89,7 +96,8 @@ struct OperationsScaffold<Actions: View, Activity: View, Hero: View, Content: Vi
                 hero
                 content
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: nativePageContentMaxWidth(contentWidth) ?? .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: contentWidth == .centered ? .center : .leading)
             .padding(NativeUI.pagePadding)
         }
     }
@@ -98,6 +106,7 @@ struct OperationsScaffold<Actions: View, Activity: View, Hero: View, Content: Vi
 struct SplitContentScaffold<Actions: View, Sidebar: View, Detail: View>: View {
     let title: String
     let subtitle: String
+    let contentWidth: NativePageContentWidth
     @ViewBuilder let actions: Actions
     @ViewBuilder let sidebar: Sidebar
     @ViewBuilder let detail: Detail
@@ -105,12 +114,14 @@ struct SplitContentScaffold<Actions: View, Sidebar: View, Detail: View>: View {
     init(
         title: String,
         subtitle: String,
+        contentWidth: NativePageContentWidth = .full,
         @ViewBuilder actions: () -> Actions = { EmptyView() },
         @ViewBuilder sidebar: () -> Sidebar,
         @ViewBuilder detail: () -> Detail
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.contentWidth = contentWidth
         self.actions = actions()
         self.sidebar = sidebar()
         self.detail = detail()
@@ -137,6 +148,7 @@ struct SplitContentScaffold<Actions: View, Sidebar: View, Detail: View>: View {
 }
 
 struct GuidedFlowScaffold<Header: View, Content: View, Footer: View, Aside: View>: View {
+    let contentWidth: NativePageContentWidth
     @ViewBuilder let header: Header
     @ViewBuilder let content: Content
     @ViewBuilder let footer: Footer
@@ -145,11 +157,13 @@ struct GuidedFlowScaffold<Header: View, Content: View, Footer: View, Aside: View
 
     init(
         asideWidth: CGFloat = 320,
+        contentWidth: NativePageContentWidth = .centered,
         @ViewBuilder header: () -> Header,
         @ViewBuilder content: () -> Content,
         @ViewBuilder footer: () -> Footer = { EmptyView() },
         @ViewBuilder aside: () -> Aside = { EmptyView() }
     ) {
+        self.contentWidth = contentWidth
         self.header = header()
         self.content = content()
         self.footer = footer()
@@ -183,7 +197,8 @@ struct GuidedFlowScaffold<Header: View, Content: View, Footer: View, Aside: View
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: nativePageContentMaxWidth(contentWidth) ?? .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: contentWidth == .centered ? .center : .leading)
                 .padding(NativeUI.pagePadding)
             }
         }

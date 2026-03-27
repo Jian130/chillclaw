@@ -121,7 +121,8 @@ struct DashboardScreen: View {
             } else {
                 WorkspaceScaffold(
                     title: nativeDashboardCopy(localeIdentifier: resolveNativeOnboardingLocaleIdentifier(selectedLocaleIdentifier)).dashboardTitle,
-                    subtitle: nativeDashboardCopy(localeIdentifier: resolveNativeOnboardingLocaleIdentifier(selectedLocaleIdentifier)).dashboardSubtitle
+                    subtitle: nativeDashboardCopy(localeIdentifier: resolveNativeOnboardingLocaleIdentifier(selectedLocaleIdentifier)).dashboardSubtitle,
+                    contentWidth: nativeDashboardContentWidth
                 ) {
                     LoadingState(title: "Loading dashboard", description: "ChillClaw is gathering runtime, model, and team health data.")
                 }
@@ -140,7 +141,7 @@ struct DashboardScreen: View {
         let metricColumns = nativeWorkspaceMetricColumns(for: availableWidth)
         let copy = nativeDashboardCopy(localeIdentifier: localeIdentifier)
 
-        WorkspaceScaffold(title: copy.dashboardTitle, subtitle: copy.dashboardSubtitle) {
+        WorkspaceScaffold(title: copy.dashboardTitle, subtitle: copy.dashboardSubtitle, contentWidth: nativeDashboardContentWidth) {
             HStack(spacing: 12) {
                 ActionButton(copy.createEmployee, variant: .primary) {
                     appState.selectedSection = .members
@@ -444,7 +445,7 @@ struct DeployScreen: View {
         SurfaceCard(padding: 22, spacing: 18) {
             HStack(alignment: .top, spacing: 16) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: NativeUI.mediumCornerRadius, style: .continuous)
                         .fill(nativeAccentColor(target.accent).opacity(0.14))
                     Text(target.icon)
                         .font(.system(size: 32))
@@ -558,7 +559,7 @@ struct DeployScreen: View {
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(nativeAccentColor(card.accent))
                     .frame(width: 36, height: 36)
-                    .background(nativeAccentColor(card.accent).opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(nativeAccentColor(card.accent).opacity(0.14), in: RoundedRectangle(cornerRadius: NativeUI.iconCornerRadius, style: .continuous))
                 VStack(alignment: .leading, spacing: 6) {
                     Text(card.title)
                         .font(.headline)
@@ -832,6 +833,23 @@ struct SkillsScreen: View {
                 showCustomSkillSheet = true
             }
         } content: {
+            if let presetSync = appState.skillConfig?.presetSkillSync {
+                SurfaceCard(title: "Preset Skill Sync", subtitle: presetSync.summary) {
+                    let counts = nativePresetSkillSyncCounts(presetSync)
+                    HStack {
+                        StatusBadge("\(counts.verified) verified", tone: .success)
+                        StatusBadge("\(counts.pending) pending", tone: counts.pending > 0 ? .info : .neutral)
+                        StatusBadge("\(counts.failed) failed", tone: counts.failed > 0 ? .warning : .neutral)
+                        Spacer()
+                        if presetSync.repairRecommended {
+                            ActionButton("Repair Preset Skills", systemImage: "wrench.and.screwdriver", variant: .outline) {
+                                Task { await repairPresetSkills() }
+                            }
+                        }
+                    }
+                }
+            }
+
             SurfaceCard(title: "Installed Skills") {
                 if let installedSkills = appState.skillConfig?.installedSkills, !installedSkills.isEmpty {
                     ForEach(installedSkills) { skill in
@@ -898,6 +916,30 @@ struct SkillsScreen: View {
             appState.presentErrorUnlessCancelled(error)
         }
     }
+
+    private func repairPresetSkills() async {
+        do {
+            let response = try await appState.client.repairPresetSkillSync()
+            appState.skillConfig = response.skillConfig
+            appState.applyBanner(response.message)
+            await appState.refreshAll()
+        } catch {
+            appState.presentErrorUnlessCancelled(error)
+        }
+    }
+}
+
+private func nativePresetSkillSyncCounts(_ overview: PresetSkillSyncOverview) -> (pending: Int, verified: Int, failed: Int) {
+    overview.entries.reduce(into: (pending: 0, verified: 0, failed: 0)) { counts, entry in
+        switch entry.status {
+        case .verified, .installed:
+            counts.verified += 1
+        case .failed:
+            counts.failed += 1
+        default:
+            counts.pending += 1
+        }
+    }
 }
 
 struct MembersScreen: View {
@@ -912,7 +954,7 @@ struct MembersScreen: View {
         } content: {
             if let members = appState.aiTeamOverview?.members, !members.isEmpty {
                 ForEach(members) { member in
-                    SurfaceCard(title: member.name, subtitle: member.jobTitle) {
+                    SurfaceCard(title: member.name, subtitle: member.jobTitle, minimumHeight: nativeWorkspaceCollectionCardMinHeight) {
                         VStack(alignment: .leading, spacing: 10) {
                             Text(member.currentStatus)
                                 .foregroundStyle(.secondary)
@@ -998,35 +1040,333 @@ struct ChatScreen: View {
         } detail: {
             SurfaceCard(tone: .muted, padding: 20, spacing: 12) {
                 if let thread = appState.chatViewModel.selectedThread {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(thread.title)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            Text(thread.sessionKey)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if thread.composerState.canAbort {
-                            ActionButton("Stop", variant: .destructive) {
-                                Task { await appState.chatViewModel.abortCurrentRun() }
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(thread.title)
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                                Text(thread.lastPreview ?? "Waiting for the next assistant update.")
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            if thread.composerState.canAbort {
+                                ActionButton("Stop", variant: .destructive) {
+                                    Task { await appState.chatViewModel.abortCurrentRun() }
+                                }
                             }
                         }
-                    }
-                    SlackClawChatTranscriptView(messages: thread.messages)
-                    HStack {
-                        TextField("Message", text: $appState.chatViewModel.draftMessage, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                        ActionButton("Send", systemImage: "paperplane.fill", variant: .primary) {
-                            Task { await appState.chatViewModel.sendCurrentMessage() }
+
+                        HStack(spacing: 8) {
+                            StatusBadge(
+                                nativeChatComposerLabel(for: thread.composerState.status),
+                                tone: nativeChatComposerTone(for: thread.composerState.status),
+                                systemImage: nativeChatComposerIcon(for: thread.composerState.status)
+                            )
+                            if let bridgeState = thread.composerState.bridgeState {
+                                StatusBadge(
+                                    nativeChatBridgeLabel(for: bridgeState),
+                                    tone: nativeChatBridgeTone(for: bridgeState),
+                                    systemImage: nativeChatBridgeIcon(for: bridgeState)
+                                )
+                            }
+                            if let activeRunState = thread.activeRunState, !activeRunState.isEmpty {
+                                TagBadge(activeRunState, tone: .neutral)
+                            }
+                            if thread.composerState.canAbort {
+                                TagBadge("Live run", tone: .accent)
+                            }
                         }
-                        .disabled(!thread.composerState.canSend)
+
+                        if let activityLabel = thread.composerState.activityLabel, !activityLabel.isEmpty {
+                            Text(activityLabel)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let error = thread.composerState.error, !error.isEmpty {
+                            InfoBanner(
+                                title: "Send failed",
+                                description: error,
+                                icon: "exclamationmark.triangle.fill",
+                                accent: .red
+                            )
+                        }
+
+                        if let toolActivities = thread.composerState.toolActivities, !toolActivities.isEmpty {
+                            SurfaceCard(title: "Tool progress", subtitle: "Current assistant tool calls and their live state.") {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(toolActivities, id: \.id) { activity in
+                                        HStack(alignment: .top, spacing: 10) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(activity.label)
+                                                    .fontWeight(.semibold)
+                                                if let detail = activity.detail, !detail.isEmpty {
+                                                    Text(detail)
+                                                        .font(.callout)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                            Spacer(minLength: 0)
+                                            StatusBadge(
+                                                nativeChatToolActivityLabel(for: activity.status),
+                                                tone: nativeChatToolActivityTone(for: activity.status)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        SlackClawChatTranscriptView(thread: thread)
+
+                        HStack(spacing: 12) {
+                            ZStack(alignment: .topLeading) {
+                                NativeChatComposerTextView(
+                                    text: $appState.chatViewModel.draftMessage,
+                                    canSend: appState.chatViewModel.canSendCurrentDraft
+                                ) {
+                                    Task { await appState.chatViewModel.sendCurrentMessage() }
+                                }
+                                if appState.chatViewModel.draftMessage.isEmpty {
+                                    Text("Message")
+                                        .foregroundStyle(.tertiary)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 12)
+                                        .allowsHitTesting(false)
+                                }
+                            }
+                            .frame(minHeight: 78, maxHeight: 140)
+                            ActionButton("Send", systemImage: "paperplane.fill", variant: .primary) {
+                                Task { await appState.chatViewModel.sendCurrentMessage() }
+                            }
+                            .disabled(!appState.chatViewModel.canSendCurrentDraft)
+                        }
+                        Text("Return sends. Shift-Return adds a new line.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 } else {
                     EmptyState(title: "Choose a chat", description: "Create a new chat or select an existing conversation.", symbol: "bubble.left.and.bubble.right")
                 }
             }
         }
+    }
+}
+
+func nativeChatComposerLabel(for status: String) -> String {
+    switch status.lowercased() {
+    case "sending":
+        return "Sending"
+    case "thinking":
+        return "Thinking"
+    case "streaming":
+        return "Streaming"
+    case "aborting":
+        return "Stopping"
+    case "error", "failed":
+        return "Failed"
+    default:
+        return "Idle"
+    }
+}
+
+func nativeChatComposerTone(for status: String) -> NativeStatusTone {
+    switch status.lowercased() {
+    case "sending", "thinking", "streaming", "aborting":
+        return .info
+    case "error", "failed":
+        return .danger
+    default:
+        return .neutral
+    }
+}
+
+func nativeChatComposerIcon(for status: String) -> String? {
+    switch status.lowercased() {
+    case "sending":
+        return "paperplane"
+    case "thinking":
+        return "brain"
+    case "streaming":
+        return "waveform"
+    case "aborting":
+        return "stop.fill"
+    case "error", "failed":
+        return "exclamationmark.triangle.fill"
+    default:
+        return "checkmark.circle.fill"
+    }
+}
+
+func nativeChatShouldSendComposerShortcut(
+    keyCode: Int,
+    modifierFlags: NSEvent.ModifierFlags,
+    isComposing: Bool,
+    canSend: Bool,
+    draft: String
+) -> Bool {
+    guard !isComposing else { return false }
+    guard keyCode == 36 || keyCode == 76 else { return false }
+    guard !modifierFlags.contains(.shift) else { return false }
+    return canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+func nativeChatShouldInsertComposerLineBreak(
+    keyCode: Int,
+    modifierFlags: NSEvent.ModifierFlags,
+    isComposing: Bool
+) -> Bool {
+    guard !isComposing else { return false }
+    guard keyCode == 36 || keyCode == 76 else { return false }
+    return modifierFlags.contains(.shift)
+}
+
+func nativeChatBridgeLabel(for state: ChatBridgeState) -> String {
+    switch state {
+    case .connected:
+        return "Connected"
+    case .reconnecting:
+        return "Reconnecting"
+    case .polling:
+        return "Polling"
+    case .disconnected:
+        return "Disconnected"
+    }
+}
+
+func nativeChatBridgeTone(for state: ChatBridgeState) -> NativeStatusTone {
+    switch state {
+    case .connected:
+        return .success
+    case .reconnecting, .polling:
+        return .info
+    case .disconnected:
+        return .warning
+    }
+}
+
+func nativeChatBridgeIcon(for state: ChatBridgeState) -> String {
+    switch state {
+    case .connected:
+        return "link.circle.fill"
+    case .reconnecting:
+        return "arrow.triangle.2.circlepath"
+    case .polling:
+        return "timer"
+    case .disconnected:
+        return "wifi.slash"
+    }
+}
+
+func nativeChatToolActivityLabel(for status: ChatToolActivityStatus) -> String {
+    switch status {
+    case .queued:
+        return "Queued"
+    case .running:
+        return "Running"
+    case .completed:
+        return "Completed"
+    case .failed:
+        return "Failed"
+    }
+}
+
+func nativeChatToolActivityTone(for status: ChatToolActivityStatus) -> NativeStatusTone {
+    switch status {
+    case .queued, .running:
+        return .info
+    case .completed:
+        return .success
+    case .failed:
+        return .danger
+    }
+}
+
+private struct NativeChatComposerTextView: NSViewRepresentable {
+    @Binding var text: String
+    let canSend: Bool
+    let onSend: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+
+        let textView = NativeChatTextView()
+        textView.delegate = context.coordinator
+        textView.font = .systemFont(ofSize: 14)
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.onSend = onSend
+        textView.canSendDraft = { canSend && !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NativeChatTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.onSend = onSend
+        textView.canSendDraft = { canSend && !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        private var text: Binding<String>
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            text.wrappedValue = textView.string
+        }
+    }
+}
+
+private final class NativeChatTextView: NSTextView {
+    var onSend: (() -> Void)?
+    var canSendDraft: (() -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let composing = hasMarkedText()
+
+        if nativeChatShouldInsertComposerLineBreak(
+            keyCode: Int(event.keyCode),
+            modifierFlags: flags,
+            isComposing: composing
+        ) {
+            insertNewlineIgnoringFieldEditor(self)
+            return
+        }
+
+        if nativeChatShouldSendComposerShortcut(
+            keyCode: Int(event.keyCode),
+            modifierFlags: flags,
+            isComposing: composing,
+            canSend: canSendDraft?() ?? false,
+            draft: string
+        ) {
+            onSend?()
+            return
+        }
+
+        super.keyDown(with: event)
     }
 }
 
@@ -1081,7 +1421,7 @@ struct SettingsScreen: View {
         WorkspaceScaffold(title: "Settings", subtitle: "Inspect the daemon, permissions, and recovery controls.") {
             EmptyView()
         } content: {
-            SurfaceCard(title: "Daemon") {
+            SurfaceCard(title: "Daemon", minimumHeight: nativeWorkspaceCollectionCardMinHeight) {
                 SettingRow(title: "Current state", subtitle: String(describing: appState.processManager.status)) {
                     EmptyView()
                 }
@@ -1104,7 +1444,7 @@ struct SettingsScreen: View {
                 }
             }
 
-            SurfaceCard(title: "Fallback") {
+            SurfaceCard(title: "Fallback", minimumHeight: nativeWorkspaceCollectionCardMinHeight) {
                 Text("Open the existing React UI in your browser if you need parity with the current web surface.")
                 ActionButton("Open Web Fallback", systemImage: "globe", variant: .outline) {
                     appState.openFallbackWeb()
@@ -1118,7 +1458,7 @@ struct SettingsScreen: View {
                 NativePermissionsList(localeIdentifier: resolveNativeOnboardingLocaleIdentifier())
             }
 
-            SurfaceCard(title: "Guided Setup") {
+            SurfaceCard(title: "Guided Setup", minimumHeight: nativeWorkspaceCollectionCardMinHeight) {
                 Text("Run the guided setup again without uninstalling ChillClaw.")
                 ActionButton(isRedoingOnboarding ? "Resetting..." : "Redo onboarding", variant: .secondary, isBusy: isRedoingOnboarding) {
                     Task {
@@ -1267,7 +1607,7 @@ private struct ChannelEntrySheet: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: NativeUI.compactCornerRadius, style: .continuous))
             }
             if !message.isEmpty {
                 Text(message)
@@ -1405,6 +1745,7 @@ private struct MemberSheet: View {
     @State private var soul = ""
     @State private var selectedBrain = ""
     @State private var workStyles = ""
+    @State private var presetSkillIds: [String] = []
     @State private var skillIds: [String] = []
     @State private var knowledgePackIds: [String] = []
     @State private var memoryEnabled = true
@@ -1475,6 +1816,7 @@ private struct MemberSheet: View {
                 personality: personality,
                 soul: soul,
                 workStyles: workStyles.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
+                presetSkillIds: presetSkillIds.isEmpty ? nil : presetSkillIds,
                 skillIds: skillIds,
                 knowledgePackIds: knowledgePackIds,
                 capabilitySettings: MemberCapabilitySettings(memoryEnabled: memoryEnabled, contextWindow: 8000)
@@ -1495,6 +1837,7 @@ private struct MemberSheet: View {
         personality = preset.personality
         soul = preset.soul
         workStyles = preset.workStyles.joined(separator: ", ")
+        presetSkillIds = preset.presetSkillIds ?? []
         skillIds = preset.skillIds
         knowledgePackIds = preset.knowledgePackIds
         memoryEnabled = preset.defaultMemoryEnabled ?? true

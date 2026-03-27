@@ -258,7 +258,32 @@ test("onboarding state exposes the curated model providers for step 3", async ()
     state.config?.employeePresets?.map((preset) => preset.id),
     ["research-analyst", "support-captain", "delivery-operator"]
   );
-  assert.deepEqual(state.config?.employeePresets?.[0]?.skillIds, ["research-brief", "status-writer"]);
+  assert.deepEqual(state.config?.employeePresets?.[0]?.presetSkillIds, ["research-brief", "status-writer"]);
   assert.deepEqual(state.config?.employeePresets?.[1]?.knowledgePackIds, ["customer-voice"]);
   assert.equal(state.config?.employeePresets?.[2]?.theme, "operator");
+});
+
+test("onboarding service migrates legacy preset skill ids out of the live draft shape", async () => {
+  const { service, store } = createService("onboarding-service-legacy-preset-skills");
+
+  await store.write({
+    tasks: [],
+    onboarding: {
+      draft: {
+        currentStep: "employee",
+        employee: {
+          name: "Alex Morgan",
+          jobTitle: "Research Analyst",
+          avatarPresetId: "onboarding-analyst",
+          presetId: "research-analyst",
+          skillIds: ["research-brief", "status-writer"]
+        } as never
+      }
+    }
+  });
+
+  const state = await service.getState();
+
+  assert.deepEqual(state.draft.employee?.presetSkillIds, ["research-brief", "status-writer"]);
+  assert.equal("skillIds" in (state.draft.employee ?? {}), false);
 });

@@ -28,14 +28,17 @@ private struct OnboardingProgressStep: View {
     let complete: Bool
 
     var body: some View {
+        let state = nativeOnboardingProgressState(active: active, complete: complete)
+        let palette = nativeProgressBadgePalette(state)
+
         VStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .fill(complete ? Color(red: 0.18, green: 0.64, blue: 0.40) : active ? Color(red: 0.24, green: 0.41, blue: 0.95) : Color.white.opacity(0.85))
+                    .fill(palette.background)
                     .frame(width: 34, height: 34)
                 Text("\(index + 1)")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(complete || active ? Color.white : nativeOnboardingTextSecondary)
+                    .foregroundStyle(palette.foreground)
             }
 
             Text(title)
@@ -50,41 +53,11 @@ private struct OnboardingProgressStep: View {
 private struct OnboardingHighlightCard: View {
     let title: String
     let bodyText: String
-    let accent: Color
+    let accent: NativeInfoBannerAccent
     let symbol: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: nativeOnboardingFeatureGap) {
-            ZStack {
-                RoundedRectangle(cornerRadius: nativeOnboardingIconTileRadius, style: .continuous)
-                    .fill(Color.white.opacity(0.82))
-                    .frame(width: 48, height: 48)
-                Image(systemName: symbol)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(accent)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(nativeOnboardingTextPrimary)
-                Text(bodyText)
-                    .font(.system(size: 14, weight: .regular))
-                    .lineSpacing(6)
-                    .foregroundStyle(nativeOnboardingTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
-                .fill(accent.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
-                        .strokeBorder(accent.opacity(0.2))
-                )
-        )
+        InfoBanner(title: title, description: bodyText, icon: symbol, accent: accent)
     }
 }
 
@@ -100,19 +73,18 @@ private struct OnboardingSelectCard<Content: View>: View {
     }
 
     var body: some View {
+        let palette = nativeSelectionPalette(nativeOnboardingSelectionState(selected: selected))
+
         Button(action: action) {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .background(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(selected ? Color(red: 0.95, green: 0.97, blue: 1.0) : Color.white.opacity(0.78))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(selected ? Color(red: 0.24, green: 0.41, blue: 0.95) : Color.black.opacity(0.08), lineWidth: selected ? 2 : 1)
-                )
+            SurfaceCard(tone: palette.tone, padding: 18, spacing: 0) {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: NativeUI.cardCornerRadius, style: .continuous)
+                    .strokeBorder(palette.stroke, lineWidth: palette.lineWidth)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: NativeUI.cardCornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -140,56 +112,24 @@ private struct NativeOnboardingActionButton<Label: View>: View {
         nativeOnboardingActionButtonLayout(variant: variant)
     }
 
-    private var foregroundColor: Color {
-        switch variant {
-        case .secondary:
-            return nativeOnboardingTextPrimary
-        case .accent, .primary:
-            return .white
-        }
-    }
-
-    private var backgroundStyle: AnyShapeStyle {
-        switch variant {
-        case .accent:
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [Color(red: 0.15, green: 0.34, blue: 0.95), Color(red: 0.35, green: 0.22, blue: 0.95)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-        case .primary:
-            return AnyShapeStyle(Color(red: 0.03, green: 0.02, blue: 0.07))
-        case .secondary:
-            return AnyShapeStyle(Color.white.opacity(0.82))
-        }
-    }
-
-    private var strokeColor: Color? {
-        variant == .secondary ? Color.black.opacity(0.08) : nil
-    }
-
     var body: some View {
         Button(action: action) {
             label
                 .frame(maxWidth: layout.expandsToContainer ? .infinity : nil)
                 .frame(minHeight: layout.minHeight)
-                .padding(.horizontal, 16)
                 .contentShape(RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous))
-                .background(
-                    RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous)
-                        .fill(backgroundStyle)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous)
-                                .strokeBorder(strokeColor ?? .clear, lineWidth: strokeColor == nil ? 0 : 1)
-                        )
-                )
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(foregroundColor)
+        .buttonStyle(NativeActionButtonStyle(variant: nativeOnboardingActionButtonVariant(variant)))
         .disabled(disabled)
         .opacity(disabled ? 0.55 : 1)
+    }
+}
+
+private struct OnboardingPresetStatusBadge: View {
+    let readiness: NativeOnboardingPresetReadiness
+
+    var body: some View {
+        StatusBadge(readiness.label, tone: nativeOnboardingPresetStatusTone(readiness.status))
     }
 }
 
@@ -205,29 +145,15 @@ private struct OnboardingGlassPanel<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if let title {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(.title3.weight(.semibold))
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.callout)
-                            .foregroundStyle(nativeOnboardingTextSecondary)
-                    }
-                }
-            }
+        SurfaceCard(
+            title: title,
+            subtitle: subtitle,
+            tone: .muted,
+            padding: nativeOnboardingInnerCardPadding,
+            spacing: 16
+        ) {
             content
         }
-        .padding(nativeOnboardingInnerCardPadding)
-        .background(
-            RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
-                .fill(Color.white.opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.78))
-                )
-        )
     }
 }
 
@@ -330,14 +256,8 @@ struct NativeOnboardingView: View {
         VStack(spacing: 16) {
             HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(red: 0.23, green: 0.39, blue: 0.95), Color(red: 0.34, green: 0.25, blue: 0.97)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                    RoundedRectangle(cornerRadius: NativeUI.mediumCornerRadius, style: .continuous)
+                        .fill(nativeBrandMarkGradient())
                         .frame(width: 56, height: 56)
                     Image(systemName: "sparkles")
                         .font(.system(size: 26, weight: .bold))
@@ -380,13 +300,14 @@ struct NativeOnboardingView: View {
         }
     }
 
-    private func progressHeader(contentWidth: CGFloat, compactLayout: Bool) -> some View {
+    private func progressHeader(contentWidth: CGFloat, compactLayout _: Bool) -> some View {
         let progressValue = Double(viewModel.currentStepIndex + 1)
         let progressPercent = Int((progressValue / Double(nativeOnboardingStepOrder.count)) * 100)
+        let progressFraction = progressValue / Double(nativeOnboardingStepOrder.count)
 
         if nativeOnboardingUsesInlineProgressHeader(step: viewModel.currentStep, contentWidth: contentWidth) {
             return AnyView(
-                VStack(spacing: 8) {
+                SurfaceCard(tone: .muted, padding: nativeOnboardingInnerCardPadding, spacing: 8) {
                     HStack(spacing: 10) {
                         Text(formatNativeOnboardingProgressStep(viewModel.copy.progressStep, current: viewModel.currentStepIndex + 1, total: nativeOnboardingStepOrder.count))
                             .font(.system(size: 12, weight: .medium))
@@ -396,24 +317,14 @@ struct NativeOnboardingView: View {
                             .foregroundStyle(nativeOnboardingTextSecondary)
                     }
 
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.black.opacity(0.12))
-                            .frame(height: 8)
-                        GeometryReader { geometry in
-                            Capsule()
-                                .fill(Color(red: 0.03, green: 0.02, blue: 0.07))
-                                .frame(width: max(geometry.size.width * (CGFloat(progressPercent) / 100), 48), height: 8)
-                        }
-                        .frame(height: 8)
-                    }
+                    ProgressBar(value: progressFraction, label: nil)
                 }
                 .frame(maxWidth: contentWidth)
             )
         }
 
         return AnyView(
-            VStack(spacing: 18) {
+            SurfaceCard(tone: .muted, padding: nativeOnboardingInnerCardPadding, spacing: 18) {
                 HStack(spacing: 10) {
                     Text("Step \(viewModel.currentStepIndex + 1) of \(nativeOnboardingStepOrder.count)")
                         .font(.headline)
@@ -423,8 +334,7 @@ struct NativeOnboardingView: View {
                         .foregroundStyle(nativeOnboardingTextSecondary)
                 }
 
-                ProgressView(value: progressValue, total: Double(nativeOnboardingStepOrder.count))
-                    .tint(Color(red: 0.24, green: 0.41, blue: 0.95))
+                ProgressBar(value: progressFraction, label: nil)
 
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(Array(nativeOnboardingStepOrder.enumerated()), id: \.offset) { index, step in
@@ -437,20 +347,11 @@ struct NativeOnboardingView: View {
                     }
                 }
             }
-            .padding(nativeOnboardingInnerCardPadding)
-            .background(
-                RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
-                    .fill(Color.white.opacity(0.56))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.74))
-                    )
-            )
         )
     }
 
     private func mainCard(contentWidth: CGFloat, welcomeMinHeight: CGFloat, compactEmployeeLayout: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 24) {
+        SurfaceCard(tone: .standard, padding: nativeOnboardingOuterPanelPadding, spacing: 24) {
             switch viewModel.currentStep {
             case .welcome:
                 welcomeStep
@@ -468,16 +369,6 @@ struct NativeOnboardingView: View {
                 completeStep
             }
         }
-        .padding(nativeOnboardingOuterPanelPadding)
-        .background(
-            RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
-                .fill(Color.white.opacity(0.84))
-                .overlay(
-                    RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.82))
-                )
-                .shadow(color: Color.black.opacity(0.06), radius: 30, x: 0, y: 16)
-        )
         .frame(maxWidth: contentWidth, alignment: .leading)
         .frame(minHeight: viewModel.currentStep == .welcome ? welcomeMinHeight : nil, alignment: .top)
     }
@@ -559,7 +450,7 @@ struct NativeOnboardingView: View {
             if installViewState.kind == .installing {
                 VStack(spacing: 16) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        RoundedRectangle(cornerRadius: nativeOnboardingStandardRadius, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [
@@ -586,22 +477,8 @@ struct NativeOnboardingView: View {
                         .multilineTextAlignment(.center)
 
                     VStack(spacing: 10) {
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.black.opacity(0.12))
-                                .frame(height: 12)
-                            GeometryReader { geometry in
-                                Capsule()
-                                    .fill(Color(red: 0.03, green: 0.02, blue: 0.07))
-                                    .frame(
-                                        width: max((installViewState.progressPercent ?? 16) / 100 * geometry.size.width, 48),
-                                        height: 12
-                                    )
-                            }
-                            .frame(height: 12)
-                        }
-                        .frame(maxWidth: .infinity)
-
+                        ProgressBar(value: (installViewState.progressPercent ?? 16) / 100, label: nil)
+                            .frame(maxWidth: .infinity)
                         Text(installViewState.stageLabel ?? viewModel.copy.installStageDetecting)
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(nativeOnboardingTextSecondary)
@@ -651,7 +528,7 @@ struct NativeOnboardingView: View {
                     .padding(.horizontal, 28)
                     .padding(.vertical, 28)
                     .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        RoundedRectangle(cornerRadius: nativeOnboardingStandardRadius, style: .continuous)
                             .fill(
                                 installViewState.kind == .missing
                                     ? LinearGradient(
@@ -672,7 +549,7 @@ struct NativeOnboardingView: View {
                                     )
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                RoundedRectangle(cornerRadius: nativeOnboardingStandardRadius, style: .continuous)
                                     .stroke(
                                         installViewState.kind == .missing ? Color.orange.opacity(0.45) : Color.green.opacity(0.35),
                                         lineWidth: 1
@@ -776,7 +653,7 @@ struct NativeOnboardingView: View {
                             } content: {
                                 HStack(spacing: 16) {
                                     ZStack {
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                             .fill(Color.white.opacity(0.92))
                                             .frame(width: 48, height: 48)
                                         Image(systemName: "brain.head.profile")
@@ -821,7 +698,7 @@ struct NativeOnboardingView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         HStack(spacing: 16) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
                                     .fill(Color.white.opacity(0.92))
                                     .frame(width: 52, height: 52)
                                 Image(systemName: "brain.head.profile")
@@ -838,10 +715,10 @@ struct NativeOnboardingView: View {
                         .padding(.horizontal, 20)
                         .padding(.vertical, 24)
                         .background(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                 .fill(onboardingProviderGradient(curatedProvider.theme))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                         .strokeBorder(Color(red: 0.56, green: 0.75, blue: 0.99), lineWidth: 2)
                                 )
                         )
@@ -866,7 +743,7 @@ struct NativeOnboardingView: View {
                                             } content: {
                                                 VStack(spacing: 10) {
                                                     ZStack {
-                                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                                             .fill(Color(red: 0.93, green: 0.96, blue: 1.0))
                                                             .frame(width: 42, height: 42)
                                                         Image(systemName: onboardingAuthMethodSymbol(method))
@@ -1002,10 +879,10 @@ struct NativeOnboardingView: View {
                                                     .padding(.horizontal, 18)
                                                     .frame(height: 56)
                                                     .background(
-                                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                                             .fill(Color.white.opacity(0.95))
                                                             .overlay(
-                                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                                RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                                                     .strokeBorder(Color(red: 0.33, green: 0.85, blue: 0.55), lineWidth: 1.5)
                                                             )
                                                     )
@@ -1019,10 +896,10 @@ struct NativeOnboardingView: View {
                                                     .padding(.horizontal, 18)
                                                     .frame(height: 56)
                                                     .background(
-                                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                                             .fill(Color.white.opacity(0.95))
                                                             .overlay(
-                                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                                RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                                                     .strokeBorder(Color(red: 0.33, green: 0.85, blue: 0.55), lineWidth: 1.5)
                                                             )
                                                     )
@@ -1124,13 +1001,13 @@ struct NativeOnboardingView: View {
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 22)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                         .fill(LinearGradient(colors: [
                                             Color(red: 0.91, green: 0.99, blue: 0.93),
                                             Color(red: 0.85, green: 0.98, blue: 0.9),
                                         ], startPoint: .topLeading, endPoint: .bottomTrailing))
                                         .overlay(
-                                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                                 .strokeBorder(Color(red: 0.67, green: 0.96, blue: 0.76))
                                         )
                                 )
@@ -1192,7 +1069,7 @@ struct NativeOnboardingView: View {
                 if let channel = viewModel.selectedChannelPresentation {
                     VStack(alignment: .leading, spacing: 18) {
                         HStack(spacing: 16) {
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
                                 .fill(Color.white.opacity(0.92))
                                 .frame(width: 52, height: 52)
                                 .overlay(
@@ -1217,10 +1094,10 @@ struct NativeOnboardingView: View {
                         .padding(.horizontal, 20)
                         .padding(.vertical, 24)
                         .background(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                 .fill(nativeOnboardingChannelPresentationTheme(channel.theme))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                         .strokeBorder(Color(red: 0.56, green: 0.75, blue: 0.99), lineWidth: 2)
                                 )
                         )
@@ -1405,7 +1282,7 @@ struct NativeOnboardingView: View {
                                     viewModel.updateSelectedChannel(channel.id)
                                 } label: {
                                     HStack(spacing: 16) {
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                             .fill(Color.white.opacity(0.92))
                                             .frame(width: 48, height: 48)
                                             .overlay(
@@ -1433,12 +1310,12 @@ struct NativeOnboardingView: View {
                                     }
                                     .padding(.horizontal, 20)
                                     .padding(.vertical, 24)
-                                    .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                    .contentShape(RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous))
                                     .background(
-                                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                        RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                             .fill(nativeOnboardingChannelPresentationTheme(channel.theme))
                                             .overlay(
-                                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                                RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                                                     .strokeBorder(channel.id == viewModel.selectedChannelId ? Color(red: 0.56, green: 0.75, blue: 0.99) : Color.black.opacity(0.08), lineWidth: channel.id == viewModel.selectedChannelId ? 2 : 1)
                                             )
                                     )
@@ -1527,12 +1404,17 @@ struct NativeOnboardingView: View {
 
                     LazyVGrid(columns: presetColumns, alignment: .leading, spacing: 12) {
                         ForEach(viewModel.employeePresets) { preset in
+                            let readiness = resolveOnboardingEmployeePresetReadiness(
+                                preset: preset,
+                                onboardingState: viewModel.onboardingState
+                            )
+
                             Button {
                                 viewModel.selectEmployeePreset(preset.id)
                             } label: {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack(spacing: 12) {
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                             .fill(nativePresetTheme(preset.theme))
                                             .frame(width: 40, height: 40)
                                             .overlay(
@@ -1555,28 +1437,32 @@ struct NativeOnboardingView: View {
 
                                     let compactLabels = Array(preset.starterSkillLabels.prefix(1)) + Array(preset.toolLabels.prefix(1))
 
-                                    FlowLayout(compactLabels, id: \.self) { label in
-                                        Text(label)
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .background(
-                                                Capsule().fill(
-                                                    preset.starterSkillLabels.contains(label)
-                                                        ? Color.green.opacity(0.16)
-                                                        : Color.gray.opacity(0.12)
+                                    FlowLayout(["status-\(preset.id)"] + compactLabels, id: \.self) { label in
+                                        if label == "status-\(preset.id)" {
+                                            OnboardingPresetStatusBadge(readiness: readiness)
+                                        } else {
+                                            Text(label)
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(
+                                                    Capsule().fill(
+                                                        preset.starterSkillLabels.contains(label)
+                                                            ? Color.green.opacity(0.16)
+                                                            : Color.gray.opacity(0.12)
+                                                    )
                                                 )
-                                            )
+                                        }
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(14)
-                                .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: nativeOnboardingStandardRadius, style: .continuous))
                                 .background(
-                                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    RoundedRectangle(cornerRadius: nativeOnboardingStandardRadius, style: .continuous)
                                         .fill(Color.white.opacity(0.92))
                                         .overlay(
-                                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                            RoundedRectangle(cornerRadius: nativeOnboardingStandardRadius, style: .continuous)
                                                 .strokeBorder(viewModel.selectedEmployeePreset?.id == preset.id ? Color.blue : Color.black.opacity(0.08), lineWidth: viewModel.selectedEmployeePreset?.id == preset.id ? 2 : 1)
                                         )
                                 )
@@ -1622,6 +1508,14 @@ struct NativeOnboardingView: View {
                             .font(.headline)
                         Text(selectedPreset.description)
                             .foregroundStyle(nativeOnboardingTextSecondary)
+                        if let readiness = viewModel.selectedEmployeePresetReadiness {
+                            OnboardingPresetStatusBadge(readiness: readiness)
+                            if let detail = readiness.detail {
+                                Text(detail)
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundStyle(nativeOnboardingTextSecondary)
+                            }
+                        }
                         FlowLayout(selectedPreset.starterSkillLabels + selectedPreset.toolLabels, id: \.self) { label in
                             Text(label)
                                 .font(.system(size: 12, weight: .semibold))
@@ -1668,7 +1562,11 @@ struct NativeOnboardingView: View {
     private var createEmployeeButton: some View {
         NativeOnboardingActionButton(
             variant: .primary,
-            disabled: viewModel.selectedEmployeePreset == nil || viewModel.selectedBrainEntryId == nil || viewModel.employeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.employeeJobTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            disabled: viewModel.selectedEmployeePreset == nil
+                || viewModel.selectedBrainEntryId == nil
+                || viewModel.employeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || viewModel.employeeJobTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || (viewModel.selectedEmployeePresetReadiness?.blocking ?? false)
         ) {
             Task { await viewModel.createEmployee() }
         } label: {
@@ -1738,12 +1636,12 @@ struct NativeOnboardingView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 170, alignment: .leading)
             .padding(22)
-            .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: nativeOnboardingDisplayRadius, style: .continuous))
             .background(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                RoundedRectangle(cornerRadius: nativeOnboardingDisplayRadius, style: .continuous)
                     .fill(Color.white.opacity(0.78))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        RoundedRectangle(cornerRadius: nativeOnboardingDisplayRadius, style: .continuous)
                             .strokeBorder(Color.white.opacity(0.78))
                     )
             )
@@ -1763,9 +1661,9 @@ struct NativeOnboardingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
                 .fill(Color.white.opacity(0.72))
-                .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.78)))
+                .overlay(RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous).strokeBorder(Color.white.opacity(0.78)))
         )
     }
 
@@ -1839,10 +1737,10 @@ private struct NativeOnboardingGuideCard<Trailing: View, Content: View>: View {
         }
         .padding(22)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                 .fill(tone.background)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                         .strokeBorder(tone.border, lineWidth: 1.5)
                 )
         )
@@ -1906,10 +1804,10 @@ private func nativeChannelInstructionCard(title: String, steps: [String], ctaLab
     }
     .padding(22)
     .background(
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
+        RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
             .fill(LinearGradient(colors: [Color(red: 0.93, green: 0.96, blue: 1.0), Color(red: 0.94, green: 0.97, blue: 1.0)], startPoint: .topLeading, endPoint: .bottomTrailing))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                     .strokeBorder(Color(red: 0.69, green: 0.82, blue: 0.99), lineWidth: 1.5)
             )
     )
@@ -1936,10 +1834,10 @@ private func nativeChannelCredentialCard<Content: View>(title: String?, body: St
     }
     .padding(22)
     .background(
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
+        RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
             .fill(LinearGradient(colors: [Color(red: 0.93, green: 0.99, blue: 0.96), Color(red: 0.94, green: 1.0, blue: 0.97)], startPoint: .topLeading, endPoint: .bottomTrailing))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
                     .strokeBorder(Color(red: 0.63, green: 0.93, blue: 0.74), lineWidth: 1.5)
             )
     )
@@ -1958,10 +1856,10 @@ private func nativeChannelField<FieldContent: View>(title: String, @ViewBuilder 
             .padding(.horizontal, 18)
             .frame(height: 56)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                     .fill(Color.white.opacity(0.95))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                             .strokeBorder(Color(red: 0.33, green: 0.85, blue: 0.55), lineWidth: 1.5)
                     )
             )
@@ -2062,7 +1960,7 @@ private struct NativeOnboardingTutorialSheet: View {
                     }
                 }
                 .background(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: nativeOnboardingOuterRadius, style: .continuous)
                         .fill(Color(red: 0.97, green: 0.98, blue: 1.0))
                 )
 

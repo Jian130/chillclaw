@@ -10,6 +10,9 @@ test("config manager stores model auth secrets through the secrets adapter befor
   const calls: ModelAuthRequest[] = [];
   const secrets = new InMemorySecretsAdapter();
   const response: ModelConfigActionResponse = {
+    epoch: "daemon-local",
+    revision: 0,
+    settled: true,
     status: "completed",
     message: "Saved",
     modelConfig: {
@@ -67,7 +70,9 @@ test("config manager stores model auth secrets through the secrets adapter befor
       installMarketplaceSkill: async () => ({}),
       updateMarketplaceSkill: async () => ({}),
       saveCustomSkill: async () => ({ slug: "custom-skill" }),
-      removeInstalledSkill: async () => ({})
+      removeInstalledSkill: async () => ({}),
+      installManagedSkill: async () => ({}),
+      verifyManagedSkill: async () => undefined
     },
     {
       secrets,

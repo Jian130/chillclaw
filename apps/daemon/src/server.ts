@@ -10,6 +10,7 @@ import type {
   CompleteOnboardingRequest,
   CreateChatThreadRequest,
   DeleteAIMemberRequest,
+  DeploymentTargetActionResponse,
   InstallSkillRequest,
   SendChatMessageRequest,
   SaveAIMemberRequest,
@@ -32,6 +33,7 @@ import type {
 } from "@slackclaw/contracts";
 
 import { createEngineAdapter } from "./engine/registry.js";
+import type { EngineReadCacheResource } from "./engine/adapter.js";
 import { createDefaultSecretsAdapter } from "./platform/macos-keychain-secrets-adapter.js";
 import { AppControlService } from "./services/app-control-service.js";
 import { AppServiceManager } from "./services/app-service-manager.js";
@@ -42,9 +44,10 @@ import { errorToLogDetails, writeErrorLog, writeInfoLog } from "./services/logge
 import { EventPublisher } from "./services/event-publisher.js";
 import { OnboardingService } from "./services/onboarding-service.js";
 import { OverviewService } from "./services/overview-service.js";
+import { PresetSkillService } from "./services/preset-skill-service.js";
 import { SetupService } from "./services/setup-service.js";
 import { SkillService } from "./services/skill-service.js";
-import { StateStore } from "./services/state-store.js";
+import { StateStore, type AppState } from "./services/state-store.js";
 import { TaskService } from "./services/task-service.js";
 import { EventBusService } from "./services/event-bus-service.js";
 import { getDataDir, getStaticDir } from "./runtime-paths.js";
@@ -122,6 +125,47 @@ async function serveStaticAsset(requestUrl: string, response: ServerResponse): P
   }
 }
 
+export function resolveFreshReadInvalidationTargets(method: string, pathname: string): EngineReadCacheResource[] {
+  if (method !== "GET") {
+    return [];
+  }
+
+  switch (pathname) {
+    case "/api/overview":
+      return ["engine", "channels"];
+    case "/api/models/config":
+      return ["models"];
+    case "/api/channels/config":
+      return ["channels", "engine"];
+    case "/api/skills/config":
+      return ["skills"];
+    case "/api/ai-team/overview":
+      return ["models", "skills", "ai-members"];
+    case "/api/onboarding/state":
+      return ["engine", "channels", "models", "skills", "ai-members"];
+    default:
+      return [];
+  }
+}
+
+export function resetStateAfterRuntimeUninstall(current: AppState): AppState {
+  return {
+    ...current,
+    setupCompletedAt: undefined,
+    selectedProfileId: undefined,
+    onboarding: undefined,
+    channelOnboarding: undefined
+  };
+}
+
+export function shouldResetStateAfterDeploymentUninstall(result: DeploymentTargetActionResponse): boolean {
+  return result.status === "completed" && !result.engineStatus.installed;
+}
+
+async function clearRuntimeUninstallState(store: StateStore): Promise<void> {
+  await store.update((current) => resetStateAfterRuntimeUninstall(current));
+}
+
 export function startServer(port = 4545) {
   const adapter = createEngineAdapter();
   const secrets = createDefaultSecretsAdapter();
@@ -130,12 +174,13 @@ export function startServer(port = 4545) {
   const overviewService = new OverviewService(adapter, store, appServiceManager);
   const eventBus = new EventBusService();
   const eventPublisher = new EventPublisher(eventBus);
+  const presetSkillService = new PresetSkillService(adapter, store, eventPublisher);
   const channelSetupService = new ChannelSetupService(adapter, store, eventPublisher, secrets);
-  const aiTeamService = new AITeamService(adapter, store, eventPublisher);
+  const aiTeamService = new AITeamService(adapter, store, eventPublisher, presetSkillService);
   const chatService = new ChatService(adapter, store, aiTeamService, eventPublisher);
-  const skillService = new SkillService(adapter, store, eventPublisher);
-  const setupService = new SetupService(adapter, store, overviewService, eventPublisher);
-  const onboardingService = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
+  const skillService = new SkillService(adapter, store, eventPublisher, presetSkillService);
+  const setupService = new SetupService(adapter, store, overviewService, eventPublisher, presetSkillService);
+  const onboardingService = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService);
   const taskService = new TaskService(adapter, store, eventPublisher);
   const eventSocketServer = new WebSocketServer({ noServer: true });
   let server: ReturnType<typeof createServer>;
@@ -144,6 +189,12 @@ export function startServer(port = 4545) {
   });
 
   eventSocketServer.on("connection", (socket: WebSocket) => {
+    for (const event of eventBus.getRetainedEvents()) {
+      if (socket.readyState === socket.OPEN) {
+        socket.send(JSON.stringify(event));
+      }
+    }
+
     const unsubscribe = eventBus.subscribe((event) => {
       if (socket.readyState === socket.OPEN) {
         socket.send(JSON.stringify(event));
@@ -184,8 +235,11 @@ export function startServer(port = 4545) {
       const pathname = requestUrl.pathname;
       const freshRead = requestUrl.searchParams.get("fresh") === "1";
 
-      if (request.method === "GET" && pathname.startsWith("/api/") && pathname !== "/api/ping" && freshRead) {
-        adapter.invalidateReadCaches();
+      if (freshRead) {
+        const invalidationTargets = resolveFreshReadInvalidationTargets(request.method, pathname);
+        if (invalidationTargets.length > 0) {
+          adapter.invalidateReadCaches(invalidationTargets);
+        }
       }
 
       if (request.method === "GET" && pathname === "/api/ping") {
@@ -199,7 +253,9 @@ export function startServer(port = 4545) {
       }
 
       if (request.method === "GET" && pathname === "/api/overview") {
-        sendJson(response, 200, await overviewService.getOverview());
+        const overview = await overviewService.getOverview();
+        eventPublisher.publishOverviewUpdated(overview);
+        sendJson(response, 200, overview);
         return;
       }
 
@@ -275,6 +331,9 @@ export function startServer(port = 4545) {
           message: `SlackClaw is removing the ${targetId} OpenClaw runtime.`
         });
         const result = await adapter.instances.uninstallDeploymentTarget(targetId);
+        if (shouldResetStateAfterDeploymentUninstall(result)) {
+          await clearRuntimeUninstallState(store);
+        }
         eventPublisher.publishDeployCompleted({
           correlationId,
           targetId,
@@ -298,44 +357,58 @@ export function startServer(port = 4545) {
       }
 
       if (request.method === "GET" && pathname === "/api/models/config") {
-        sendJson(response, 200, await adapter.config.getModelConfig());
+        const modelConfig = await adapter.config.getModelConfig();
+        eventPublisher.publishModelConfigUpdated(modelConfig);
+        sendJson(response, 200, modelConfig);
         return;
       }
 
       if (request.method === "POST" && request.url === "/api/models/entries") {
         const body = await readJson<SaveModelEntryRequest>(request);
-        sendJson(response, 200, await adapter.config.createSavedModelEntry(body));
+        const result = await adapter.config.createSavedModelEntry(body);
+        const sync = eventPublisher.publishModelConfigUpdated(result.modelConfig);
+        sendJson(response, 200, { ...result, ...sync, settled: result.status === "interactive" ? false : sync.settled });
         return;
       }
 
       if (request.method === "PATCH" && request.url.startsWith("/api/models/entries/")) {
         const entryId = request.url.slice("/api/models/entries/".length);
         const body = await readJson<SaveModelEntryRequest>(request);
-        sendJson(response, 200, await adapter.config.updateSavedModelEntry(entryId, body));
+        const result = await adapter.config.updateSavedModelEntry(entryId, body);
+        const sync = eventPublisher.publishModelConfigUpdated(result.modelConfig);
+        sendJson(response, 200, { ...result, ...sync, settled: result.status === "interactive" ? false : sync.settled });
         return;
       }
 
       if (request.method === "DELETE" && pathname.startsWith("/api/models/entries/")) {
         const entryId = pathname.slice("/api/models/entries/".length);
-        sendJson(response, 200, await adapter.config.removeSavedModelEntry(entryId));
+        const result = await adapter.config.removeSavedModelEntry(entryId);
+        const sync = eventPublisher.publishModelConfigUpdated(result.modelConfig);
+        sendJson(response, 200, { ...result, ...sync });
         return;
       }
 
       if (request.method === "POST" && request.url === "/api/models/default-entry") {
         const body = await readJson<SetDefaultModelEntryRequest>(request);
-        sendJson(response, 200, await adapter.config.setDefaultModelEntry(body));
+        const result = await adapter.config.setDefaultModelEntry(body);
+        const sync = eventPublisher.publishModelConfigUpdated(result.modelConfig);
+        sendJson(response, 200, { ...result, ...sync });
         return;
       }
 
       if (request.method === "POST" && request.url === "/api/models/fallbacks") {
         const body = await readJson<ReplaceFallbackModelEntriesRequest>(request);
-        sendJson(response, 200, await adapter.config.replaceFallbackModelEntries(body));
+        const result = await adapter.config.replaceFallbackModelEntries(body);
+        const sync = eventPublisher.publishModelConfigUpdated(result.modelConfig);
+        sendJson(response, 200, { ...result, ...sync });
         return;
       }
 
       if (request.method === "POST" && request.url === "/api/models/auth") {
         const body = await readJson<ModelAuthRequest>(request);
-        sendJson(response, 200, await adapter.config.authenticateModelProvider(body));
+        const result = await adapter.config.authenticateModelProvider(body);
+        const sync = eventPublisher.publishModelConfigUpdated(result.modelConfig);
+        sendJson(response, 200, { ...result, ...sync, settled: result.status === "interactive" ? false : sync.settled });
         return;
       }
 
@@ -354,7 +427,9 @@ export function startServer(port = 4545) {
 
       if (request.method === "POST" && request.url === "/api/models/default") {
         const body = await readJson<SetDefaultModelRequest>(request);
-        sendJson(response, 200, await adapter.config.setDefaultModel(body.modelKey));
+        const result = await adapter.config.setDefaultModel(body.modelKey);
+        const sync = eventPublisher.publishModelConfigUpdated(result.modelConfig);
+        sendJson(response, 200, { ...result, ...sync });
         return;
       }
 
@@ -370,13 +445,9 @@ export function startServer(port = 4545) {
 
       if (request.method === "POST" && request.url === "/api/engine/uninstall") {
         const result = await adapter.instances.uninstall();
-        await store.update((current) => ({
-          ...current,
-          setupCompletedAt: undefined,
-          selectedProfileId: undefined,
-          onboarding: undefined,
-          channelOnboarding: undefined
-        }));
+        if (result.status === "completed" && !result.engineStatus.installed) {
+          await clearRuntimeUninstallState(store);
+        }
         sendJson(response, 200, {
           result,
           overview: await overviewService.getOverview()
@@ -418,12 +489,16 @@ export function startServer(port = 4545) {
       }
 
       if (request.method === "GET" && pathname === "/api/channels/config") {
-        sendJson(response, 200, await channelSetupService.getConfigOverview());
+        const channelConfig = await channelSetupService.getConfigOverview();
+        eventPublisher.publishChannelConfigUpdated(channelConfig);
+        sendJson(response, 200, channelConfig);
         return;
       }
 
       if (request.method === "GET" && pathname === "/api/skills/config") {
-        sendJson(response, 200, await skillService.getConfigOverview());
+        const skillConfig = await skillService.getConfigOverview();
+        eventPublisher.publishSkillCatalogUpdated(skillConfig);
+        sendJson(response, 200, skillConfig);
         return;
       }
 
@@ -455,8 +530,15 @@ export function startServer(port = 4545) {
         return;
       }
 
+      if (request.method === "POST" && request.url === "/api/skills/preset-sync/repair") {
+        sendJson(response, 200, await skillService.repairPresetSkillSync());
+        return;
+      }
+
       if (request.method === "GET" && pathname === "/api/ai-team/overview") {
-        sendJson(response, 200, await aiTeamService.getOverview());
+        const overview = await aiTeamService.getOverview();
+        eventPublisher.publishAITeamUpdated(overview);
+        sendJson(response, 200, overview);
         return;
       }
 

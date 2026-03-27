@@ -1,6 +1,7 @@
 import type {
   CompleteOnboardingRequest,
   CompleteOnboardingResponse,
+  OnboardingEmployeeState,
   OnboardingCompletionSummary,
   OnboardingStateResponse,
   UpdateOnboardingStateRequest
@@ -8,13 +9,45 @@ import type {
 
 import type { EngineAdapter } from "../engine/adapter.js";
 import { onboardingUiConfig } from "../config/onboarding-config.js";
+import { presetSkillDefinitionById } from "../config/preset-skill-definitions.js";
 import { ChannelSetupService } from "./channel-setup-service.js";
 import { OverviewService } from "./overview-service.js";
 import { StateStore, defaultOnboardingDraftState } from "./state-store.js";
 import { AITeamService } from "./ai-team-service.js";
+import { PresetSkillService } from "./preset-skill-service.js";
 
 function hasOwn(input: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(input, key);
+}
+
+function resolvePresetSkillIds(employee: OnboardingEmployeeState | undefined): string[] {
+  if (!employee) {
+    return [];
+  }
+
+  const configuredPreset = employee.presetId
+    ? onboardingUiConfig.employeePresets.find((preset) => preset.id === employee.presetId)
+    : undefined;
+  const fromEmployee = (employee.presetSkillIds ?? []).filter((presetSkillId) => presetSkillDefinitionById(presetSkillId));
+  const fromPreset = configuredPreset?.presetSkillIds ?? [];
+
+  return [...new Set((fromEmployee.length > 0 ? fromEmployee : fromPreset).filter(Boolean))];
+}
+
+function normalizedEmployeeState(employee: OnboardingEmployeeState | undefined): OnboardingEmployeeState | undefined {
+  if (!employee) {
+    return undefined;
+  }
+
+  const presetSkillIds = resolvePresetSkillIds(employee);
+  return {
+    ...employee,
+    presetSkillIds
+  };
+}
+
+function presetSkillTargetMode(install: ReturnType<typeof defaultOnboardingDraftState>["install"]) {
+  return install?.disposition === "reused-existing" || install?.disposition === "installed-system" ? "reused-install" : "managed-local";
 }
 
 export class OnboardingService {
@@ -23,12 +56,16 @@ export class OnboardingService {
     private readonly store: StateStore,
     private readonly overviewService: OverviewService,
     private readonly channelSetupService: ChannelSetupService,
-    private readonly aiTeamService: AITeamService
+    private readonly aiTeamService: AITeamService,
+    private readonly presetSkillService?: PresetSkillService
   ) {}
 
   async getState(): Promise<OnboardingStateResponse> {
     const state = await this.store.read();
-    const draft = state.onboarding?.draft ?? defaultOnboardingDraftState();
+    const draft = {
+      ...(state.onboarding?.draft ?? defaultOnboardingDraftState()),
+      employee: normalizedEmployeeState(state.onboarding?.draft?.employee)
+    };
     const summary = await this.buildSummary(draft);
 
     return {
@@ -39,7 +76,8 @@ export class OnboardingService {
       },
       draft,
       config: onboardingUiConfig,
-      summary
+      summary,
+      presetSkillSync: this.presetSkillService ? await this.presetSkillService.getOverview() : undefined
     };
   }
 
@@ -53,7 +91,7 @@ export class OnboardingService {
         ...(request.install ? { install: request.install } : {}),
         ...(request.model ? { model: request.model } : {}),
         ...(request.channel ? { channel: request.channel } : {}),
-        ...(request.employee ? { employee: request.employee } : {}),
+        ...(request.employee ? { employee: normalizedEmployeeState(request.employee) } : {}),
         ...(hasOwn(request, "activeModelAuthSessionId")
           ? { activeModelAuthSessionId: request.activeModelAuthSessionId || undefined }
           : {}),
@@ -72,6 +110,12 @@ export class OnboardingService {
     });
 
     const draft = nextState.onboarding?.draft ?? defaultOnboardingDraftState();
+    const targetMode = presetSkillTargetMode(draft.install);
+    if (this.presetSkillService) {
+      await this.presetSkillService.setDesiredPresetSkillIds("onboarding", resolvePresetSkillIds(draft.employee), {
+        targetMode
+      });
+    }
     const summary = reuseDraftSummary ? this.buildDraftSummary(draft) : await this.buildSummary(draft);
 
     return {
@@ -82,7 +126,8 @@ export class OnboardingService {
       },
       draft,
       config: onboardingUiConfig,
-      summary
+      summary,
+      presetSkillSync: this.presetSkillService ? await this.presetSkillService.getOverview() : undefined
     };
   }
 
@@ -125,7 +170,8 @@ export class OnboardingService {
       },
       draft,
       config: onboardingUiConfig,
-      summary: await this.buildSummary(draft)
+      summary: await this.buildSummary(draft),
+      presetSkillSync: this.presetSkillService ? await this.presetSkillService.setDesiredPresetSkillIds("onboarding", []) : undefined
     };
   }
 

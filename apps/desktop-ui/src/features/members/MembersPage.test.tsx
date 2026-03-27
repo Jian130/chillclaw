@@ -1,6 +1,7 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { buildMemberPresetDraft, memberDeleteSummary, memberOriginLabel, memberOriginTone } from "./MembersPage.js";
+import { buildMemberPresetDraft, MemberStatusBadge, memberDeleteSummary, memberOriginLabel, memberOriginTone } from "./MembersPage.js";
 
 describe("MembersPage helpers", () => {
   it("labels detected and ChillClaw-managed members distinctly", () => {
@@ -30,6 +31,7 @@ describe("MembersPage helpers", () => {
         personality: "Clear and dependable",
         soul: "Turn requests into useful next steps.",
         workStyles: ["Methodical", "Structured"],
+        presetSkillIds: ["research-brief", "status-writer"],
         skillIds: ["research-brief", "status-writer"],
         knowledgePackIds: ["company-handbook"],
         defaultMemoryEnabled: true
@@ -40,9 +42,18 @@ describe("MembersPage helpers", () => {
       personality: "Clear and dependable",
       soul: "Turn requests into useful next steps.",
       workStyles: ["Methodical", "Structured"],
+      presetSkillIds: ["research-brief", "status-writer"],
       skillIds: ["research-brief", "status-writer"],
       knowledgePackIds: ["company-handbook"],
       memoryEnabled: true
     });
+  });
+
+  it("renders member operational state through StatusBadge semantics", () => {
+    const html = renderToStaticMarkup(<MemberStatusBadge status="busy" />);
+
+    expect(html).toContain("badge--status");
+    expect(html).toContain("badge--info");
+    expect(html).toContain("Busy");
   });
 });

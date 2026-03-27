@@ -129,6 +129,7 @@ test("gateway socket adapter authenticates and maps chat and tool events", async
     type: "event",
     event: "agent",
     payload: {
+      sessionKey: "session-1",
       runId: "run-1",
       data: {
         name: "browser",
@@ -161,8 +162,15 @@ test("gateway socket adapter authenticates and maps chat and tool events", async
     },
     {
       type: "assistant-tool-status",
+      sessionKey: "session-1",
       runId: "run-1",
-      activityLabel: "Using tools: browser"
+      activityLabel: "Using tools: browser",
+      toolActivity: {
+        id: "browser",
+        label: "browser",
+        status: "running",
+        detail: undefined
+      }
     },
     {
       type: "assistant-completed",

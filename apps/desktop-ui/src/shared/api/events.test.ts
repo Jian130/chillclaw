@@ -9,6 +9,7 @@ class FakeWebSocket {
 
   readonly url: string;
   readyState = FakeWebSocket.CONNECTING;
+  onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
@@ -21,6 +22,11 @@ class FakeWebSocket {
 
   emitMessage(data: string) {
     this.onmessage?.({ data });
+  }
+
+  emitOpen() {
+    this.readyState = FakeWebSocket.OPEN;
+    this.onopen?.();
   }
 
   emitClose() {
@@ -61,31 +67,85 @@ describe("daemon event client", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const events = await loadEventsModule();
     const received: unknown[] = [];
+    const states: unknown[] = [];
 
     const unsubscribe = events.subscribeToDaemonEvents((event) => {
       received.push(event);
+    }, undefined, (state) => {
+      states.push(state);
     });
 
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(FakeWebSocket.instances[0]?.url).toBe("ws://127.0.0.1:4545/api/events");
+    expect(states.at(-1)).toMatchObject({
+      connectionState: "connecting",
+      lastSeenByResource: {}
+    });
+
+    FakeWebSocket.instances[0]?.emitOpen();
+    expect(states.at(-1)).toMatchObject({
+      connectionState: "connected"
+    });
 
     FakeWebSocket.instances[0]?.emitMessage(
       JSON.stringify({
-        type: "gateway.status",
-        reachable: true,
-        pendingGatewayApply: false,
-        summary: "Ready"
+        type: "overview.updated",
+        snapshot: {
+          epoch: "epoch-1",
+          revision: 4,
+          data: {
+            appName: "ChillClaw",
+            appVersion: "1.0.0",
+            platformTarget: "desktop",
+            firstRun: {
+              status: "completed"
+            },
+            appService: {
+              serviceId: "service",
+              installed: true,
+              running: true,
+              status: "running",
+              summary: "Running"
+            },
+            engine: {
+              engine: "openclaw",
+              installed: true,
+              running: true,
+              summary: "Ready",
+              lastCheckedAt: "2026-03-27T00:00:00.000Z"
+            },
+            installSpec: {
+              desiredVersion: "1.0.0"
+            },
+            capabilities: [],
+            installChecks: [],
+            channelSetup: {
+              channels: [],
+              gatewaySummary: "Ready"
+            },
+            profiles: [],
+            templates: [],
+            healthChecks: [],
+            recoveryActions: [],
+            recentTasks: []
+          }
+        }
       })
     );
 
     expect(received).toEqual([
       {
-        type: "gateway.status",
-        reachable: true,
-        pendingGatewayApply: false,
-        summary: "Ready"
+        type: "overview.updated",
+        snapshot: expect.objectContaining({
+          epoch: "epoch-1",
+          revision: 4
+        })
       }
     ]);
+    expect(events.getDaemonResourceRevision("overview")).toEqual({
+      epoch: "epoch-1",
+      revision: 4
+    });
 
     unsubscribe();
   });

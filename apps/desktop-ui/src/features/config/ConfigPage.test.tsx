@@ -1,9 +1,11 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ChannelCapability, ConfiguredChannelEntry, ModelConfigOverview, ModelProviderConfig } from "@slackclaw/contracts";
 
 import {
   activeSavedModelEntries,
   applyModelEntryRole,
+  ChannelStatusBadge,
   channelIcon,
   channelStatusTone,
   configuredChannelActionState,
@@ -257,6 +259,14 @@ describe("ConfigPage helpers", () => {
     expect(providerIcon("github-copilot")).toBe("GH");
     expect(providerIcon("openai")).toBe("OA");
     expect(channelIcon("telegram")).toBe("TG");
+  });
+
+  it("renders configured channel status through StatusBadge semantics", () => {
+    const html = renderToStaticMarkup(<ChannelStatusBadge status="awaiting-pairing" />);
+
+    expect(html).toContain("badge--status");
+    expect(html).toContain("badge--info");
+    expect(html).toContain("awaiting-pairing");
   });
 
   it("maps channel statuses to stable badge tones", () => {

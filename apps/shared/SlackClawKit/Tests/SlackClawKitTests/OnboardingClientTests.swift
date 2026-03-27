@@ -147,7 +147,7 @@ struct OnboardingClientTests {
                     "theme": "analyst",
                     "starterSkillLabels": ["Research Brief", "Status Writer"],
                     "toolLabels": ["Company handbook", "Delivery playbook"],
-                    "skillIds": ["research-brief", "status-writer"],
+                    "presetSkillIds": ["research-brief", "status-writer"],
                     "knowledgePackIds": ["company-handbook", "delivery-playbook"],
                     "workStyles": [],
                     "defaultMemoryEnabled": true
@@ -324,7 +324,7 @@ struct OnboardingClientTests {
                     "theme": "analyst",
                     "starterSkillLabels": ["Research Brief", "Status Writer"],
                     "toolLabels": ["Company handbook", "Delivery playbook"],
-                    "skillIds": ["research-brief", "status-writer"],
+                    "presetSkillIds": ["research-brief", "status-writer"],
                     "knowledgePackIds": ["company-handbook", "delivery-playbook"],
                     "workStyles": [],
                     "defaultMemoryEnabled": true

@@ -7,9 +7,12 @@ import type {
   ChannelSetupState,
   EngineTaskResult,
   OnboardingDraftState,
+  PresetSkillSyncOverview,
+  PresetSkillTargetMode,
   TeamDetail,
   SupportedChannelId
 } from "@slackclaw/contracts";
+import { normalizePresetSkillIds, presetSkillDefinitionById } from "../config/preset-skill-definitions.js";
 import { FilesystemStateAdapter } from "../platform/filesystem-state-adapter.js";
 import { getDataDir } from "../runtime-paths.js";
 
@@ -49,6 +52,19 @@ export interface SkillState {
   customEntries: Record<string, StoredCustomSkillState>;
 }
 
+export interface PresetSkillSelectionState {
+  presetSkillIds: string[];
+  targetMode: PresetSkillTargetMode;
+  updatedAt: string;
+}
+
+export interface PresetSkillState {
+  targetMode: PresetSkillTargetMode;
+  selections: Record<string, PresetSkillSelectionState>;
+  syncOverview?: PresetSkillSyncOverview;
+  lastReconciledAt?: string;
+}
+
 export interface StoredChatThreadState {
   id: string;
   memberId: string;
@@ -77,6 +93,7 @@ export interface AppState {
   channelOnboarding?: ChannelOnboardingState;
   aiTeam?: AITeamState;
   skills?: SkillState;
+  presetSkills?: PresetSkillState;
   chat?: ChatState;
 }
 
@@ -86,10 +103,48 @@ export function defaultOnboardingDraftState(): OnboardingDraftState {
   };
 }
 
+export function defaultPresetSkillState(): PresetSkillState {
+  return {
+    targetMode: "managed-local",
+    selections: {}
+  };
+}
+
 const DEFAULT_STATE: AppState = {
   selectedProfileId: undefined,
   tasks: []
 };
+
+function migrateLegacyOnboardingPresetSkills(state: AppState): AppState {
+  const employee = state.onboarding?.draft?.employee as (OnboardingDraftState["employee"] & {
+    skillIds?: string[];
+  }) | undefined;
+
+  if (!employee || employee.presetSkillIds?.length) {
+    return state;
+  }
+
+  const legacyPresetSkillIds = normalizePresetSkillIds(employee.skillIds).filter((presetSkillId) => presetSkillDefinitionById(presetSkillId));
+  if (legacyPresetSkillIds.length === 0) {
+    return state;
+  }
+
+  const { skillIds: _legacySkillIds, ...nextEmployee } = employee;
+
+  return {
+    ...state,
+    onboarding: {
+      ...(state.onboarding ?? { draft: defaultOnboardingDraftState() }),
+      draft: {
+        ...(state.onboarding?.draft ?? defaultOnboardingDraftState()),
+        employee: {
+          ...nextEmployee,
+          presetSkillIds: legacyPresetSkillIds
+        }
+      }
+    }
+  };
+}
 
 export class StateStore {
   private readonly filePath: string;
@@ -102,7 +157,7 @@ export class StateStore {
 
   async read(): Promise<AppState> {
     const persisted = await this.filesystem.readJson(this.filePath, DEFAULT_STATE);
-    return { ...DEFAULT_STATE, ...persisted } as AppState;
+    return migrateLegacyOnboardingPresetSkills({ ...DEFAULT_STATE, ...persisted } as AppState);
   }
 
   async write(nextState: AppState): Promise<void> {

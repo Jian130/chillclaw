@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { WorkspaceScaffold } from "./Scaffold.js";
+import { SplitContentScaffold, WorkspaceScaffold } from "./Scaffold.js";
 import { StatusBadge } from "./StatusBadge.js";
 
 describe("StatusBadge", () => {
@@ -29,5 +29,37 @@ describe("StatusBadge", () => {
     expect(html).toContain("Manage models and channels");
     expect(html).toContain("Refresh");
     expect(html).toContain("Body");
+  });
+
+  it("defaults workspace scaffolds to the centered content width", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceScaffold title="Settings" subtitle="Inspect the daemon">
+        <div>Body</div>
+      </WorkspaceScaffold>
+    );
+
+    expect(html).toContain("workspace-scaffold--centered");
+  });
+
+  it("allows workspace scaffolds to opt into the full content width", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceScaffold title="Dashboard" subtitle="Wide layout" contentWidth="full">
+        <div>Body</div>
+      </WorkspaceScaffold>
+    );
+
+    expect(html).toContain("workspace-scaffold--full");
+    expect(html).not.toContain("workspace-scaffold--centered");
+  });
+
+  it("keeps split content scaffolds full width by default", () => {
+    const html = renderToStaticMarkup(
+      <SplitContentScaffold title="Chat" subtitle="Talk to your AI team" sidebar={<div>Sidebar</div>} detail={<div>Detail</div>} >
+        <div>Body</div>
+      </SplitContentScaffold>
+    );
+
+    expect(html).toContain("split-content-scaffold--full");
+    expect(html).not.toContain("split-content-scaffold--centered");
   });
 });

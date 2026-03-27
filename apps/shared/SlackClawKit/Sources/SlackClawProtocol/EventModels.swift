@@ -27,6 +27,12 @@ public enum SlackClawConfigResource: String, Codable, Sendable {
 }
 
 public enum SlackClawEvent: Codable, Sendable {
+    case overviewUpdated(snapshot: RevisionedSnapshot<ProductOverview>)
+    case aiTeamUpdated(snapshot: RevisionedSnapshot<AITeamOverview>)
+    case modelConfigUpdated(snapshot: RevisionedSnapshot<ModelConfigOverview>)
+    case channelConfigUpdated(snapshot: RevisionedSnapshot<ChannelConfigOverview>)
+    case skillCatalogUpdated(snapshot: RevisionedSnapshot<SkillCatalogOverview>)
+    case presetSkillSyncUpdated(snapshot: RevisionedSnapshot<PresetSkillSyncOverview>)
     case deployProgress(correlationId: String, targetId: String, phase: SlackClawDeployPhase, percent: Int?, message: String)
     case deployCompleted(correlationId: String, targetId: String, status: String, message: String, engineStatus: EngineStatus)
     case gatewayStatus(reachable: Bool, pendingGatewayApply: Bool, summary: String)
@@ -54,6 +60,7 @@ public enum SlackClawEvent: Codable, Sendable {
         case channelId
         case session
         case resource
+        case snapshot
     }
 
     public init(from decoder: Decoder) throws {
@@ -61,6 +68,18 @@ public enum SlackClawEvent: Codable, Sendable {
         let type = try container.decode(String.self, forKey: .type)
 
         switch type {
+        case "overview.updated":
+            self = .overviewUpdated(snapshot: try container.decode(RevisionedSnapshot<ProductOverview>.self, forKey: .snapshot))
+        case "ai-team.updated":
+            self = .aiTeamUpdated(snapshot: try container.decode(RevisionedSnapshot<AITeamOverview>.self, forKey: .snapshot))
+        case "model-config.updated":
+            self = .modelConfigUpdated(snapshot: try container.decode(RevisionedSnapshot<ModelConfigOverview>.self, forKey: .snapshot))
+        case "channel-config.updated":
+            self = .channelConfigUpdated(snapshot: try container.decode(RevisionedSnapshot<ChannelConfigOverview>.self, forKey: .snapshot))
+        case "skill-catalog.updated":
+            self = .skillCatalogUpdated(snapshot: try container.decode(RevisionedSnapshot<SkillCatalogOverview>.self, forKey: .snapshot))
+        case "preset-skill-sync.updated":
+            self = .presetSkillSyncUpdated(snapshot: try container.decode(RevisionedSnapshot<PresetSkillSyncOverview>.self, forKey: .snapshot))
         case "deploy.progress":
             self = .deployProgress(
                 correlationId: try container.decode(String.self, forKey: .correlationId),
@@ -118,6 +137,24 @@ public enum SlackClawEvent: Codable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
         switch self {
+        case let .overviewUpdated(snapshot):
+            try container.encode("overview.updated", forKey: .type)
+            try container.encode(snapshot, forKey: .snapshot)
+        case let .aiTeamUpdated(snapshot):
+            try container.encode("ai-team.updated", forKey: .type)
+            try container.encode(snapshot, forKey: .snapshot)
+        case let .modelConfigUpdated(snapshot):
+            try container.encode("model-config.updated", forKey: .type)
+            try container.encode(snapshot, forKey: .snapshot)
+        case let .channelConfigUpdated(snapshot):
+            try container.encode("channel-config.updated", forKey: .type)
+            try container.encode(snapshot, forKey: .snapshot)
+        case let .skillCatalogUpdated(snapshot):
+            try container.encode("skill-catalog.updated", forKey: .type)
+            try container.encode(snapshot, forKey: .snapshot)
+        case let .presetSkillSyncUpdated(snapshot):
+            try container.encode("preset-skill-sync.updated", forKey: .type)
+            try container.encode(snapshot, forKey: .snapshot)
         case let .deployProgress(correlationId, targetId, phase, percent, message):
             try container.encode("deploy.progress", forKey: .type)
             try container.encode(correlationId, forKey: .correlationId)

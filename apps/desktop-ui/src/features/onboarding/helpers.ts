@@ -8,6 +8,7 @@ import type {
   OnboardingInstallState,
   OnboardingStateResponse,
   OnboardingStep,
+  PresetSkillSyncOverview,
   ProductOverview,
   SaveAIMemberRequest,
   SavedModelEntry,
@@ -26,7 +27,7 @@ export interface OnboardingEmployeeDraft {
   avatarPresetId: string;
   presetId: string;
   personalityTraits: string[];
-  skillIds: string[];
+  presetSkillIds: string[];
   knowledgePackIds: string[];
   workStyles: string[];
   memoryEnabled: boolean;
@@ -49,6 +50,83 @@ export function resolveOnboardingEmployeePresets(
   onboardingState: Pick<OnboardingStateResponse, "config"> | undefined
 ): OnboardingEmployeePresetPresentation[] {
   return onboardingState?.config.employeePresets ?? [];
+}
+
+export type OnboardingEmployeePresetReadinessStatus = "ready" | "syncing" | "repair" | "install";
+
+export interface OnboardingEmployeePresetReadiness {
+  status: OnboardingEmployeePresetReadinessStatus;
+  label: string;
+  detail?: string;
+  blocking: boolean;
+}
+
+export function resolveOnboardingPresetSkillIds(
+  preset:
+    | Pick<OnboardingEmployeePresetPresentation, "presetSkillIds">
+    | Pick<OnboardingEmployeeDraft, "presetSkillIds">
+    | undefined
+): string[] {
+  if (!preset) {
+    return [];
+  }
+
+  return preset.presetSkillIds?.filter(Boolean) ?? [];
+}
+
+export function resolveOnboardingEmployeePresetReadiness(
+  preset: Pick<OnboardingEmployeePresetPresentation, "presetSkillIds">,
+  presetSkillSync: PresetSkillSyncOverview | undefined
+): OnboardingEmployeePresetReadiness {
+  const presetSkillIds = resolveOnboardingPresetSkillIds(preset);
+  if (presetSkillIds.length === 0) {
+    return {
+      status: "ready",
+      label: "Ready",
+      detail: "This preset does not need any managed skills.",
+      blocking: false
+    };
+  }
+
+  const entries = presetSkillIds
+    .map((presetSkillId) => presetSkillSync?.entries.find((entry) => entry.presetSkillId === presetSkillId))
+    .filter((entry) => Boolean(entry));
+
+  if (entries.length === presetSkillIds.length && entries.every((entry) => entry?.status === "verified")) {
+    return {
+      status: "ready",
+      label: "Ready",
+      detail: presetSkillSync?.summary ?? "Preset skills are verified in the active runtime.",
+      blocking: false
+    };
+  }
+
+  const failedEntry = entries.find((entry) => entry?.status === "failed");
+  if (failedEntry) {
+    return {
+      status: "repair",
+      label: "Repair needed",
+      detail: failedEntry.lastError ?? presetSkillSync?.summary ?? "ChillClaw could not verify every preset skill.",
+      blocking: true
+    };
+  }
+
+  const inFlight = entries.some((entry) => entry && entry.status !== "verified");
+  if (inFlight) {
+    return {
+      status: "syncing",
+      label: "Syncing",
+      detail: presetSkillSync?.summary ?? "ChillClaw is syncing preset skills for this employee.",
+      blocking: true
+    };
+  }
+
+  return {
+    status: "install",
+    label: "Install on select",
+    detail: "Choose this preset and ChillClaw will install its guided skills.",
+    blocking: true
+  };
 }
 
 export interface ResolvedOnboardingModelProvider {
@@ -329,7 +407,8 @@ export function buildOnboardingMemberRequest(draft: OnboardingEmployeeDraft): Sa
     personality,
     soul: personality,
     workStyles: draft.workStyles,
-    skillIds: draft.skillIds,
+    presetSkillIds: draft.presetSkillIds,
+    skillIds: [],
     knowledgePackIds: draft.knowledgePackIds,
     capabilitySettings: {
       memoryEnabled: draft.memoryEnabled,
@@ -353,7 +432,7 @@ export function resolveOnboardingModelProviders(
   }));
 }
 
-export type OnboardingRefreshResource = "overview" | "model" | "channel" | "team";
+export type OnboardingRefreshResource = "overview" | "model" | "channel" | "team" | "onboarding";
 
 export function onboardingRefreshResourceForEvent(
   step: OnboardingStep,
@@ -363,18 +442,12 @@ export function onboardingRefreshResourceForEvent(
     case "install":
       return event.type === "deploy.completed" || event.type === "gateway.status" ? "overview" : undefined;
     case "model":
-      return event.type === "config.applied" && event.resource === "models" ? "model" : undefined;
+      return undefined;
     case "channel":
-      if (event.type === "config.applied" && event.resource === "channels") {
-        return "channel";
-      }
       return event.type === "channel.session.updated" ? "channel" : undefined;
     case "employee":
     case "complete":
-      if (event.type !== "config.applied") {
-        return undefined;
-      }
-      return ["ai-employees", "models", "skills"].includes(event.resource) ? "team" : undefined;
+      return event.type === "preset-skill-sync.updated" ? "onboarding" : undefined;
     case "welcome":
     default:
       return undefined;

@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+import type { ChatStreamEvent } from "@slackclaw/contracts";
+
 import { MockAdapter } from "../engine/mock-adapter.js";
 import { AITeamService } from "./ai-team-service.js";
 import { ChatService } from "./chat-service.js";
@@ -175,10 +177,14 @@ test("chat service mirrors chat stream updates onto the daemon event bus", async
   const { chatService, member, eventBus } = await createServices("chat-service-daemon-events", { withEvents: true });
   const eventTypes: string[] = [];
   const payloadTypes: string[] = [];
+  const toolPayloads: Array<Extract<ChatStreamEvent, { type: "assistant-tool-status" }>> = [];
   const unsubscribe = eventBus!.subscribe((event) => {
     eventTypes.push(event.type);
     if (event.type === "chat.stream") {
       payloadTypes.push(event.payload.type);
+      if (event.payload.type === "assistant-tool-status") {
+        toolPayloads.push(event.payload);
+      }
     }
   });
   const thread = (await chatService.createThread({ memberId: member.id, mode: "new" })).thread!;
@@ -190,7 +196,44 @@ test("chat service mirrors chat stream updates onto the daemon event bus", async
   assert.equal(eventTypes.includes("chat.stream"), true);
   assert.equal(payloadTypes.includes("thread-created"), true);
   assert.equal(payloadTypes.includes("message-created"), true);
+  assert.equal(payloadTypes.includes("assistant-tool-status"), true);
   assert.equal(payloadTypes.includes("assistant-completed"), true);
+  assert.equal(toolPayloads[0]?.sessionKey, thread.sessionKey);
+  assert.equal(toolPayloads[0]?.toolActivity.label, "mock-search");
+});
+
+test("chat service publishes connection-state and history-loaded resync events on reconnect", async () => {
+  const { adapter, chatService, member, eventBus } = await createServices("chat-service-reconnect-resync", { withEvents: true });
+  const payloadTypes: string[] = [];
+  const connectionStates: string[] = [];
+  const listeners = (adapter as unknown as {
+    chatListeners: Set<(event: import("../engine/adapter.js").EngineChatLiveEvent) => void>;
+  }).chatListeners;
+
+  eventBus!.subscribe((event) => {
+    if (event.type !== "chat.stream") {
+      return;
+    }
+
+    payloadTypes.push(event.payload.type);
+    if (event.payload.type === "connection-state") {
+      connectionStates.push(event.payload.state);
+    }
+  });
+
+  const thread = (await chatService.createThread({ memberId: member.id, mode: "new" })).thread!;
+  await chatService.sendMessage(thread.id, { message: "Summarize today's work.", clientMessageId: "client-reconnect" });
+
+  for (const listener of listeners) {
+    listener({ type: "disconnected", error: "Socket dropped." });
+    listener({ type: "connected" });
+  }
+
+  await delay(50);
+
+  assert.equal(connectionStates.includes("reconnecting"), true);
+  assert.equal(connectionStates.includes("connected"), true);
+  assert.equal(payloadTypes.includes("history-loaded"), true);
 });
 
 test("chat service abort returns the current thread detail when nothing is running", async () => {

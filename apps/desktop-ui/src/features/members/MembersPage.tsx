@@ -34,12 +34,14 @@ import { Badge } from "../../shared/ui/Badge.js";
 import { Button } from "../../shared/ui/Button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../shared/ui/Card.js";
 import { Dialog } from "../../shared/ui/Dialog.js";
+import { ErrorState } from "../../shared/ui/ErrorState.js";
 import { FieldLabel, Input, Select, Textarea } from "../../shared/ui/Field.js";
 import { LoadingBlocker } from "../../shared/ui/LoadingBlocker.js";
 import { LoadingPanel } from "../../shared/ui/LoadingPanel.js";
 import { MemberAvatar, memberInitials } from "../../shared/ui/MemberAvatar.js";
 import { WorkspaceScaffold } from "../../shared/ui/Scaffold.js";
 import { EmptyState } from "../../shared/ui/EmptyState.js";
+import { StatusBadge } from "../../shared/ui/StatusBadge.js";
 
 const workStyleOptions = ["Methodical", "Fast-paced", "Data-driven", "Adaptive", "Warm", "Structured"];
 const quickActionTemplates = [
@@ -179,6 +181,7 @@ type MemberPresetDraft = {
   personality: string;
   soul: string;
   workStyles: string[];
+  presetSkillIds: string[];
   skillIds: string[];
   knowledgePackIds: string[];
   memoryEnabled: boolean;
@@ -191,10 +194,15 @@ export function buildMemberPresetDraft(preset?: AIMemberPreset): MemberPresetDra
     personality: preset?.personality ?? "",
     soul: preset?.soul ?? "",
     workStyles: preset?.workStyles ?? [],
+    presetSkillIds: preset?.presetSkillIds ?? [],
     skillIds: preset?.skillIds ?? [],
     knowledgePackIds: preset?.knowledgePackIds ?? [],
     memoryEnabled: preset?.defaultMemoryEnabled ?? true
   };
+}
+
+export function MemberStatusBadge(props: { status: AIMemberDetail["status"] }) {
+  return <StatusBadge tone={memberStatusTone(props.status)}>{memberStatusLabel(props.status)}</StatusBadge>;
 }
 
 function MemberDialog(props: {
@@ -214,6 +222,7 @@ function MemberDialog(props: {
   const [personality, setPersonality] = useState("");
   const [soul, setSoul] = useState("");
   const [workStyles, setWorkStyles] = useState<string[]>([]);
+  const [presetSkillIds, setPresetSkillIds] = useState<string[]>([]);
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const [knowledgePackIds, setKnowledgePackIds] = useState<string[]>([]);
   const [memoryEnabled, setMemoryEnabled] = useState(true);
@@ -227,6 +236,7 @@ function MemberDialog(props: {
 
     if (props.member) {
       const member = props.member;
+      const presetSkillSelection = (member as AIMemberDetail & { presetSkillIds?: string[] }).presetSkillIds ?? [];
       const preset = memberAvatarPresets.find((item) => item.id === member.avatar.presetId) ?? memberAvatarPresets[0];
       setSelectedPresetId("");
       setName(member.name);
@@ -236,6 +246,7 @@ function MemberDialog(props: {
       setPersonality(member.personality);
       setSoul(member.soul);
       setWorkStyles(member.workStyles);
+      setPresetSkillIds(presetSkillSelection);
       setSkillIds(member.skillIds);
       setKnowledgePackIds(member.knowledgePackIds);
       setMemoryEnabled(member.capabilitySettings.memoryEnabled ?? true);
@@ -250,6 +261,7 @@ function MemberDialog(props: {
       setPersonality(presetDraft.personality);
       setSoul(presetDraft.soul);
       setWorkStyles(presetDraft.workStyles);
+      setPresetSkillIds(presetDraft.presetSkillIds);
       setSkillIds(presetDraft.skillIds);
       setKnowledgePackIds(presetDraft.knowledgePackIds);
       setMemoryEnabled(presetDraft.memoryEnabled);
@@ -274,6 +286,7 @@ function MemberDialog(props: {
     setPersonality(presetDraft.personality);
     setSoul(presetDraft.soul);
     setWorkStyles(presetDraft.workStyles);
+    setPresetSkillIds(presetDraft.presetSkillIds);
     setSkillIds(presetDraft.skillIds);
     setKnowledgePackIds(presetDraft.knowledgePackIds);
     setMemoryEnabled(presetDraft.memoryEnabled);
@@ -302,6 +315,7 @@ function MemberDialog(props: {
         personality,
         soul,
         workStyles,
+        presetSkillIds: presetSkillIds.length > 0 ? presetSkillIds : undefined,
         skillIds,
         knowledgePackIds,
         capabilitySettings: {
@@ -329,7 +343,7 @@ function MemberDialog(props: {
     >
       <LoadingBlocker active={busy} label="Saving AI member" description="ChillClaw is creating the member and syncing the OpenClaw agent workspace.">
         <div className="panel-stack">
-          {error ? <p className="card__description" style={{ color: "var(--danger)" }}>{error}</p> : null}
+          {error ? <ErrorState compact title="Could not save AI member" description={error} /> : null}
           {!props.member ? (
             <div className="field-grid">
               <div>
@@ -420,7 +434,11 @@ function MemberDialog(props: {
                   <button
                     key={skill.id}
                     className={`badge ${skillIds.includes(skill.id) ? "badge--success" : "badge--neutral"}`}
-                    onClick={() => toggle(skillIds, setSkillIds, skill.id)}
+                    onClick={() => {
+                      setSelectedPresetId("");
+                      setPresetSkillIds([]);
+                      toggle(skillIds, setSkillIds, skill.id);
+                    }}
                     type="button"
                   >
                     {skill.label}
@@ -517,7 +535,7 @@ function RemoveMemberDialog(props: {
     >
       <LoadingBlocker active={Boolean(busyMode)} label="Removing AI member" description="ChillClaw is updating OpenClaw and the team roster.">
         <div className="panel-stack">
-          {error ? <p className="card__description" style={{ color: "var(--danger)" }}>{error}</p> : null}
+          {error ? <ErrorState compact title="Could not remove AI member" description={error} /> : null}
           <p className="card__description">{memberDeleteSummary(props.member)}</p>
           <div className="actions-row" style={{ justifyContent: "flex-end" }}>
             <Button variant="outline" onClick={props.onClose} disabled={Boolean(busyMode)}>
@@ -665,12 +683,14 @@ export default function MembersPage() {
 
   if (error && !overview) {
     return (
-      <EmptyState
-        title="ChillClaw could not load AI members"
-        description={error}
-        actionLabel="Retry"
-        onAction={() => window.location.reload()}
-      />
+      <WorkspaceScaffold className="members-studio" title={copy.title} subtitle={copy.subtitle}>
+        <ErrorState
+          title="ChillClaw could not load AI members"
+          description={error}
+          actionLabel="Retry"
+          onAction={() => window.location.reload()}
+        />
+      </WorkspaceScaffold>
     );
   }
 
@@ -779,7 +799,7 @@ export default function MembersPage() {
                   style={{ "--member-accent": member.avatar.accent } as CSSProperties}
                 >
                   <div className="member-spotlight-card__badge-row">
-                    <Badge tone={memberStatusTone(member.status)}>{memberStatusLabel(member.status)}</Badge>
+                    <MemberStatusBadge status={member.status} />
                     {member.capabilitySettings.memoryEnabled ? <Badge tone="info">{copy.memoryEnabled}</Badge> : null}
                   </div>
                   <div className="member-spotlight-card__avatar-shell">
@@ -807,7 +827,7 @@ export default function MembersPage() {
                     <div className="member-spotlight-card__tag-row">
                       {personalityTags.length > 0 ? personalityTags.map((trait) => (
                         <Badge key={trait} tone="info">{trait}</Badge>
-                      )) : <Badge tone="info">{memberStatusLabel(member.status)}</Badge>}
+                      )) : <MemberStatusBadge status={member.status} />}
                     </div>
                     <div className="member-spotlight-card__tag-row">
                       {member.workStyles.slice(0, 2).map((style) => (
@@ -888,7 +908,7 @@ export default function MembersPage() {
                     <h2>{selectedMember.name}</h2>
                     <p>{selectedMember.jobTitle}</p>
                     <div className="actions-row">
-                      <Badge tone={memberStatusTone(selectedMember.status)}>{memberStatusLabel(selectedMember.status)}</Badge>
+                      <MemberStatusBadge status={selectedMember.status} />
                       <Badge tone={memberOriginTone(selectedMember)}>{memberOriginLabel(selectedMember)}</Badge>
                       <Badge tone="neutral">{memberTaskLabel(selectedMember.activeTaskCount)}</Badge>
                     </div>

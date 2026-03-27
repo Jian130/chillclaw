@@ -14,7 +14,6 @@ import {
   createChannelEntry,
   createSavedModelEntry,
   fetchChannelConfig,
-  fetchModelAuthSession,
   fetchModelConfig,
   removeSavedModelEntry,
   removeChannelEntry,
@@ -25,7 +24,7 @@ import {
   submitModelAuthSessionInput
 } from "../../shared/api/client.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
-import { settleAfterMutation } from "../../shared/data/settle.js";
+import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 import { t } from "../../shared/i18n/messages.js";
 import { Badge } from "../../shared/ui/Badge.js";
 import { Button } from "../../shared/ui/Button.js";
@@ -36,6 +35,7 @@ import { InfoBanner } from "../../shared/ui/InfoBanner.js";
 import { LoadingBlocker } from "../../shared/ui/LoadingBlocker.js";
 import { LoadingPanel } from "../../shared/ui/LoadingPanel.js";
 import { WorkspaceScaffold } from "../../shared/ui/Scaffold.js";
+import { StatusBadge } from "../../shared/ui/StatusBadge.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/Tabs.js";
 import { EmptyState } from "../../shared/ui/EmptyState.js";
 import { ProviderLogo, providerFallbackGlyph } from "../../shared/ui/ProviderLogo.js";
@@ -106,6 +106,10 @@ export function channelStatusTone(status: ConfiguredChannelEntry["status"] | und
   }
 
   return "neutral" as const;
+}
+
+export function ChannelStatusBadge(props: { status: ConfiguredChannelEntry["status"] | undefined }) {
+  return <StatusBadge tone={channelStatusTone(props.status)}>{props.status ?? "pending"}</StatusBadge>;
 }
 
 export function channelIcon(channelId: string) {
@@ -312,45 +316,6 @@ async function copyText(value: string) {
   await navigator.clipboard.writeText(value);
 }
 
-function savedEntrySignature(entry: SavedModelEntry | undefined) {
-  if (!entry) {
-    return "";
-  }
-
-  return JSON.stringify({
-    id: entry.id,
-    providerId: entry.providerId,
-    modelKey: entry.modelKey,
-    authMethodId: entry.authMethodId,
-    isDefault: entry.isDefault,
-    isFallback: entry.isFallback,
-    updatedAt: entry.updatedAt
-  });
-}
-
-function configuredChannelSignature(entry: ConfiguredChannelEntry | undefined) {
-  if (!entry) {
-    return "";
-  }
-
-  return JSON.stringify({
-    id: entry.id,
-    channelId: entry.channelId,
-    status: entry.status,
-    summary: entry.summary,
-    pairingRequired: entry.pairingRequired,
-    lastUpdatedAt: entry.lastUpdatedAt
-  });
-}
-
-function findCreatedSavedEntry(previousEntries: SavedModelEntry[], nextEntries: SavedModelEntry[]) {
-  return nextEntries.find((entry) => !previousEntries.some((previous) => previous.id === entry.id));
-}
-
-function findCreatedChannelEntry(previousEntries: ConfiguredChannelEntry[], nextEntries: ConfiguredChannelEntry[]) {
-  return nextEntries.find((entry) => !previousEntries.some((previous) => previous.id === entry.id));
-}
-
 export function configuredChannelActionState(
   entry: Pick<ConfiguredChannelEntry, "pairingRequired">,
   capability: Pick<ChannelCapability, "supportsPairing"> | undefined
@@ -470,48 +435,6 @@ function ModelDialog(props: {
     });
   }, [models, props.initialEntry?.modelKey, props.modelConfig, props.open, provider]);
 
-  useEffect(() => {
-    if (!session?.id) {
-      return;
-    }
-
-    const timer = window.setInterval(async () => {
-      const nextSession = await fetchModelAuthSession(session.id);
-      setSession(nextSession.session);
-
-      if (nextSession.session.status === "completed") {
-        const result = await settleAfterMutation({
-          mutate: async () => nextSession,
-          getProvisionalState: (mutation) => mutation.modelConfig,
-          applyState: props.onModelConfigChange,
-          readFresh: () => props.reloadModelConfig({ fresh: true }),
-          isSettled: (state, mutation) => {
-            const entryId = mutation.session.entryId ?? props.initialEntry?.id;
-
-            if (!entryId) {
-              return true;
-            }
-
-            const expectedEntry = mutation.modelConfig.savedEntries.find((entry) => entry.id === entryId);
-            const actualEntry = state.savedEntries.find((entry) => entry.id === entryId);
-            return savedEntrySignature(actualEntry) === savedEntrySignature(expectedEntry);
-          },
-          attempts: 8,
-          delayMs: 700
-        });
-        props.onModelConfigChange(result.state);
-        props.onClose();
-        return;
-      }
-
-      if (nextSession.session.status === "failed") {
-        props.onModelConfigChange(await props.reloadModelConfig({ fresh: true }));
-      }
-    }, 1600);
-
-    return () => window.clearInterval(timer);
-  }, [props, session?.id]);
-
   async function handleSave() {
     if (!provider || !method) return;
     setBusy("save");
@@ -525,52 +448,14 @@ function ModelDialog(props: {
         makeDefault,
         useAsFallback
       };
-      const previousEntries = props.modelConfig?.savedEntries ?? [];
-      const result = props.initialEntry
-        ? await settleAfterMutation({
-            mutate: () => updateSavedModelEntry(props.initialEntry!.id, request),
-            getProvisionalState: (mutation) => mutation.modelConfig,
-            applyState: props.onModelConfigChange,
-            readFresh: () => props.reloadModelConfig({ fresh: true }),
-            isSettled: (state, mutation) => {
-              if (mutation.authSession) {
-                return false;
-              }
+      const response = props.initialEntry
+        ? await updateSavedModelEntry(props.initialEntry!.id, request)
+        : await createSavedModelEntry(request);
 
-              const expectedEntry = mutation.modelConfig.savedEntries.find((entry) => entry.id === props.initialEntry!.id);
-              const actualEntry = state.savedEntries.find((entry) => entry.id === props.initialEntry!.id);
-              return savedEntrySignature(actualEntry) === savedEntrySignature(expectedEntry);
-            },
-            attempts: 8,
-            delayMs: 700
-          })
-        : await settleAfterMutation({
-            mutate: () => createSavedModelEntry(request),
-            getProvisionalState: (mutation) => mutation.modelConfig,
-            applyState: props.onModelConfigChange,
-            readFresh: () => props.reloadModelConfig({ fresh: true }),
-            isSettled: (state, mutation) => {
-              if (mutation.authSession) {
-                return false;
-              }
+      props.onModelConfigChange(response.modelConfig);
+      setSession(response.authSession);
 
-              const createdEntry = findCreatedSavedEntry(previousEntries, mutation.modelConfig.savedEntries);
-
-              if (!createdEntry) {
-                return false;
-              }
-
-              const actualEntry = state.savedEntries.find((entry) => entry.id === createdEntry.id);
-              return savedEntrySignature(actualEntry) === savedEntrySignature(createdEntry);
-            },
-            attempts: 8,
-            delayMs: 700
-          });
-
-      props.onModelConfigChange(result.state);
-      setSession(result.mutation.authSession);
-
-      if (!result.mutation.authSession && result.mutation.status === "completed") {
+      if (!response.authSession && response.status === "completed") {
         props.onClose();
       }
     } finally {
@@ -585,7 +470,11 @@ function ModelDialog(props: {
       const next = await submitModelAuthSessionInput(session.id, { value: sessionInput.trim() });
       setSession(next.session);
       setSessionInput("");
-      props.onModelConfigChange(await props.reloadModelConfig());
+      props.onModelConfigChange(next.modelConfig);
+
+      if (next.session.status === "completed") {
+        props.onClose();
+      }
     } finally {
       setBusy("");
     }
@@ -623,12 +512,12 @@ function ModelDialog(props: {
           description="ChillClaw is syncing the model entry with OpenClaw."
         >
           <div className="panel-stack">
-          <div className="info-banner">
-            <ProviderLogo label={provider.label} providerId={provider.id} />
-            <div>
-              <h3>{provider.label}</h3>
-              <p>{provider.description}</p>
-              <div className="actions-row" style={{ marginTop: 12 }}>
+            <InfoBanner
+              icon={<ProviderLogo label={provider.label} providerId={provider.id} />}
+              title={provider.label}
+              description={provider.description}
+            >
+              <div className="actions-row info-banner__actions">
                 <Button onClick={() => setProviderId("")} variant="outline">
                   Change Provider
                 </Button>
@@ -639,8 +528,7 @@ function ModelDialog(props: {
                   </Button>
                 ) : null}
               </div>
-            </div>
-          </div>
+            </InfoBanner>
 
           <div className="field-grid field-grid--two">
             <div>
@@ -808,51 +696,13 @@ function ChannelDialog(props: {
     setBusy(action);
     try {
       const request = { channelId: capability.id, values, action };
-      const previousEntries = props.channelConfig?.entries ?? [];
-      const result = props.initialEntry
-        ? await settleAfterMutation({
-            mutate: () => updateChannelEntry(props.initialEntry!.id, request),
-            getProvisionalState: (mutation) => mutation.channelConfig,
-            applyState: props.onChannelConfigChange,
-            readFresh: () => props.reloadChannelConfig({ fresh: true }),
-            isSettled: (state, mutation) => {
-              if (mutation.session) {
-                return false;
-              }
+      const response = props.initialEntry
+        ? await updateChannelEntry(props.initialEntry!.id, request)
+        : await createChannelEntry(request);
+      props.onChannelConfigChange(response.channelConfig);
+      setMessage(response.message);
 
-              const expectedEntry = mutation.channelConfig.entries.find((entry) => entry.id === props.initialEntry!.id);
-              const actualEntry = state.entries.find((entry) => entry.id === props.initialEntry!.id);
-              return configuredChannelSignature(actualEntry) === configuredChannelSignature(expectedEntry);
-            },
-            attempts: 8,
-            delayMs: 700
-          })
-        : await settleAfterMutation({
-            mutate: () => createChannelEntry(request),
-            getProvisionalState: (mutation) => mutation.channelConfig,
-            applyState: props.onChannelConfigChange,
-            readFresh: () => props.reloadChannelConfig({ fresh: true }),
-            isSettled: (state, mutation) => {
-              if (mutation.session) {
-                return false;
-              }
-
-              const createdEntry = findCreatedChannelEntry(previousEntries, mutation.channelConfig.entries);
-
-              if (!createdEntry) {
-                return false;
-              }
-
-              const actualEntry = state.entries.find((entry) => entry.id === createdEntry.id);
-              return configuredChannelSignature(actualEntry) === configuredChannelSignature(createdEntry);
-            },
-            attempts: 8,
-            delayMs: 700
-          });
-      props.onChannelConfigChange(result.state);
-      setMessage(result.mutation.message);
-
-      if (shouldCloseChannelDialogAfterAction(action, capability.id, Boolean(result.mutation.session))) {
+      if (shouldCloseChannelDialogAfterAction(action, capability.id, Boolean(response.session))) {
         props.onClose();
       }
     } finally {
@@ -887,12 +737,12 @@ function ChannelDialog(props: {
           description="ChillClaw is sending the channel action to OpenClaw."
         >
           <div className="panel-stack">
-          <div className="info-banner">
-            <div className="provider-logo">{channelIcon(capability.id)}</div>
-            <div>
-              <h3>{capability.label}</h3>
-              <p>{capability.description}</p>
-              <div className="actions-row" style={{ marginTop: 12 }}>
+            <InfoBanner
+              icon={<div className="provider-logo">{channelIcon(capability.id)}</div>}
+              title={capability.label}
+              description={capability.description}
+            >
+              <div className="actions-row info-banner__actions">
                 <Button onClick={() => setChannelId("")} variant="outline">
                   Change Channel
                 </Button>
@@ -903,15 +753,14 @@ function ChannelDialog(props: {
                   </Button>
                 ) : null}
               </div>
-            </div>
-          </div>
+            </InfoBanner>
 
           {props.initialEntry ? (
             <Card>
               <CardContent className="panel-stack">
                 <div className="actions-row" style={{ justifyContent: "space-between" }}>
                   <strong>Current configuration</strong>
-                  <Badge tone={channelStatusTone(props.initialEntry.status)}>{props.initialEntry.status}</Badge>
+                  <ChannelStatusBadge status={props.initialEntry.status} />
                 </div>
                 <p className="card__description">{props.initialEntry.summary}</p>
                 {props.initialEntry.maskedConfigSummary.length ? (
@@ -957,15 +806,11 @@ function ChannelDialog(props: {
                     </div>
                   ))}
                 </div>
-                <div className="info-banner">
-                  <div>
-                    <h3>What to prepare before saving</h3>
-                    <p>
-                      App ID, App Secret, the correct tenant domain, imported scopes, bot capability enabled, long connection enabled,
-                      and the message receive event required by OpenClaw.
-                    </p>
-                  </div>
-                </div>
+                <InfoBanner
+                  title="What to prepare before saving"
+                  description="App ID, App Secret, the correct tenant domain, imported scopes, bot capability enabled, long connection enabled, and the message receive event required by OpenClaw."
+                  accent="blue"
+                />
                 <Textarea readOnly value={feishuScopes} />
                 <div className="actions-row">
                   <Button onClick={() => void copyText(feishuScopes)} variant="outline">
@@ -1039,7 +884,7 @@ function ChannelDialog(props: {
               <Badge tone={capability.officialSupport ? "success" : "warning"}>
                 {capability.officialSupport ? "Official" : "Workaround"}
               </Badge>
-              {props.initialEntry?.pairingRequired ? <Badge tone="info">Pairing required</Badge> : null}
+              {props.initialEntry?.pairingRequired ? <StatusBadge tone="info">Pairing required</StatusBadge> : null}
             </div>
             <div className="actions-row">
               {capability.id === "feishu" ? (
@@ -1113,16 +958,33 @@ export default function ConfigPage() {
   }, [channelConfig, channelDialogOpen, channelsLoading]);
 
   useEffect(() => {
-    if (!channelConfig?.activeSession?.id) {
-      return;
-    }
+    return subscribeToDaemonEvents((event) => {
+      if (event.type === "model-config.updated") {
+        setModelConfig(event.snapshot.data);
+        setModelsLoading(false);
+        return;
+      }
 
-    const timer = window.setInterval(() => {
-      void reloadChannelConfig({ fresh: true });
-    }, 1600);
+      if (event.type === "channel-config.updated") {
+        setChannelConfig(event.snapshot.data);
+        setChannelsLoading(false);
+        return;
+      }
 
-    return () => window.clearInterval(timer);
-  }, [channelConfig?.activeSession?.id]);
+      if (event.type === "channel.session.updated") {
+        setChannelConfig((current) => {
+          if (!current || current.activeSession?.channelId !== event.channelId) {
+            return current;
+          }
+
+          return {
+            ...current,
+            activeSession: event.session
+          };
+        });
+      }
+    });
+  }, []);
 
   async function reloadModelConfig(options?: { fresh?: boolean }) {
     setModelsLoading(true);
@@ -1155,17 +1017,9 @@ export default function ConfigPage() {
   async function handleRemoveChannel(entry: ConfiguredChannelEntry) {
     setBusy(`remove:${entry.id}`);
     try {
-      const result = await settleAfterMutation({
-        mutate: () => removeChannelEntry(entry.id),
-        getProvisionalState: (mutation) => mutation.channelConfig,
-        applyState: setChannelConfig,
-        readFresh: () => reloadChannelConfig({ fresh: true }),
-        isSettled: (state) => !state.entries.some((item) => item.id === entry.id),
-        attempts: 8,
-        delayMs: 700
-      });
-      setChannelConfig(result.state);
-      setChannelMessage(result.mutation.message);
+      const response = await removeChannelEntry(entry.id);
+      setChannelConfig(response.channelConfig);
+      setChannelMessage(response.message);
     } finally {
       setBusy("");
     }
@@ -1174,16 +1028,8 @@ export default function ConfigPage() {
   async function handleSetDefaultEntry(entry: SavedModelEntry) {
     setBusy("models:gateway");
     try {
-      const result = await settleAfterMutation({
-        mutate: () => setDefaultModelEntry({ entryId: entry.id }),
-        getProvisionalState: (mutation) => mutation.modelConfig,
-        applyState: setModelConfig,
-        readFresh: () => reloadModelConfig({ fresh: true }),
-        isSettled: (state) => state.defaultEntryId === entry.id,
-        attempts: 8,
-        delayMs: 700
-      });
-      setModelConfig(result.state);
+      const response = await setDefaultModelEntry({ entryId: entry.id });
+      setModelConfig(response.modelConfig);
     } finally {
       setBusy("");
     }
@@ -1216,20 +1062,8 @@ export default function ConfigPage() {
         })
         .map((item) => item.id);
 
-      const result = await settleAfterMutation({
-        mutate: () => replaceFallbackModelEntries({ entryIds: nextFallbackIds }),
-        getProvisionalState: (mutation) => mutation.modelConfig,
-        applyState: setModelConfig,
-        readFresh: () => reloadModelConfig({ fresh: true }),
-        isSettled: (state) => {
-          const actualFallbackIds = state.savedEntries.filter((item) => item.isFallback).map((item) => item.id).sort();
-          const expectedFallbackIds = [...nextFallbackIds].sort();
-          return JSON.stringify(actualFallbackIds) === JSON.stringify(expectedFallbackIds);
-        },
-        attempts: 8,
-        delayMs: 700
-      });
-      setModelConfig(result.state);
+      const response = await replaceFallbackModelEntries({ entryIds: nextFallbackIds });
+      setModelConfig(response.modelConfig);
     } finally {
       setBusy("");
     }
@@ -1242,16 +1076,8 @@ export default function ConfigPage() {
 
     setBusy(`models:remove:${entry.id}`);
     try {
-      const result = await settleAfterMutation({
-        mutate: () => removeSavedModelEntry(entry.id),
-        getProvisionalState: (mutation) => mutation.modelConfig,
-        applyState: setModelConfig,
-        readFresh: () => reloadModelConfig({ fresh: true }),
-        isSettled: (state) => !state.savedEntries.some((item) => item.id === entry.id),
-        attempts: 8,
-        delayMs: 700
-      });
-      setModelConfig(result.state);
+      const response = await removeSavedModelEntry(entry.id);
+      setModelConfig(response.modelConfig);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "ChillClaw could not remove this configured model.");
     } finally {
@@ -1577,8 +1403,8 @@ export default function ConfigPage() {
                           <strong>{entry.label}</strong>
                           <span className="card__description">{capability?.label ?? entry.channelId}</span>
                           <div className="actions-row">
-                            <Badge tone={channelStatusTone(entry.status)}>{entry.status}</Badge>
-                            {entry.pairingRequired ? <Badge tone="info">Pairing required</Badge> : null}
+                            <ChannelStatusBadge status={entry.status} />
+                            {entry.pairingRequired ? <StatusBadge tone="info">Pairing required</StatusBadge> : null}
                             {capability?.officialSupport === false ? <Badge tone="warning">Workaround</Badge> : null}
                           </div>
                         </div>

@@ -7,6 +7,7 @@ import {
   buildOnboardingMemberRequest,
   onboardingDestinationPath,
   onboardingRefreshResourceForEvent,
+  resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingModelSetupVariant,
   shouldShowOnboardingAuthMethodChooser,
   resolveOnboardingInstallViewState,
@@ -14,6 +15,7 @@ import {
   resolveOnboardingModelViewState,
   resolveOnboardingChannelPresentations,
   resolveOnboardingEmployeePresets,
+  resolveOnboardingPresetSkillIds,
   resolveOnboardingChannelSetupVariant,
   buildOnboardingChannelSaveValues,
   type ResolvedOnboardingModelProvider,
@@ -36,7 +38,7 @@ describe("onboarding helpers", () => {
       avatarPresetId: "onboarding-analyst",
       presetId: "research-analyst",
       personalityTraits: [],
-      skillIds: ["research-brief", "status-writer"],
+      presetSkillIds: ["research-brief", "status-writer"],
       knowledgePackIds: ["company-handbook", "delivery-playbook"],
       workStyles: ["Analytical", "Concise"],
       memoryEnabled: true,
@@ -56,7 +58,8 @@ describe("onboarding helpers", () => {
       personality: "Analytical, Concise",
       soul: "Analytical, Concise",
       workStyles: ["Analytical", "Concise"],
-      skillIds: ["research-brief", "status-writer"],
+      presetSkillIds: ["research-brief", "status-writer"],
+      skillIds: [],
       knowledgePackIds: ["company-handbook", "delivery-playbook"],
       capabilitySettings: {
         memoryEnabled: true,
@@ -80,14 +83,69 @@ describe("onboarding helpers", () => {
         lastCheckedAt: "2026-03-21T00:00:00.000Z"
       }
     };
-    const modelEvent: SlackClawEvent = { type: "config.applied", resource: "models", summary: "Models updated." };
-    const channelEvent: SlackClawEvent = { type: "config.applied", resource: "channels", summary: "Channels updated." };
-    const employeeEvent: SlackClawEvent = { type: "config.applied", resource: "ai-employees", summary: "Members updated." };
+    const modelEvent: SlackClawEvent = {
+      type: "model-config.updated",
+      snapshot: {
+        epoch: "epoch-1",
+        revision: 3,
+        data: {
+          providers: [],
+          models: [],
+          savedEntries: [],
+          configuredModelKeys: [],
+          fallbackEntryIds: []
+        }
+      }
+    };
+    const channelEvent: SlackClawEvent = {
+      type: "channel-config.updated",
+      snapshot: {
+        epoch: "epoch-1",
+        revision: 4,
+        data: {
+          baseOnboardingCompleted: false,
+          capabilities: [],
+          entries: [],
+          gatewaySummary: "Ready"
+        }
+      }
+    };
+    const employeeEvent: SlackClawEvent = {
+      type: "ai-team.updated",
+      snapshot: {
+        epoch: "epoch-1",
+        revision: 5,
+        data: {
+          teamVision: "",
+          members: [],
+          teams: [],
+          activity: [],
+          availableBrains: [],
+          memberPresets: [],
+          knowledgePacks: [],
+          skillOptions: []
+        }
+      }
+    };
+    const presetSyncEvent: SlackClawEvent = {
+      type: "preset-skill-sync.updated",
+      snapshot: {
+        epoch: "epoch-1",
+        revision: 7,
+        data: {
+          targetMode: "managed-local",
+          entries: [],
+          summary: "No preset skills selected.",
+          repairRecommended: false
+        }
+      }
+    };
 
     expect(onboardingRefreshResourceForEvent("install", installEvent)).toBe("overview");
-    expect(onboardingRefreshResourceForEvent("model", modelEvent)).toBe("model");
-    expect(onboardingRefreshResourceForEvent("channel", channelEvent)).toBe("channel");
-    expect(onboardingRefreshResourceForEvent("employee", employeeEvent)).toBe("team");
+    expect(onboardingRefreshResourceForEvent("model", modelEvent)).toBeUndefined();
+    expect(onboardingRefreshResourceForEvent("channel", channelEvent)).toBeUndefined();
+    expect(onboardingRefreshResourceForEvent("employee", employeeEvent)).toBeUndefined();
+    expect(onboardingRefreshResourceForEvent("employee", presetSyncEvent)).toBe("onboarding");
   });
 
   it("ignores unrelated daemon events during onboarding", () => {
@@ -300,7 +358,7 @@ describe("onboarding helpers", () => {
             theme: "analyst",
             starterSkillLabels: ["Research Brief", "Status Writer"],
             toolLabels: ["Company handbook", "Delivery playbook"],
-            skillIds: ["research-brief", "status-writer"],
+            presetSkillIds: ["research-brief", "status-writer"],
             knowledgePackIds: ["company-handbook", "delivery-playbook"],
             workStyles: ["Analytical", "Concise"],
             defaultMemoryEnabled: true
@@ -312,7 +370,7 @@ describe("onboarding helpers", () => {
             theme: "support",
             starterSkillLabels: ["Status Writer"],
             toolLabels: ["Customer voice", "Memory"],
-            skillIds: ["status-writer"],
+            presetSkillIds: ["status-writer"],
             knowledgePackIds: ["customer-voice"],
             workStyles: ["Calm", "Supportive"],
             defaultMemoryEnabled: true
@@ -324,7 +382,7 @@ describe("onboarding helpers", () => {
             theme: "operator",
             starterSkillLabels: ["Research Brief"],
             toolLabels: ["Delivery playbook", "Company handbook"],
-            skillIds: ["research-brief"],
+            presetSkillIds: ["research-brief"],
             knowledgePackIds: ["delivery-playbook", "company-handbook"],
             workStyles: ["Methodical", "Action-oriented"],
             defaultMemoryEnabled: true
@@ -337,6 +395,99 @@ describe("onboarding helpers", () => {
     expect(presets[0]?.starterSkillLabels).toEqual(["Research Brief", "Status Writer"]);
     expect(presets[1]?.toolLabels).toEqual(["Customer voice", "Memory"]);
     expect(presets[2]?.knowledgePackIds).toEqual(["delivery-playbook", "company-handbook"]);
+  });
+
+  it("uses preset skill ids only for curated onboarding presets", () => {
+    expect(
+      resolveOnboardingPresetSkillIds({
+        presetSkillIds: ["research-brief", "status-writer"]
+      })
+    ).toEqual(["research-brief", "status-writer"]);
+
+    expect(
+      resolveOnboardingPresetSkillIds({})
+    ).toEqual([]);
+  });
+
+  it("marks onboarding employee presets ready only after all preset skills verify", () => {
+    const preset = {
+      id: "research-analyst",
+      presetSkillIds: ["research-brief", "status-writer"]
+    };
+
+    expect(
+      resolveOnboardingEmployeePresetReadiness(preset, {
+        targetMode: "managed-local",
+        entries: [
+          {
+            presetSkillId: "research-brief",
+            runtimeSlug: "research-brief",
+            targetMode: "managed-local",
+            status: "verified",
+            updatedAt: "2026-03-27T00:00:00.000Z"
+          },
+          {
+            presetSkillId: "status-writer",
+            runtimeSlug: "status-writer",
+            targetMode: "managed-local",
+            status: "verified",
+            updatedAt: "2026-03-27T00:00:00.000Z"
+          }
+        ],
+        summary: "2 preset skills verified on the managed-local runtime.",
+        repairRecommended: false
+      })
+    ).toMatchObject({
+      status: "ready",
+      blocking: false
+    });
+
+    expect(
+      resolveOnboardingEmployeePresetReadiness(preset, {
+        targetMode: "managed-local",
+        entries: [
+          {
+            presetSkillId: "research-brief",
+            runtimeSlug: "research-brief",
+            targetMode: "managed-local",
+            status: "installing",
+            updatedAt: "2026-03-27T00:00:00.000Z"
+          }
+        ],
+        summary: "1 preset skill is syncing on the managed-local runtime.",
+        repairRecommended: true
+      })
+    ).toMatchObject({
+      status: "syncing",
+      blocking: true
+    });
+
+    expect(
+      resolveOnboardingEmployeePresetReadiness(preset, {
+        targetMode: "managed-local",
+        entries: [
+          {
+            presetSkillId: "research-brief",
+            runtimeSlug: "research-brief",
+            targetMode: "managed-local",
+            status: "failed",
+            lastError: "Missing skill install.",
+            updatedAt: "2026-03-27T00:00:00.000Z"
+          }
+        ],
+        summary: "1 preset skill needs repair on the managed-local runtime.",
+        repairRecommended: true
+      })
+    ).toMatchObject({
+      status: "repair",
+      blocking: true,
+      detail: "Missing skill install."
+    });
+
+    expect(resolveOnboardingEmployeePresetReadiness(preset, undefined)).toMatchObject({
+      status: "install",
+      blocking: true
+    });
   });
 
   it("uses provider-specific channel setup variants", () => {

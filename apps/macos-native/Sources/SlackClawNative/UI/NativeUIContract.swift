@@ -45,6 +45,24 @@ enum NativeInfoBannerAccent: Equatable {
     case red
 }
 
+enum NativeSelectionState: Equatable {
+    case `default`
+    case selected
+}
+
+enum NativeProgressStepState: Equatable {
+    case inactive
+    case active
+    case complete
+}
+
+enum NativePageContentWidth: Equatable {
+    case centered
+    case full
+}
+
+typealias NativeShellNavigationState = NativeSelectionState
+
 struct NativeSurfacePalette {
     let fill: AnyShapeStyle
     let stroke: Color
@@ -58,12 +76,44 @@ struct NativeBadgePalette {
     let foreground: Color
 }
 
+struct NativeSelectionPalette {
+    let tone: SurfaceCardTone
+    let stroke: Color
+    let lineWidth: CGFloat
+}
+
+struct NativeShellNavigationPalette {
+    let fill: Color
+    let foreground: Color
+}
+
 enum NativeUI {
     static let pagePadding: CGFloat = 24
     static let sectionGap: CGFloat = 20
+    static let centeredPageMaxWidth: CGFloat = 1200
+    static let iconCornerRadius: CGFloat = 12
+    static let controlCornerRadius: CGFloat = 14
     static let cardCornerRadius: CGFloat = 24
-    static let mutedCornerRadius: CGFloat = 18
     static let compactCornerRadius: CGFloat = 16
+    static let mediumCornerRadius: CGFloat = 18
+    static let standardCornerRadius: CGFloat = 20
+    static let panelCornerRadius: CGFloat = 22
+    static let heroCornerRadius: CGFloat = 28
+    static let showcaseCornerRadius: CGFloat = 32
+}
+
+let nativeCenteredPageMaxWidth: CGFloat = NativeUI.centeredPageMaxWidth
+let nativeDashboardContentWidth: NativePageContentWidth = .full
+
+let nativeWorkspaceCollectionCardMinHeight: CGFloat = 132
+
+func nativePageContentMaxWidth(_ contentWidth: NativePageContentWidth) -> CGFloat? {
+    switch contentWidth {
+    case .centered:
+        return nativeCenteredPageMaxWidth
+    case .full:
+        return nil
+    }
 }
 
 func nativeWorkspaceMetricColumnCount(for width: CGFloat) -> Int {
@@ -141,6 +191,24 @@ func nativeDeployBadgeSemantic(_ badge: NativeDeployBadge) -> NativeBadgeSemanti
     }
 }
 
+func nativeOnboardingProgressState(active: Bool, complete: Bool) -> NativeProgressStepState {
+    if complete {
+        return .complete
+    }
+    if active {
+        return .active
+    }
+    return .inactive
+}
+
+func nativeOnboardingSelectionState(selected: Bool) -> NativeSelectionState {
+    selected ? .selected : .default
+}
+
+func nativeShellNavigationState(selected: Bool) -> NativeShellNavigationState {
+    nativeOnboardingSelectionState(selected: selected)
+}
+
 func nativeSurfacePalette(_ tone: SurfaceCardTone) -> NativeSurfacePalette {
     switch tone {
     case .standard:
@@ -188,6 +256,23 @@ func nativeSurfacePalette(_ tone: SurfaceCardTone) -> NativeSurfacePalette {
     }
 }
 
+func nativeSelectionPalette(_ state: NativeSelectionState) -> NativeSelectionPalette {
+    switch state {
+    case .selected:
+        return NativeSelectionPalette(
+            tone: .accent,
+            stroke: Color.blue.opacity(0.26),
+            lineWidth: 2
+        )
+    case .default:
+        return NativeSelectionPalette(
+            tone: .muted,
+            stroke: Color.black.opacity(0.08),
+            lineWidth: 1
+        )
+    }
+}
+
 func nativeBadgePalette(_ semantic: NativeBadgeSemantic) -> NativeBadgePalette {
     switch semantic {
     case .status(.success):
@@ -213,6 +298,32 @@ func nativeBadgePalette(_ semantic: NativeBadgeSemantic) -> NativeBadgePalette {
     }
 }
 
+func nativeProgressBadgePalette(_ state: NativeProgressStepState) -> NativeBadgePalette {
+    switch state {
+    case .complete:
+        return nativeBadgePalette(.status(.success))
+    case .active:
+        return nativeBadgePalette(.status(.info))
+    case .inactive:
+        return NativeBadgePalette(background: Color.white.opacity(0.86), foreground: nativeOnboardingTextSecondary)
+    }
+}
+
+func nativeShellNavigationPalette(_ state: NativeShellNavigationState) -> NativeShellNavigationPalette {
+    switch state {
+    case .selected:
+        return NativeShellNavigationPalette(
+            fill: Color.blue.opacity(0.12),
+            foreground: .blue
+        )
+    case .default:
+        return NativeShellNavigationPalette(
+            fill: .clear,
+            foreground: Color(red: 0.22, green: 0.28, blue: 0.4)
+        )
+    }
+}
+
 func nativeBannerAccentColor(_ accent: NativeInfoBannerAccent) -> Color {
     switch accent {
     case .blue:
@@ -226,6 +337,17 @@ func nativeBannerAccentColor(_ accent: NativeInfoBannerAccent) -> Color {
     case .red:
         return .red
     }
+}
+
+func nativeBrandMarkGradient() -> LinearGradient {
+    LinearGradient(
+        colors: [
+            Color.blue,
+            Color.purple
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
 func nativeAccentColor(_ accent: NativeDeployAccent) -> Color {
@@ -244,8 +366,8 @@ func nativeAccentColor(_ accent: NativeDeployAccent) -> Color {
 func nativeShellBackgroundStyle() -> LinearGradient {
     LinearGradient(
         colors: [
-            Color(red: 0.95, green: 0.97, blue: 1.0),
-            Color(red: 0.99, green: 0.99, blue: 1.0)
+            Color.blue.opacity(0.05),
+            Color.white
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing

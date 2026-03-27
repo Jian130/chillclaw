@@ -21,7 +21,7 @@ import type {
 } from "@slackclaw/contracts";
 
 import type { ChannelSetupState } from "@slackclaw/contracts";
-import type { ConfigManager, SkillRuntimeCatalog } from "./adapter.js";
+import type { ConfigManager, ManagedSkillInstallRequest, ManagedSkillInstallResult, SkillRuntimeCatalog, SkillRuntimeEntry } from "./adapter.js";
 import { NoopSecretsAdapter, modelAuthSecretName, type SecretsAdapter } from "../platform/secrets-adapter.js";
 
 type ConfigAccess = {
@@ -52,6 +52,8 @@ type ConfigAccess = {
     slug: string,
     request: RemoveSkillRequest & { managedBy: "clawhub" | "slackclaw-custom" }
   ) => Promise<{ requiresGatewayApply?: boolean }>;
+  installManagedSkill: (request: ManagedSkillInstallRequest) => Promise<ManagedSkillInstallResult>;
+  verifyManagedSkill: (slug: string) => Promise<SkillRuntimeEntry | undefined>;
 };
 
 export class OpenClawConfigManager implements ConfigManager {
@@ -181,5 +183,13 @@ export class OpenClawConfigManager implements ConfigManager {
 
   removeInstalledSkill(slug: string, request: RemoveSkillRequest & { managedBy: "clawhub" | "slackclaw-custom" }) {
     return this.access.removeInstalledSkill(slug, request);
+  }
+
+  installManagedSkill(request: ManagedSkillInstallRequest) {
+    return this.access.installManagedSkill(request);
+  }
+
+  verifyManagedSkill(slug: string) {
+    return this.access.verifyManagedSkill(slug);
   }
 }

@@ -18,6 +18,7 @@ import type { EngineAdapter } from "../engine/adapter.js";
 import { channelSecretName, NoopSecretsAdapter, type SecretsAdapter } from "../platform/secrets-adapter.js";
 import type { AppState } from "./state-store.js";
 import { EventPublisher } from "./event-publisher.js";
+import { fallbackMutationSyncMeta } from "./mutation-sync.js";
 import { StateStore, type StoredChannelEntryState } from "./state-store.js";
 
 const CHANNEL_ORDER: SupportedChannelId[] = ["telegram", "whatsapp", "feishu", "wechat"];
@@ -423,11 +424,6 @@ export class ChannelSetupService {
       };
     });
 
-    this.eventPublisher?.publishConfigApplied({
-      resource: "channels",
-      summary: result.message
-    });
-
     if (result.session) {
       this.eventPublisher?.publishChannelSessionUpdated({
         channelId,
@@ -435,11 +431,16 @@ export class ChannelSetupService {
       });
     }
 
+    const channelConfig = await this.getConfigOverview(nextState);
+    const sync = this.eventPublisher?.publishChannelConfigUpdated(channelConfig) ?? fallbackMutationSyncMeta(!result.session);
+
     return {
+      ...sync,
       status: result.session ? "interactive" : "completed",
       message: result.message,
-      channelConfig: await this.getConfigOverview(nextState),
+      channelConfig,
       session: result.session,
+      settled: result.session ? false : sync.settled,
       requiresGatewayApply: result.requiresGatewayApply
     };
   }
@@ -484,15 +485,14 @@ export class ChannelSetupService {
       };
     });
 
-    this.eventPublisher?.publishConfigApplied({
-      resource: "channels",
-      summary: result.message
-    });
+    const channelConfig = await this.getConfigOverview(nextState);
+    const sync = this.eventPublisher?.publishChannelConfigUpdated(channelConfig) ?? fallbackMutationSyncMeta();
 
     return {
+      ...sync,
       status: "completed",
       message: result.message,
-      channelConfig: await this.getConfigOverview(nextState),
+      channelConfig,
       requiresGatewayApply: result.requiresGatewayApply
     };
   }

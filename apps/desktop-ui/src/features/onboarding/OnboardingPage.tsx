@@ -61,17 +61,20 @@ import { Button } from "../../shared/ui/Button.js";
 import { Card, CardContent } from "../../shared/ui/Card.js";
 import { FieldLabel, Input } from "../../shared/ui/Field.js";
 import { Dialog } from "../../shared/ui/Dialog.js";
+import { ErrorState } from "../../shared/ui/ErrorState.js";
 import { LanguageSelector } from "../../shared/ui/LanguageSelector.js";
 import { LoadingBlocker } from "../../shared/ui/LoadingBlocker.js";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar.js";
 import { Progress } from "../../shared/ui/Progress.js";
 import { GuidedFlowScaffold } from "../../shared/ui/Scaffold.js";
+import { StatusBadge } from "../../shared/ui/StatusBadge.js";
 import { onboardingCopy } from "./copy.js";
 import {
   buildExistingInstallAdvanceDraft,
   buildOnboardingChannelSaveValues,
   buildOnboardingMemberRequest,
   onboardingDestinationPath,
+  resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingEmployeePresets,
   onboardingRefreshResourceForEvent,
   resolveOnboardingChannelPresentations,
@@ -82,6 +85,7 @@ import {
   resolveOnboardingModelViewState,
   resolveOnboardingProviderId,
   resolveOnboardingModelProviders,
+  resolveOnboardingPresetSkillIds,
   shouldShowOnboardingAuthMethodChooser,
   type OnboardingEmployeeDraft,
   type OnboardingInstallProgressSnapshot
@@ -382,6 +386,19 @@ export default function OnboardingPage() {
 
     return employeePresets.find((preset) => preset.id === selectedEmployeePresetId) ?? employeePresets[0];
   }, [employeePresets, selectedEmployeePresetId]);
+  const employeePresetReadinessById = useMemo(
+    () =>
+      new Map(
+        employeePresets.map((preset) => [
+          preset.id,
+          resolveOnboardingEmployeePresetReadiness(preset, onboardingState?.presetSkillSync)
+        ])
+      ),
+    [employeePresets, onboardingState?.presetSkillSync]
+  );
+  const selectedEmployeePresetReadiness = selectedEmployeePreset
+    ? employeePresetReadinessById.get(selectedEmployeePreset.id)
+    : undefined;
 
   async function readFreshOverview() {
     const next = await refresh({ fresh: true });
@@ -538,6 +555,16 @@ export default function OnboardingPage() {
         });
       }
 
+      if (event.type === "overview.updated") {
+        setOverview(event.snapshot.data);
+      } else if (event.type === "model-config.updated") {
+        setModelConfig(event.snapshot.data);
+      } else if (event.type === "channel-config.updated") {
+        setChannelConfig(event.snapshot.data);
+      } else if (event.type === "ai-team.updated") {
+        setTeamOverview(event.snapshot.data);
+      }
+
       const resource = onboardingRefreshResourceForEvent(currentStep, event);
       if (!resource) {
         return;
@@ -548,6 +575,9 @@ export default function OnboardingPage() {
           switch (resource) {
             case "overview":
               await readFreshOverview();
+              break;
+            case "onboarding":
+              await refreshOnboardingState();
               break;
             case "model":
               await readFreshModelConfig();
@@ -673,7 +703,7 @@ export default function OnboardingPage() {
       avatarPresetId: employeeAvatarPresetId,
       presetId: selectedEmployeePreset?.id,
       personalityTraits: [],
-      skillIds: selectedEmployeePreset?.skillIds ?? [],
+      presetSkillIds: resolveOnboardingPresetSkillIds(selectedEmployeePreset),
       knowledgePackIds: selectedEmployeePreset?.knowledgePackIds ?? [],
       workStyles: selectedEmployeePreset?.workStyles ?? [],
       memoryEnabled
@@ -1022,6 +1052,14 @@ export default function OnboardingPage() {
       return;
     }
 
+    if (selectedEmployeePresetReadiness?.blocking) {
+      setPageError(
+        selectedEmployeePresetReadiness.detail ??
+          "ChillClaw is still preparing this preset's managed skills in the active OpenClaw runtime."
+      );
+      return;
+    }
+
     setPageError(undefined);
     setEmployeeBusy(true);
     try {
@@ -1031,7 +1069,7 @@ export default function OnboardingPage() {
         avatarPresetId: employeeAvatarPresetId,
         presetId: selectedEmployeePreset.id,
         personalityTraits: [],
-        skillIds: selectedEmployeePreset.skillIds,
+        presetSkillIds: resolveOnboardingPresetSkillIds(selectedEmployeePreset),
         knowledgePackIds: selectedEmployeePreset.knowledgePackIds,
         workStyles: selectedEmployeePreset.workStyles,
         memoryEnabled,
@@ -1067,7 +1105,7 @@ export default function OnboardingPage() {
           avatarPresetId: createdMember?.avatar.presetId ?? draft.avatarPresetId,
           presetId: draft.presetId,
           personalityTraits: [],
-          skillIds: draft.skillIds,
+          presetSkillIds: draft.presetSkillIds,
           knowledgePackIds: draft.knowledgePackIds,
           workStyles: draft.workStyles,
           memoryEnabled
@@ -1169,7 +1207,9 @@ export default function OnboardingPage() {
 
         <Card className={`onboarding-card ${currentStep === "welcome" ? "onboarding-card--welcome" : ""}`.trim()}>
           <CardContent className="onboarding-card__content">
-            {pageError ? <div className="onboarding-error">{pageError}</div> : null}
+            {pageError ? (
+              <ErrorState compact title="Could not continue onboarding" description={pageError} />
+            ) : null}
 
             {currentStep === "welcome" ? (
               <div className="onboarding-step onboarding-step--welcome onboarding-step--welcome-figma">
@@ -1897,34 +1937,47 @@ export default function OnboardingPage() {
                       <div className="panel-stack">
                         <strong>{copy.skillsTitle}</strong>
                         <div className="onboarding-employee-preset-grid">
-                          {employeePresets.map((preset) => (
-                            <button
-                              className={`onboarding-select-card onboarding-select-card--employee-preset ${selectedEmployeePreset?.id === preset.id ? "onboarding-select-card--active" : ""} onboarding-employee-preset onboarding-employee-preset--${preset.theme}`}
-                              key={preset.id}
-                              onClick={() => selectEmployeePreset(preset.id)}
-                              type="button"
-                            >
-                              <div className="onboarding-employee-preset__head">
-                                <div className="onboarding-provider-mark onboarding-provider-mark--employee-preset">
-                                  {preset.theme === "analyst" ? <Brain size={24} strokeWidth={2.2} /> : null}
-                                  {preset.theme === "support" ? <Users size={24} strokeWidth={2.2} /> : null}
-                                  {preset.theme === "operator" ? <Rocket size={24} strokeWidth={2.2} /> : null}
+                          {employeePresets.map((preset) => {
+                            const readiness = employeePresetReadinessById.get(preset.id);
+                            const readinessTone =
+                              readiness?.status === "ready"
+                                ? "success"
+                                : readiness?.status === "repair"
+                                  ? "warning"
+                                  : readiness?.status === "syncing"
+                                    ? "info"
+                                    : "neutral";
+
+                            return (
+                              <button
+                                className={`onboarding-select-card onboarding-select-card--employee-preset ${selectedEmployeePreset?.id === preset.id ? "onboarding-select-card--active" : ""} onboarding-employee-preset onboarding-employee-preset--${preset.theme}`}
+                                key={preset.id}
+                                onClick={() => selectEmployeePreset(preset.id)}
+                                type="button"
+                              >
+                                <div className="onboarding-employee-preset__head">
+                                  <div className="onboarding-provider-mark onboarding-provider-mark--employee-preset">
+                                    {preset.theme === "analyst" ? <Brain size={24} strokeWidth={2.2} /> : null}
+                                    {preset.theme === "support" ? <Users size={24} strokeWidth={2.2} /> : null}
+                                    {preset.theme === "operator" ? <Rocket size={24} strokeWidth={2.2} /> : null}
+                                  </div>
+                                  <div className="onboarding-provider-copy onboarding-provider-copy--employee-preset">
+                                    <strong>{preset.label}</strong>
+                                    <span>{preset.description}</span>
+                                  </div>
                                 </div>
-                                <div className="onboarding-provider-copy onboarding-provider-copy--employee-preset">
-                                  <strong>{preset.label}</strong>
-                                  <span>{preset.description}</span>
+                                <div className="actions-row onboarding-employee-preset__chips">
+                                  {readiness ? <StatusBadge tone={readinessTone}>{readiness.label}</StatusBadge> : null}
+                                  {preset.starterSkillLabels.slice(0, 1).map((label) => (
+                                    <Badge key={label} tone="success">{label}</Badge>
+                                  ))}
+                                  {preset.toolLabels.slice(0, 1).map((label) => (
+                                    <Badge key={label} tone="neutral">{label}</Badge>
+                                  ))}
                                 </div>
-                              </div>
-                              <div className="actions-row onboarding-employee-preset__chips">
-                                {preset.starterSkillLabels.slice(0, 1).map((label) => (
-                                  <Badge key={label} tone="success">{label}</Badge>
-                                ))}
-                                {preset.toolLabels.slice(0, 1).map((label) => (
-                                  <Badge key={label} tone="neutral">{label}</Badge>
-                                ))}
-                              </div>
-                            </button>
-                          ))}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
@@ -1971,7 +2024,22 @@ export default function OnboardingPage() {
                             <p>{employeeJobTitle || "Senior Research Analyst"}</p>
                           </div>
                         </div>
-                        <div className="actions-row" style={{ flexWrap: "wrap" }}>
+                        <div className="actions-row onboarding-preview-card__chips">
+                          {selectedEmployeePresetReadiness ? (
+                            <StatusBadge
+                              tone={
+                                selectedEmployeePresetReadiness.status === "ready"
+                                  ? "success"
+                                  : selectedEmployeePresetReadiness.status === "repair"
+                                    ? "warning"
+                                    : selectedEmployeePresetReadiness.status === "syncing"
+                                      ? "info"
+                                      : "neutral"
+                              }
+                            >
+                              {selectedEmployeePresetReadiness.label}
+                            </StatusBadge>
+                          ) : null}
                           {selectedEmployeePreset?.starterSkillLabels.slice(0, 2).map((label) => (
                             <Badge key={label} tone="success">{label}</Badge>
                           ))}
@@ -1982,6 +2050,9 @@ export default function OnboardingPage() {
                         <p className="card__description">
                           {selectedModelEntry?.label ?? selectedModelEntry?.modelKey ?? "Default onboarding model"}
                         </p>
+                        {selectedEmployeePresetReadiness?.detail ? (
+                          <p className="card__description">{selectedEmployeePresetReadiness.detail}</p>
+                        ) : null}
                       </div>
 
                       <div className="onboarding-actions">
@@ -1990,7 +2061,13 @@ export default function OnboardingPage() {
                         </Button>
                         <Button
                           onClick={() => void handleCreateEmployee()}
-                          disabled={!selectedBrainEntryId || !selectedEmployeePreset || !employeeName.trim() || !employeeJobTitle.trim()}
+                          disabled={
+                            !selectedBrainEntryId ||
+                            !selectedEmployeePreset ||
+                            !employeeName.trim() ||
+                            !employeeJobTitle.trim() ||
+                            Boolean(selectedEmployeePresetReadiness?.blocking)
+                          }
                           loading={employeeBusy}
                         >
                           {copy.createEmployee}

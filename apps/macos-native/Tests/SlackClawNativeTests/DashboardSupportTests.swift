@@ -4,6 +4,11 @@ import Testing
 
 struct DashboardSupportTests {
     @Test
+    func dashboardUsesFullWidthScaffoldMode() {
+        #expect(nativeDashboardContentWidth == .full)
+    }
+
+    @Test
     func dashboardPresentationMatchesReactParityMetricsAndHealth() {
         let presentation = makeDashboardPresentation(
             overview: makeDashboardOverview(),
@@ -179,6 +184,7 @@ private func makeDashboardAITeamOverview() -> AITeamOverview {
         availableBrains: [],
         memberPresets: [],
         knowledgePacks: [],
-        skillOptions: []
+        skillOptions: [],
+        presetSkillSync: nil
     )
 }

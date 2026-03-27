@@ -18,11 +18,11 @@ import { WorkspaceScaffold } from "../../shared/ui/Scaffold.js";
 import { StatusBadge } from "../../shared/ui/StatusBadge.js";
 
 function toneColor(tone: string) {
-  if (tone === "completed") return "#16a34a";
-  if (tone === "started") return "#2563eb";
-  if (tone === "generated") return "#7c3aed";
-  if (tone === "updated") return "#d97706";
-  return "#4f46e5";
+  if (tone === "completed") return "var(--success)";
+  if (tone === "started") return "var(--primary)";
+  if (tone === "generated") return "var(--accent)";
+  if (tone === "updated") return "var(--warning)";
+  return "var(--accent-strong)";
 }
 
 export function connectedModelCount(modelConfig: ModelConfigOverview | undefined): number {
@@ -47,7 +47,7 @@ export function connectedModelDetail(
 export default function DashboardPage() {
   const { locale } = useLocale();
   const copy = t(locale).dashboard;
-  const { overview, refresh } = useOverview();
+  const { overview } = useOverview();
   const { overview: aiTeam } = useAITeam();
   const [modelConfig, setModelConfig] = useState<ModelConfigOverview>();
   const readyCount = aiTeam?.members.filter((member) => member.status === "ready").length ?? 0;
@@ -55,14 +55,14 @@ export default function DashboardPage() {
   const channelReady = overview?.channelSetup.channels.filter((channel) => channel.status === "completed" || channel.status === "ready").length ?? 0;
 
   useEffect(() => {
-    void refresh({ fresh: true });
-    void fetchModelConfig({ fresh: true })
+    void fetchModelConfig()
       .then((next) => setModelConfig(next))
       .catch(() => setModelConfig(undefined));
-  }, [refresh]);
+  }, []);
 
   return (
     <WorkspaceScaffold
+      contentWidth="full"
       title={copy.title}
       subtitle={copy.subtitle}
       actions={
@@ -166,7 +166,7 @@ export default function DashboardPage() {
                 {aiTeam?.activity.map((item) => (
                   <div className="check-row" key={item.id}>
                     <div className="actions-row" style={{ alignItems: "start" }}>
-                      <div className="channel-logo" style={{ background: toneColor(item.tone), color: "white" }}>
+                      <div className="channel-logo" style={{ background: toneColor(item.tone), color: "var(--white)" }}>
                         {(item.memberName ?? "S")[0]}
                       </div>
                       <div className="check-row__meta">

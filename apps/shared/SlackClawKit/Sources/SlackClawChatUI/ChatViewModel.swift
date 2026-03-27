@@ -37,6 +37,10 @@ public final class SlackClawChatViewModel {
     public private(set) var selectedThread: ChatThreadDetail?
     public private(set) var errorMessage: String?
     public var draftMessage = ""
+    public var canSendCurrentDraft: Bool {
+        guard let selectedThread else { return false }
+        return canSendChatDraft(draftMessage, canSend: selectedThread.composerState.canSend)
+    }
 
     private let transport: SlackClawChatTransport
     private var eventTask: Task<Void, Never>?
@@ -50,17 +54,31 @@ public final class SlackClawChatViewModel {
         guard eventTask == nil else { return }
         eventTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                let stream = try await self.transport.events()
-                for try await event in stream {
+            while !Task.isCancelled {
+                do {
+                    let stream = try await self.transport.events()
                     await MainActor.run {
-                        self.apply(event)
+                        self.errorMessage = nil
+                    }
+                    for try await event in stream {
+                        if Task.isCancelled {
+                            break
+                        }
+                        await MainActor.run {
+                            self.apply(event)
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.errorMessage = error.localizedDescription
                     }
                 }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
+
+                if Task.isCancelled {
+                    break
                 }
+
+                try? await Task.sleep(nanoseconds: 250_000_000)
             }
         }
     }
@@ -72,6 +90,7 @@ public final class SlackClawChatViewModel {
             if let current = selectedThread?.id ?? overview.threads.first?.id {
                 self.selectedThread = try await transport.fetchThread(threadId: current)
             }
+            self.errorMessage = nil
         } catch {
             self.errorMessage = error.localizedDescription
         }
@@ -80,6 +99,7 @@ public final class SlackClawChatViewModel {
     public func selectThread(_ threadId: String) async {
         do {
             self.selectedThread = try await transport.fetchThread(threadId: threadId)
+            self.errorMessage = nil
         } catch {
             self.errorMessage = error.localizedDescription
         }
@@ -96,23 +116,34 @@ public final class SlackClawChatViewModel {
     }
 
     public func sendCurrentMessage() async {
-        guard let threadId = selectedThread?.id, !draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard let threadId = selectedThread?.id, let thread = selectedThread, canSendCurrentDraft else {
             return
         }
 
-        let message = draftMessage
-        draftMessage = ""
+        let message = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         let clientMessageId = UUID().uuidString
+        let previousOverview = overview
+        let previousThread = selectedThread
+
+        let optimistic = optimisticThreadDetail(thread: thread, message: message, clientMessageId: clientMessageId)
+        draftMessage = ""
+        errorMessage = nil
+        selectedThread = optimistic
+        upsert(detail: optimistic)
 
         do {
             let response = try await transport.sendMessage(threadId: threadId, message: message, clientMessageId: clientMessageId)
             self.overview = response.overview
+            self.errorMessage = nil
             if let thread = response.thread {
                 self.selectedThread = thread
             } else {
                 self.selectedThread = try await transport.fetchThread(threadId: threadId)
             }
         } catch {
+            self.overview = previousOverview
+            self.selectedThread = previousThread
+            self.draftMessage = message
             self.errorMessage = error.localizedDescription
         }
     }
@@ -122,6 +153,7 @@ public final class SlackClawChatViewModel {
         do {
             let response = try await transport.abort(threadId: threadId)
             self.overview = response.overview
+            self.errorMessage = nil
             if let thread = response.thread {
                 self.selectedThread = thread
             }
@@ -141,34 +173,36 @@ public final class SlackClawChatViewModel {
             }
         case let .messageCreated(threadId, message):
             guard selectedThread?.id == threadId else { return }
-            if selectedThread?.messages.contains(where: { $0.id == message.id }) == false {
-                selectedThread?.messages.append(message)
-            }
+            selectedThread?.messages = upsertChatMessages(selectedThread?.messages ?? [], message: message)
         case let .runStarted(threadId, message, _):
             guard selectedThread?.id == threadId else { return }
-            if selectedThread?.messages.contains(where: { $0.id == message.id }) == false {
-                selectedThread?.messages.append(message)
-            }
+            updateComposer(threadId: threadId, activityLabel: "Thinking…", status: "thinking", toolActivities: [])
+            selectedThread?.messages = upsertChatMessages(selectedThread?.messages ?? [], message: message)
         case let .assistantThinking(threadId, activityLabel):
             updateComposer(threadId: threadId, activityLabel: activityLabel, status: "thinking")
-        case let .assistantToolStatus(threadId, activityLabel):
-            updateComposer(threadId: threadId, activityLabel: activityLabel, status: "thinking")
+        case let .connectionState(threadId, state, detail):
+            updateComposer(threadId: threadId, activityLabel: detail, bridgeState: state)
+        case let .assistantToolStatus(threadId, _, _, activityLabel, toolActivity):
+            updateComposer(
+                threadId: threadId,
+                activityLabel: activityLabel,
+                status: "thinking",
+                bridgeState: .connected,
+                toolActivities: upsertToolActivity(threadId: threadId, toolActivity: toolActivity)
+            )
         case let .assistantDelta(threadId, message, activityLabel):
             updateComposer(threadId: threadId, activityLabel: activityLabel, status: "streaming")
             guard selectedThread?.id == threadId else { return }
-            if let index = selectedThread?.messages.firstIndex(where: { $0.id == message.id }) {
-                selectedThread?.messages[index] = message
-            } else {
-                selectedThread?.messages.append(message)
-            }
-        case let .assistantCompleted(_, detail, _),
-             let .assistantAborted(_, detail, _):
+            selectedThread?.messages = upsertChatMessages(selectedThread?.messages ?? [], message: message)
+        case let .assistantCompleted(threadId, detail, _),
+             let .assistantAborted(threadId, detail, _):
             upsert(detail: detail)
             if selectedThread?.id == detail.id {
                 selectedThread = detail
             }
+            updateComposer(threadId: threadId, activityLabel: nil, status: "idle", bridgeState: .connected, toolActivities: [])
         case let .assistantFailed(threadId, error, detail, activityLabel):
-            updateComposer(threadId: threadId, activityLabel: activityLabel, status: "error", error: error)
+            updateComposer(threadId: threadId, activityLabel: activityLabel, status: "error", error: error, bridgeState: .connected, toolActivities: [])
             if let detail, selectedThread?.id == threadId {
                 selectedThread = detail
             }
@@ -204,35 +238,120 @@ public final class SlackClawChatViewModel {
         upsert(thread: summary)
     }
 
-    private func updateComposer(threadId: String, activityLabel: String?, status: String, error: String? = nil) {
+    private func updateComposer(
+        threadId: String,
+        activityLabel: String?,
+        status: String? = nil,
+        error: String? = nil,
+        bridgeState: ChatBridgeState? = nil,
+        toolActivities: [ChatToolActivity]? = nil
+    ) {
         guard let index = overview.threads.firstIndex(where: { $0.id == threadId }) else { return }
-        overview.threads[index].composerState.status = status
+        if let status {
+            overview.threads[index].composerState.status = status
+            let availability = composerAvailability(for: status)
+            overview.threads[index].composerState.canSend = availability.canSend
+            overview.threads[index].composerState.canAbort = availability.canAbort
+            overview.threads[index].activeRunState = status == "idle" ? nil : status
+        }
         overview.threads[index].composerState.activityLabel = activityLabel
         overview.threads[index].composerState.error = error
+        if let bridgeState {
+            overview.threads[index].composerState.bridgeState = bridgeState
+        }
+        if let toolActivities {
+            overview.threads[index].composerState.toolActivities = toolActivities
+        }
         if selectedThread?.id == threadId {
-            selectedThread?.composerState.status = status
+            if let status {
+                selectedThread?.composerState.status = status
+                let availability = composerAvailability(for: status)
+                selectedThread?.composerState.canSend = availability.canSend
+                selectedThread?.composerState.canAbort = availability.canAbort
+                selectedThread?.activeRunState = status == "idle" ? nil : status
+            }
             selectedThread?.composerState.activityLabel = activityLabel
             selectedThread?.composerState.error = error
+            if let bridgeState {
+                selectedThread?.composerState.bridgeState = bridgeState
+            }
+            if let toolActivities {
+                selectedThread?.composerState.toolActivities = toolActivities
+            }
         }
+    }
+
+    private func upsertToolActivity(threadId: String, toolActivity: ChatToolActivity) -> [ChatToolActivity] {
+        guard let index = overview.threads.firstIndex(where: { $0.id == threadId }) else {
+            return [toolActivity]
+        }
+
+        var activities = overview.threads[index].composerState.toolActivities ?? []
+        if let existingIndex = activities.firstIndex(where: { $0.id == toolActivity.id }) {
+            activities[existingIndex] = toolActivity
+        } else {
+            activities.append(toolActivity)
+        }
+
+        return activities
     }
 }
 
 public struct SlackClawChatTranscriptView: View {
-    public let messages: [ChatMessage]
+    public let thread: ChatThreadDetail
 
-    public init(messages: [ChatMessage]) {
-        self.messages = messages
+    public init(thread: ChatThreadDetail) {
+        self.thread = thread
     }
 
     public var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                ForEach(messages) { message in
+                ForEach(thread.messages) { message in
                     HStack {
                         if message.role == "user" { Spacer(minLength: 60) }
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(message.text)
-                                .textSelection(.enabled)
+                            if nativeChatMessageIsThinking(message) {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text(thread.composerState.activityLabel ?? "Thinking…")
+                                        .font(.callout)
+                                }
+                            } else {
+                                Text(message.text)
+                                    .textSelection(.enabled)
+                            }
+                            if let toolActivities = nativeChatInlineToolActivities(thread: thread, message: message), !toolActivities.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(toolActivities, id: \.id) { activity in
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Text(activity.status.rawValue.capitalized)
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(activity.label)
+                                                    .font(.caption.weight(.semibold))
+                                                if let detail = activity.detail, !detail.isEmpty {
+                                                    Text(detail)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if let error = message.error {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                            if let status = message.status, !nativeChatMessageIsThinking(message) {
+                                Text(status.uppercased())
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
                             if let timestamp = message.timestamp {
                                 Text(timestamp)
                                     .font(.caption)
@@ -251,4 +370,104 @@ public struct SlackClawChatTranscriptView: View {
             .padding()
         }
     }
+}
+
+private func canSendChatDraft(_ draft: String, canSend: Bool) -> Bool {
+    canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+private func composerAvailability(for status: String) -> (canSend: Bool, canAbort: Bool) {
+    switch status.lowercased() {
+    case "sending":
+        return (false, false)
+    case "thinking", "streaming", "aborting":
+        return (false, true)
+    case "error", "idle":
+        return (true, false)
+    default:
+        return (true, false)
+    }
+}
+
+private func upsertChatMessages(_ messages: [ChatMessage], message: ChatMessage) -> [ChatMessage] {
+    var next = messages
+    if let index = next.firstIndex(where: {
+        $0.id == message.id ||
+        ($0.clientMessageId != nil && $0.clientMessageId == message.clientMessageId)
+    }) {
+        next[index] = message
+        return next
+    }
+
+    next.append(message)
+    return next
+}
+
+private func optimisticThreadDetail(thread: ChatThreadDetail, message: String, clientMessageId: String) -> ChatThreadDetail {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let userMessage = ChatMessage(
+        id: "\(thread.id):user:\(clientMessageId)",
+        role: "user",
+        text: message,
+        timestamp: timestamp,
+        clientMessageId: clientMessageId,
+        status: "pending"
+    )
+    let assistantMessage = ChatMessage(
+        id: "\(thread.id):assistant:stream",
+        role: "assistant",
+        text: "",
+        timestamp: timestamp,
+        status: "pending",
+        pending: true
+    )
+
+    return ChatThreadDetail(
+        id: thread.id,
+        memberId: thread.memberId,
+        agentId: thread.agentId,
+        sessionKey: thread.sessionKey,
+        title: thread.title,
+        createdAt: thread.createdAt,
+        updatedAt: timestamp,
+        lastPreview: message,
+        lastMessageAt: timestamp,
+        unreadCount: thread.unreadCount,
+        activeRunState: "sending",
+        historyStatus: thread.historyStatus,
+        composerState: ChatComposerState(
+            status: "sending",
+            canSend: false,
+            canAbort: false,
+            activityLabel: "Sending…",
+            error: nil,
+            bridgeState: thread.composerState.bridgeState,
+            toolActivities: []
+        ),
+        messages: upsertChatMessages(upsertChatMessages(thread.messages, message: userMessage), message: assistantMessage),
+        historyError: thread.historyError
+    )
+}
+
+private func nativeChatMessageIsThinking(_ message: ChatMessage) -> Bool {
+    (message.pending ?? false) && message.role == "assistant" && message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+private func nativeChatInlineToolActivities(thread: ChatThreadDetail, message: ChatMessage) -> [ChatToolActivity]? {
+    guard
+        message.role == "assistant",
+        let toolActivities = thread.composerState.toolActivities,
+        !toolActivities.isEmpty,
+        ["sending", "thinking", "streaming", "aborting"].contains(thread.composerState.status.lowercased())
+    else {
+        return nil
+    }
+
+    let activeStreamMessageId = "\(thread.id):assistant:stream"
+    let activeAssistantMessage = thread.messages.last(where: { $0.role == "assistant" })
+    guard message.id == activeStreamMessageId || activeAssistantMessage?.id == message.id else {
+        return nil
+    }
+
+    return toolActivities
 }

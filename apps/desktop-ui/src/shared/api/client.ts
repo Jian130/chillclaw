@@ -374,6 +374,12 @@ export function createCustomSkill(request: SaveCustomSkillRequest): Promise<Skil
   });
 }
 
+export function repairPresetSkillSync(): Promise<SkillCatalogActionResponse> {
+  return readJson<SkillCatalogActionResponse>("/skills/preset-sync/repair", {
+    method: "POST"
+  });
+}
+
 export function fetchInstalledSkillDetail(skillId: string): Promise<InstalledSkillDetail> {
   return readJson<InstalledSkillDetail>(`/skills/${encodeURIComponent(skillId)}`);
 }

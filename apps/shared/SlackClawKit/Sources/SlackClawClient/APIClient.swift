@@ -159,6 +159,10 @@ public final class SlackClawAPIClient: @unchecked Sendable {
         return try await post("/api/skills/custom", body: request)
     }
 
+    public func repairPresetSkillSync() async throws -> SkillCatalogActionResponse {
+        try await post("/api/skills/preset-sync/repair", body: EmptyBody())
+    }
+
     public func updateSkill(skillId: String, action: String, version: String? = nil) async throws -> SkillCatalogActionResponse {
         try await patch("/api/skills/\(skillId)", body: UpdateSkillRequest(action: action, version: version, name: nil, description: nil, instructions: nil, homepage: nil))
     }

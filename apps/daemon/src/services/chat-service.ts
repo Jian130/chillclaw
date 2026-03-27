@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   AbortChatRequest,
   ChatActionResponse,
+  ChatBridgeState,
   ChatComposerState,
   ChatMessage,
   ChatOverview,
@@ -10,6 +11,7 @@ import type {
   ChatThreadDetail,
   ChatThreadSummary,
   ChatThreadStatus,
+  ChatToolActivity,
   CreateChatThreadRequest,
   SendChatMessageRequest
 } from "@slackclaw/contracts";
@@ -17,6 +19,7 @@ import type {
 import type { EngineAdapter, EngineChatLiveEvent } from "../engine/adapter.js";
 import { EventPublisher } from "./event-publisher.js";
 import { errorToLogDetails, writeErrorLog } from "./logger.js";
+import { fallbackMutationSyncMeta } from "./mutation-sync.js";
 import type { StoredChatThreadState } from "./state-store.js";
 import { StateStore } from "./state-store.js";
 import { AITeamService } from "./ai-team-service.js";
@@ -33,6 +36,9 @@ interface ActiveChatRun {
   clientMessageId: string;
   status: ChatThreadStatus;
   activityLabel?: string;
+  bridgeState?: ChatBridgeState;
+  bridgeDetail?: string;
+  toolActivities: ChatToolActivity[];
   runId?: string;
   completed: boolean;
   sendSettled: boolean;
@@ -146,6 +152,7 @@ export class ChatService {
       const recent = await this.findRecentThreadForMember(request.memberId, member.agentId);
       if (recent) {
         return {
+          ...fallbackMutationSyncMeta(),
           status: "completed",
           message: `Opened the most recent chat with ${member.name}.`,
           overview: await this.getOverview(),
@@ -175,6 +182,7 @@ export class ChatService {
     });
 
     return {
+      ...fallbackMutationSyncMeta(),
       status: "completed",
       message: `Started a new chat with ${member.name}.`,
       overview: await this.getOverview(),
@@ -196,26 +204,7 @@ export class ChatService {
         sessionKey: thread.sessionKey
       });
 
-      return this.applyDetailOverride(
-        this.withActiveRunState(
-        {
-          ...detail,
-          id: thread.id,
-          memberId: thread.memberId,
-          agentId: thread.agentId,
-          sessionKey: thread.sessionKey,
-          title: thread.title,
-          createdAt: thread.createdAt,
-          updatedAt: thread.updatedAt,
-          lastPreview: thread.lastPreview,
-          lastMessageAt: thread.updatedAt,
-          unreadCount: 0,
-          historyStatus: "ready",
-          composerState: this.composerState(thread.id)
-        },
-        this.activeRuns.get(thread.id)
-        )
-      );
+      return this.hydrateGatewayDetail(thread, detail, this.activeRuns.get(thread.id));
     } catch (error) {
       await writeErrorLog("SlackClaw could not load chat history from OpenClaw.", {
         threadId,
@@ -273,6 +262,8 @@ export class ChatService {
       clientMessageId,
       status: "thinking",
       activityLabel: "Thinking…",
+      bridgeState: this.liveBridgeConnected ? "connected" : "reconnecting",
+      toolActivities: [],
       completed: false,
       sendSettled: false,
       receivedLiveEvent: false
@@ -307,6 +298,7 @@ export class ChatService {
     void this.runSendLoop(activeRun);
 
     return {
+      ...fallbackMutationSyncMeta(false),
       status: "completed",
       message: `Sending a message to ${nextTitle}.`,
       overview: await this.getOverview(),
@@ -334,6 +326,7 @@ export class ChatService {
     const activeRun = this.activeRuns.get(threadId);
     if (!activeRun) {
       return {
+        ...fallbackMutationSyncMeta(),
         status: "completed",
         message: "There is no active chat reply to stop.",
         overview: await this.getOverview(),
@@ -361,6 +354,7 @@ export class ChatService {
     }
 
     return {
+      ...fallbackMutationSyncMeta(false),
       status: "completed",
       message: "Stopping the current reply.",
       overview: await this.getOverview(),
@@ -402,6 +396,10 @@ export class ChatService {
   private async handleLiveEvent(event: EngineChatLiveEvent): Promise<void> {
     if (event.type === "connected") {
       this.liveBridgeConnected = true;
+      for (const activeRun of this.activeRuns.values()) {
+        this.setRunBridgeState(activeRun, "connected");
+        void this.resyncThreadHistory(activeRun);
+      }
       return;
     }
 
@@ -417,7 +415,7 @@ export class ChatService {
         if (activeRun.status !== "streaming") {
           activeRun.status = "thinking";
         }
-        this.broadcastThreadSummary(activeRun.threadId);
+        this.setRunBridgeState(activeRun, "reconnecting", event.error ?? "Reconnecting to live updates.");
         this.broadcast({
           type: "assistant-thinking",
           threadId: activeRun.threadId,
@@ -439,18 +437,24 @@ export class ChatService {
       clearTimeout(activeRun.fallbackTimer);
       activeRun.fallbackTimer = undefined;
     }
+    this.setRunBridgeState(activeRun, "connected");
 
     switch (event.type) {
       case "assistant-tool-status":
+        activeRun.runId = event.runId ?? activeRun.runId;
         activeRun.activityLabel = event.activityLabel;
+        activeRun.toolActivities = this.upsertToolActivity(activeRun.toolActivities, event.toolActivity);
+        this.setRunBridgeState(activeRun, "connected");
         if (activeRun.status !== "streaming") {
           activeRun.status = "thinking";
         }
-        this.broadcastThreadSummary(activeRun.threadId);
         this.broadcast({
           type: "assistant-tool-status",
           threadId: activeRun.threadId,
-          activityLabel: event.activityLabel
+          sessionKey: activeRun.sessionKey,
+          runId: event.runId ?? activeRun.runId,
+          activityLabel: event.activityLabel,
+          toolActivity: event.toolActivity
         });
         return;
       case "assistant-delta":
@@ -558,6 +562,7 @@ export class ChatService {
     }
 
     activeRun.pollInFlight = true;
+    this.setRunBridgeState(activeRun, "polling", "Polling the daemon for history updates.");
     try {
       const detail = await this.adapter.gateway.getChatThreadDetail({
         threadId: activeRun.threadId,
@@ -577,7 +582,8 @@ export class ChatService {
           status: "streaming",
           pending: true
         };
-        this.broadcastThreadSummary(activeRun.threadId);
+        await this.broadcastThreadSummary(activeRun.threadId);
+        await this.resyncThreadHistory(activeRun, detail);
         this.broadcast({
           type: "assistant-delta",
           threadId: activeRun.threadId,
@@ -592,6 +598,7 @@ export class ChatService {
       }
 
       if (next.completed) {
+        await this.resyncThreadHistory(activeRun, detail);
         await this.completeRunFromHistory(activeRun, "assistant-completed");
       }
     } catch {
@@ -727,6 +734,58 @@ export class ChatService {
     });
   }
 
+  private upsertToolActivity(toolActivities: ChatToolActivity[], nextActivity: ChatToolActivity): ChatToolActivity[] {
+    const next = [...toolActivities];
+    const existingIndex = next.findIndex((activity) => activity.id === nextActivity.id);
+    if (existingIndex >= 0) {
+      next[existingIndex] = nextActivity;
+      return next;
+    }
+
+    return [...next, nextActivity];
+  }
+
+  private setRunBridgeState(activeRun: ActiveChatRun, bridgeState: ChatBridgeState, detail?: string): void {
+    if (activeRun.bridgeState === bridgeState && activeRun.bridgeDetail === detail) {
+      return;
+    }
+
+    activeRun.bridgeState = bridgeState;
+    activeRun.bridgeDetail = detail;
+    void this.broadcastThreadSummary(activeRun.threadId);
+    this.broadcast({
+      type: "connection-state",
+      threadId: activeRun.threadId,
+      state: bridgeState,
+      detail
+    });
+  }
+
+  private async resyncThreadHistory(activeRun: ActiveChatRun, detail?: ChatThreadDetail): Promise<void> {
+    if (activeRun.completed) {
+      return;
+    }
+
+    const thread = await this.getStoredThread(activeRun.threadId);
+    if (!thread) {
+      return;
+    }
+
+    const liveDetail =
+      detail ??
+      (await this.adapter.gateway.getChatThreadDetail({
+        threadId: activeRun.threadId,
+        agentId: activeRun.agentId,
+        sessionKey: activeRun.sessionKey
+      }));
+
+    this.broadcast({
+      type: "history-loaded",
+      threadId: activeRun.threadId,
+      detail: this.hydrateGatewayDetail(thread, liveDetail, activeRun)
+    });
+  }
+
   private finishRun(threadId: string): void {
     const activeRun = this.activeRuns.get(threadId);
     if (!activeRun) {
@@ -811,12 +870,14 @@ export class ChatService {
         const progress = this.readHistoryProgress(detail.messages, activeRun.baselineMessageCount);
 
         if (progress.failed) {
+          await this.resyncThreadHistory(activeRun, detail);
           await this.failRun(activeRun, progress.failureMessage ?? fallbackError);
           return true;
         }
 
         if (progress.completed) {
           activeRun.assistantText = progress.assistantText;
+          await this.resyncThreadHistory(activeRun, detail);
           await this.completeRunFromHistory(activeRun, "assistant-completed");
           return true;
         }
@@ -999,6 +1060,33 @@ export class ChatService {
     };
   }
 
+  private hydrateGatewayDetail(
+    thread: StoredChatThreadState,
+    detail: ChatThreadDetail,
+    activeRun?: ActiveChatRun
+  ): ChatThreadDetail {
+    return this.applyDetailOverride(
+      this.withActiveRunState(
+        {
+          ...detail,
+          id: thread.id,
+          memberId: thread.memberId,
+          agentId: thread.agentId,
+          sessionKey: thread.sessionKey,
+          title: thread.title,
+          createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
+          lastPreview: thread.lastPreview,
+          lastMessageAt: thread.updatedAt,
+          unreadCount: 0,
+          historyStatus: "ready",
+          composerState: this.composerState(thread.id)
+        },
+        activeRun
+      )
+    );
+  }
+
   private toSummary(thread: StoredChatThreadState): ChatThreadSummary {
     const composerState = this.composerState(thread.id);
     return {
@@ -1032,7 +1120,9 @@ export class ChatService {
       status: active.status,
       canSend: false,
       canAbort: active.status !== "error",
-      activityLabel: active.activityLabel
+      activityLabel: active.activityLabel,
+      bridgeState: active.bridgeState,
+      toolActivities: active.toolActivities
     };
   }
 
@@ -1068,7 +1158,7 @@ export class ChatService {
       };
     }
 
-    if ("detail" in event && event.detail) {
+    if ("detail" in event && event.detail && typeof event.detail !== "string") {
       return {
         threadId: event.threadId,
         sessionKey: event.detail.sessionKey,

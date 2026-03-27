@@ -1,5 +1,7 @@
 import type { AIMemberPreset, SkillOption } from "@slackclaw/contracts";
 
+import { presetSkillDefinitions } from "./preset-skill-definitions.js";
+
 export const defaultAIMemberSkillOptions: SkillOption[] = [
   {
     id: "research-brief",
@@ -23,6 +25,7 @@ export const aiMemberPresets: AIMemberPreset[] = [
     personality: "Clear, practical, and dependable",
     soul: "Turn requests into useful next steps without adding extra complexity.",
     workStyles: ["Methodical", "Structured"],
+    presetSkillIds: presetSkillDefinitions.map((definition) => definition.id),
     skillIds: ["research-brief", "status-writer"],
     knowledgePackIds: ["company-handbook", "delivery-playbook"],
     defaultMemoryEnabled: true
@@ -36,6 +39,7 @@ export const aiMemberPresets: AIMemberPreset[] = [
     personality: "Analytical, calm, and evidence-driven",
     soul: "Separate signal from noise and turn findings into crisp recommendations.",
     workStyles: ["Data-driven", "Methodical"],
+    presetSkillIds: ["research-brief", "status-writer"],
     skillIds: ["research-brief", "status-writer"],
     knowledgePackIds: ["company-handbook"],
     defaultMemoryEnabled: true
@@ -49,6 +53,7 @@ export const aiMemberPresets: AIMemberPreset[] = [
     personality: "Organized, proactive, and steady under pressure",
     soul: "Keep work moving, surface blockers early, and make the next step obvious.",
     workStyles: ["Structured", "Fast-paced"],
+    presetSkillIds: ["status-writer", "research-brief"],
     skillIds: ["status-writer", "research-brief"],
     knowledgePackIds: ["delivery-playbook", "customer-voice"],
     defaultMemoryEnabled: true

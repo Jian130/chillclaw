@@ -155,7 +155,11 @@ export interface OnboardingModelViewState {
 }
 
 export type OnboardingModelSetupVariant = "default-api-key" | "guided-minimax-api-key" | "oauth";
-export type OnboardingChannelSetupVariant = "wechat-guided" | "feishu-guided" | "telegram-guided";
+export type OnboardingChannelSetupVariant =
+  | "wechat-work-guided"
+  | "wechat-guided"
+  | "feishu-guided"
+  | "telegram-guided";
 
 interface ResolveOnboardingInstallViewStateArgs {
   overview?: Pick<ProductOverview, "engine">;
@@ -278,6 +282,8 @@ export function shouldShowOnboardingAuthMethodChooser(methods: ModelAuthMethod[]
 
 export function resolveOnboardingChannelSetupVariant(setupKind: string | undefined): OnboardingChannelSetupVariant {
   switch (setupKind) {
+    case "wechat-work-guided":
+      return "wechat-work-guided";
     case "wechat-guided":
       return "wechat-guided";
     case "telegram-guided":
@@ -288,28 +294,22 @@ export function resolveOnboardingChannelSetupVariant(setupKind: string | undefin
   }
 }
 
-function randomBase62(length: number) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join("");
-}
-
 export function buildOnboardingChannelSaveValues(
   channelId: string,
   values: Record<string, string>
 ): Record<string, string> {
+  if (channelId === "wechat-work") {
+    return {
+      botId: values.botId ?? "",
+      secret: values.secret ?? ""
+    };
+  }
+
   if (channelId !== "wechat") {
     return values;
   }
 
-  return {
-    corpId: values.corpId ?? "",
-    agentId: values.agentId ?? "",
-    secret: values.secret ?? "",
-    token: values.token?.trim() || `slackclaw-${randomBase62(20)}`,
-    encodingAesKey: values.encodingAesKey?.trim() || randomBase62(43)
-  };
+  return values;
 }
 
 function installProgressStageLabel(

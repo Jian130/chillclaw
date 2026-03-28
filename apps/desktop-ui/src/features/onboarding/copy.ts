@@ -240,7 +240,7 @@ const en: OnboardingCopy = {
     "Copy your credentials: save the Corp ID, Agent ID, and Secret from the application settings."
   ],
   channelWechatCorpId: "Corp ID",
-  channelWechatAgentId: "Agent ID",
+  channelWechatAgentId: "Bot ID",
   channelWechatSecret: "Secret",
   channelTelegramInstructionsTitle: "Setup Instructions for Telegram",
   channelTelegramInstructionSteps: [
@@ -391,7 +391,7 @@ const zh: OnboardingCopy = {
     "获取 API 凭证：从应用设置中复制您的企业 ID、应用 ID 和 Secret"
   ],
   channelWechatCorpId: "Corp ID",
-  channelWechatAgentId: "Agent ID",
+  channelWechatAgentId: "Bot ID",
   channelWechatSecret: "Secret",
   channelTelegramInstructionsTitle: "Telegram 配置说明",
   channelTelegramInstructionSteps: [
@@ -542,7 +542,7 @@ const ja: OnboardingCopy = {
     "設定画面から Corp ID、Agent ID、Secret をコピーします。"
   ],
   channelWechatCorpId: "Corp ID",
-  channelWechatAgentId: "Agent ID",
+  channelWechatAgentId: "Bot ID",
   channelWechatSecret: "Secret",
   channelTelegramInstructionsTitle: "Telegram のセットアップ手順",
   channelTelegramInstructionSteps: [
@@ -693,7 +693,7 @@ const ko: OnboardingCopy = {
     "설정에서 Corp ID, Agent ID, Secret을 복사하세요."
   ],
   channelWechatCorpId: "Corp ID",
-  channelWechatAgentId: "Agent ID",
+  channelWechatAgentId: "Bot ID",
   channelWechatSecret: "Secret",
   channelTelegramInstructionsTitle: "Telegram 설정 안내",
   channelTelegramInstructionSteps: [
@@ -844,7 +844,7 @@ const es: OnboardingCopy = {
     "Copia el Corp ID, Agent ID y Secret desde la configuración."
   ],
   channelWechatCorpId: "Corp ID",
-  channelWechatAgentId: "Agent ID",
+  channelWechatAgentId: "Bot ID",
   channelWechatSecret: "Secret",
   channelTelegramInstructionsTitle: "Instrucciones para Telegram",
   channelTelegramInstructionSteps: [

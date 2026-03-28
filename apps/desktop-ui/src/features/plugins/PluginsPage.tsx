@@ -175,7 +175,7 @@ export default function PluginsPage() {
           accent="blue"
           icon={<Plug size={22} />}
           title="Daemon-owned plugin lifecycle"
-          description="ChillClaw installs, updates, and removes managed OpenClaw plugins itself. Features such as WeChat depend on these plugin records, so removal is blocked while a live feature still needs the plugin."
+          description="ChillClaw installs, updates, and removes managed OpenClaw plugins itself. Features such as WeChat Work (WeCom) depend on these plugin records, so removal is blocked while a live feature still needs the plugin."
         />
 
         {error ? <ErrorState compact title="Plugin action failed" description={error} /> : null}

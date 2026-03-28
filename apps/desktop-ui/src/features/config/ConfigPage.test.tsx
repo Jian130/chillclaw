@@ -99,17 +99,31 @@ const telegramCapability: ChannelCapability = {
   supportsLogin: false
 };
 
-const wechatCapability: ChannelCapability = {
-  id: "wechat",
-  label: "WeChat workaround",
-  description: "WeChat workaround setup.",
-  officialSupport: false,
+const wechatWorkCapability: ChannelCapability = {
+  id: "wechat-work",
+  label: "WeChat Work (WeCom)",
+  description: "WeChat Work setup.",
+  officialSupport: true,
   iconKey: "wechat",
   fieldDefs: [],
   supportsEdit: true,
   supportsRemove: true,
   supportsPairing: false,
   supportsLogin: false,
+  guidedSetupKind: "wechat-work"
+};
+
+const wechatCapability: ChannelCapability = {
+  id: "wechat",
+  label: "WeChat",
+  description: "Personal WeChat login.",
+  officialSupport: false,
+  iconKey: "wechat",
+  fieldDefs: [],
+  supportsEdit: false,
+  supportsRemove: false,
+  supportsPairing: false,
+  supportsLogin: true,
   guidedSetupKind: "wechat"
 };
 
@@ -259,6 +273,7 @@ describe("ConfigPage helpers", () => {
     expect(providerIcon("github-copilot")).toBe("GH");
     expect(providerIcon("openai")).toBe("OA");
     expect(channelIcon("telegram")).toBe("TG");
+    expect(channelIcon("wechat-work")).toBe("WC");
   });
 
   it("renders configured channel status through StatusBadge semantics", () => {
@@ -295,8 +310,22 @@ describe("ConfigPage helpers", () => {
       showApproveAction: true
     });
 
-    expect(configuredChannelActionState(configuredTelegramEntry, wechatCapability)).toEqual({
+    expect(configuredChannelActionState(configuredTelegramEntry, wechatWorkCapability)).toEqual({
       primaryAction: "edit",
+      showApproveAction: false
+    });
+
+    expect(
+      configuredChannelActionState(
+        {
+          ...configuredTelegramEntry,
+          channelId: "wechat",
+          status: "awaiting-pairing"
+        } as ConfiguredChannelEntry,
+        wechatCapability
+      )
+    ).toEqual({
+      primaryAction: "continue-setup",
       showApproveAction: false
     });
   });

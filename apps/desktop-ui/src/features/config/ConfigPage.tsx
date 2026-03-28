@@ -117,6 +117,7 @@ export function channelIcon(channelId: string) {
     telegram: "TG",
     whatsapp: "WA",
     feishu: "飞",
+    "wechat-work": "WC",
     wechat: "WX"
   };
 
@@ -317,11 +318,11 @@ async function copyText(value: string) {
 }
 
 export function configuredChannelActionState(
-  entry: Pick<ConfiguredChannelEntry, "pairingRequired">,
-  capability: Pick<ChannelCapability, "supportsPairing"> | undefined
+  entry: Pick<ConfiguredChannelEntry, "pairingRequired" | "status">,
+  capability: Pick<ChannelCapability, "supportsPairing" | "supportsLogin"> | undefined
 ) {
   return {
-    primaryAction: entry.pairingRequired ? "continue-setup" : "edit",
+    primaryAction: entry.pairingRequired || (capability?.supportsLogin && entry.status !== "completed") ? "continue-setup" : "edit",
     showApproveAction: Boolean(capability?.supportsPairing)
   } as const;
 }
@@ -821,13 +822,25 @@ function ChannelDialog(props: {
             </Card>
           ) : null}
 
+          {capability.guidedSetupKind === "wechat-work" ? (
+            <Card>
+              <CardContent className="panel-stack">
+                <strong>WeChat Work setup guidance</strong>
+                <p className="card__description">
+                  ChillClaw manages the required WeCom plugin automatically. Save the Bot ID and Secret here, and the
+                  daemon will install or update the plugin before it writes the WeChat Work channel config.
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+
           {capability.guidedSetupKind === "wechat" ? (
             <Card>
               <CardContent className="panel-stack">
-                <strong>WeChat workaround guidance</strong>
+                <strong>Personal WeChat login</strong>
                 <p className="card__description">
-                  ChillClaw manages the required WeCom plugin automatically. Save the Corp ID, Agent ID, webhook token,
-                  and AES key here, and the daemon will install or update the plugin before it writes the WeChat channel config.
+                  ChillClaw starts the QR-first WeChat installer for you. Use Start Login to begin, then keep this dialog
+                  open while the session log streams the pairing steps.
                 </p>
               </CardContent>
             </Card>
@@ -895,10 +908,10 @@ function ChannelDialog(props: {
               ) : null}
               {capability.supportsLogin ? (
                 <Button loading={busy === "login"} onClick={() => void applyChannelAction("login")} variant="outline">
-                  {busy === "login" ? "Starting..." : "Start Login"}
+                  {busy === "login" ? "Starting..." : capability.id === "wechat" ? "Start Login" : "Start Login"}
                 </Button>
               ) : null}
-              {capability.id !== "whatsapp" ? (
+              {capability.id !== "whatsapp" && capability.id !== "wechat" ? (
                 <Button loading={busy === "save"} onClick={() => void applyChannelAction("save")}>
                   {busy === "save" ? "Saving..." : isEdit ? "Save Changes" : "Save Channel"}
                 </Button>

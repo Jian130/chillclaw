@@ -310,13 +310,21 @@ describe("onboarding helpers", () => {
         modelProviders: [],
         channels: [
           {
-            id: "wechat",
-            label: "WeChat Work",
+            id: "wechat-work",
+            label: "WeChat Work (WeCom)",
             secondaryLabel: "企业微信",
             description: "Configure WeChat Work.",
+            theme: "wechat-work",
+            setupKind: "wechat-work-guided",
+            docsUrl: "https://work.weixin.qq.com/"
+          },
+          {
+            id: "wechat",
+            label: "WeChat",
+            secondaryLabel: "微信",
+            description: "Configure personal WeChat.",
             theme: "wechat",
             setupKind: "wechat-guided",
-            docsUrl: "https://work.weixin.qq.com/"
           },
           {
             id: "feishu",
@@ -341,8 +349,13 @@ describe("onboarding helpers", () => {
       }
     } as never);
 
-    expect(channels.map((channel) => channel.id)).toEqual(["wechat", "feishu", "telegram"]);
-    expect(channels.map((channel) => channel.setupKind)).toEqual(["wechat-guided", "feishu-guided", "telegram-guided"]);
+    expect(channels.map((channel) => channel.id)).toEqual(["wechat-work", "wechat", "feishu", "telegram"]);
+    expect(channels.map((channel) => channel.setupKind)).toEqual([
+      "wechat-work-guided",
+      "wechat-guided",
+      "feishu-guided",
+      "telegram-guided"
+    ]);
   });
 
   it("uses the daemon-curated onboarding employee presets instead of runtime skill options", () => {
@@ -491,23 +504,30 @@ describe("onboarding helpers", () => {
   });
 
   it("uses provider-specific channel setup variants", () => {
+    expect(resolveOnboardingChannelSetupVariant("wechat-work-guided")).toBe("wechat-work-guided");
     expect(resolveOnboardingChannelSetupVariant("wechat-guided")).toBe("wechat-guided");
     expect(resolveOnboardingChannelSetupVariant("feishu-guided")).toBe("feishu-guided");
     expect(resolveOnboardingChannelSetupVariant("telegram-guided")).toBe("telegram-guided");
   });
 
-  it("adds hidden onboarding defaults for wechat while preserving visible values", () => {
-    const values = buildOnboardingChannelSaveValues("wechat", {
-      corpId: "ww123",
-      agentId: "1000002",
+  it("keeps WeChat Work save values limited to Bot ID and Secret", () => {
+    const values = buildOnboardingChannelSaveValues("wechat-work", {
+      botId: "1000002",
       secret: "wechat-secret"
     });
 
-    expect(values.corpId).toBe("ww123");
-    expect(values.agentId).toBe("1000002");
+    expect(values.botId).toBe("1000002");
     expect(values.secret).toBe("wechat-secret");
-    expect(values.token?.length).toBeGreaterThan(10);
-    expect(values.encodingAesKey?.length).toBe(43);
+    expect(values).not.toHaveProperty("corpId");
+    expect(values).not.toHaveProperty("agentId");
+    expect(values).not.toHaveProperty("token");
+    expect(values).not.toHaveProperty("encodingAesKey");
+  });
+
+  it("keeps personal WeChat onboarding QR-first with no hidden credential defaults", () => {
+    const values = buildOnboardingChannelSaveValues("wechat", {});
+
+    expect(values).toEqual({});
   });
 
   it("uses a guided setup variant for the MiniMax API key flow", () => {

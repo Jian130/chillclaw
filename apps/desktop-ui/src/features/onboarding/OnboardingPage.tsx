@@ -48,6 +48,7 @@ import {
   fetchModelConfig,
   fetchOnboardingState,
   runFirstRunSetup,
+  submitChannelSessionInput,
   submitModelAuthSessionInput,
   updateChannelEntry,
   updateOnboardingState
@@ -59,7 +60,7 @@ import { t } from "../../shared/i18n/messages.js";
 import { Badge, TagBadge } from "../../shared/ui/Badge.js";
 import { Button } from "../../shared/ui/Button.js";
 import { Card, CardContent } from "../../shared/ui/Card.js";
-import { FieldLabel, Input } from "../../shared/ui/Field.js";
+import { FieldLabel, Input, Textarea } from "../../shared/ui/Field.js";
 import { Dialog } from "../../shared/ui/Dialog.js";
 import { ErrorState } from "../../shared/ui/ErrorState.js";
 import { LanguageSelector } from "../../shared/ui/LanguageSelector.js";
@@ -109,8 +110,8 @@ function channelIcon(channelId: string) {
   }
 }
 
-function onboardingChannelThemeClass(theme: "wechat" | "feishu" | "telegram") {
-  return `onboarding-channel-theme onboarding-channel-theme--${theme}`;
+function onboardingChannelThemeClass(theme: "wechat-work" | "wechat" | "feishu" | "telegram") {
+  return `onboarding-channel-theme onboarding-channel-theme--${theme === "wechat-work" ? "wechat" : theme}`;
 }
 
 function defaultChannelValuesFor(channelId: string): Record<string, string> {
@@ -217,8 +218,10 @@ function requiredChannelSetupFieldsMissing(
   values: Record<string, string>
 ) {
   switch (setupVariant) {
+    case "wechat-work-guided":
+      return !values.botId?.trim() || !values.secret?.trim();
     case "wechat-guided":
-      return !values.corpId?.trim() || !values.agentId?.trim() || !values.secret?.trim();
+      return false;
     case "telegram-guided":
       return !values.token?.trim();
     case "feishu-guided":
@@ -272,6 +275,7 @@ export default function OnboardingPage() {
   const [channelMessage, setChannelMessage] = useState("");
   const [channelBusy, setChannelBusy] = useState(false);
   const [channelRequiresApply, setChannelRequiresApply] = useState(false);
+  const [channelSessionInput, setChannelSessionInput] = useState("");
   const [channelTutorialOpen, setChannelTutorialOpen] = useState(false);
 
   const [employeeName, setEmployeeName] = useState("");
@@ -334,6 +338,8 @@ export default function OnboardingPage() {
       channelConfig.entries.find((entry) => entry.channelId === selectedChannelId)
     );
   }, [channelConfig, currentDraft.channel?.entryId, selectedChannelId]);
+  const activeChannelSession =
+    channelConfig?.activeSession?.channelId === selectedChannelId ? channelConfig.activeSession : undefined;
 
   const selectedModelEntry = useMemo(() => {
     if (!modelConfig) {
@@ -559,6 +565,17 @@ export default function OnboardingPage() {
         setModelConfig(event.snapshot.data);
       } else if (event.type === "channel-config.updated") {
         setChannelConfig(event.snapshot.data);
+      } else if (event.type === "channel.session.updated") {
+        setChannelConfig((current) => {
+          if (!current || current.activeSession?.channelId !== event.channelId) {
+            return current;
+          }
+
+          return {
+            ...current,
+            activeSession: event.session
+          };
+        });
       } else if (event.type === "ai-team.updated") {
         setTeamOverview(event.snapshot.data);
       }
@@ -1004,10 +1021,24 @@ export default function OnboardingPage() {
       setChannelConfig(result.state);
       setChannelMessage(result.mutation.message);
       setChannelRequiresApply(Boolean(result.mutation.requiresGatewayApply));
+      if (result.mutation.session) {
+        setChannelSessionInput("");
+      }
       const savedEntry =
         (selectedChannelEntry ? result.state.entries.find((entry) => entry.id === selectedChannelEntry.id) : undefined) ??
         findCreatedChannelEntry(previousEntries, result.state.entries) ??
         result.state.entries.find((entry) => entry.channelId === selectedChannelPresentation.id);
+
+      if (result.mutation.session) {
+        await persistDraft({
+          currentStep: "channel",
+          channel: {
+            channelId: selectedChannelPresentation.id,
+            entryId: savedEntry?.id
+          }
+        });
+        return;
+      }
 
       await persistDraft({
         currentStep: "employee",
@@ -1023,11 +1054,31 @@ export default function OnboardingPage() {
     }
   }
 
+  async function handleChannelSessionInput() {
+    if (!activeChannelSession?.id || !channelSessionInput.trim()) {
+      return;
+    }
+
+    setChannelBusy(true);
+    try {
+      const next = await submitChannelSessionInput(activeChannelSession.id, { value: channelSessionInput.trim() });
+      setChannelConfig((current) => current ? { ...current, activeSession: next.session } : current);
+      setChannelSessionInput("");
+      await readFreshChannelConfig();
+      await refreshOnboardingState();
+    } catch (actionError) {
+      setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not continue this channel session.");
+    } finally {
+      setChannelBusy(false);
+    }
+  }
+
   async function handleReturnToChannelPicker() {
     setSelectedChannelId("");
     setChannelValues({});
     setChannelMessage("");
     setChannelRequiresApply(false);
+    setChannelSessionInput("");
     setChannelTutorialOpen(false);
     await persistDraft({ currentStep: "channel" });
   }
@@ -1677,7 +1728,7 @@ export default function OnboardingPage() {
                         </div>
                       </div>
 
-                      {selectedChannelSetupVariant === "wechat-guided" ? (
+                      {selectedChannelSetupVariant === "wechat-work-guided" ? (
                         <>
                           <div className="onboarding-channel-docs-card onboarding-channel-docs-card--wechat">
                             <div className="onboarding-channel-docs-card__header">
@@ -1704,20 +1755,11 @@ export default function OnboardingPage() {
                           <div className="onboarding-channel-form-card onboarding-channel-form-card--wechat">
                             <div className="field-grid">
                               <div>
-                                <FieldLabel htmlFor="channel-corpId">{copy.channelWechatCorpId}</FieldLabel>
+                                <FieldLabel htmlFor="channel-botId">{copy.channelWechatAgentId}</FieldLabel>
                                 <Input
-                                  id="channel-corpId"
-                                  value={onboardingFieldValue(channelValues, "corpId")}
-                                  onChange={(event) => setChannelValues((current) => ({ ...current, corpId: event.target.value }))}
-                                  placeholder="ww..."
-                                />
-                              </div>
-                              <div>
-                                <FieldLabel htmlFor="channel-agentId">{copy.channelWechatAgentId}</FieldLabel>
-                                <Input
-                                  id="channel-agentId"
-                                  value={onboardingFieldValue(channelValues, "agentId")}
-                                  onChange={(event) => setChannelValues((current) => ({ ...current, agentId: event.target.value }))}
+                                  id="channel-botId"
+                                  value={onboardingFieldValue(channelValues, "botId")}
+                                  onChange={(event) => setChannelValues((current) => ({ ...current, botId: event.target.value }))}
                                   placeholder="1000002"
                                 />
                               </div>
@@ -1735,6 +1777,21 @@ export default function OnboardingPage() {
                             <p className="onboarding-channel-secret-help">{copy.channelSecretHelp}</p>
                           </div>
                         </>
+                      ) : null}
+
+                      {selectedChannelSetupVariant === "wechat-guided" ? (
+                        <div className="onboarding-channel-docs-card onboarding-channel-docs-card--wechat">
+                          <div className="onboarding-channel-docs-card__header">
+                            <div className="onboarding-channel-docs-card__icon">
+                              <Info size={22} />
+                            </div>
+                            <strong>{selectedChannelPresentation.label}</strong>
+                          </div>
+                          <p className="card__description">
+                            ChillClaw will run the personal WeChat installer and keep the QR-first session log here. Start
+                            the login flow, scan the QR code on your phone, and keep this step open until the installer finishes.
+                          </p>
+                        </div>
                       ) : null}
 
                       {selectedChannelSetupVariant === "telegram-guided" ? (
@@ -1855,6 +1912,31 @@ export default function OnboardingPage() {
                       ) : null}
 
                       {channelMessage ? <div className="onboarding-inline-note">{channelMessage}</div> : null}
+                      {activeChannelSession ? (
+                        <div className="onboarding-channel-form-card onboarding-channel-form-card--wechat">
+                          <div className="onboarding-channel-docs-card__header">
+                            <div className="onboarding-channel-docs-card__icon">
+                              <MessageSquare size={22} />
+                            </div>
+                            <strong>Active channel session</strong>
+                          </div>
+                          <p className="card__description">{activeChannelSession.message}</p>
+                          <Textarea readOnly value={activeChannelSession.logs.join("\n")} />
+                          {activeChannelSession.inputPrompt ? (
+                            <div className="field-grid">
+                              <div>
+                                <FieldLabel htmlFor="channel-session-input">{activeChannelSession.inputPrompt}</FieldLabel>
+                                <Input
+                                  id="channel-session-input"
+                                  value={channelSessionInput}
+                                  onChange={(event) => setChannelSessionInput(event.target.value)}
+                                  placeholder="Paste the follow-up input from the installer"
+                                />
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {channelRequiresApply ? (
                         <div className="onboarding-inline-note onboarding-inline-note--warning">
                           <strong>{copy.pendingApplyTitle}</strong>
@@ -1868,11 +1950,25 @@ export default function OnboardingPage() {
                         </Button>
                         <Button
                           fullWidth
-                          onClick={() => void handleSaveChannel()}
-                          disabled={requiredChannelSetupFieldsMissing(selectedChannelSetupVariant, channelValues)}
+                          onClick={() =>
+                            void (activeChannelSession?.inputPrompt
+                              ? handleChannelSessionInput()
+                              : handleSaveChannel())
+                          }
+                          disabled={
+                            activeChannelSession?.inputPrompt
+                              ? !channelSessionInput.trim()
+                              : requiredChannelSetupFieldsMissing(selectedChannelSetupVariant, channelValues)
+                          }
                           loading={channelBusy}
                         >
-                          {copy.channelSaveContinue}
+                          {activeChannelSession?.inputPrompt
+                            ? "Submit Session Input"
+                            : selectedChannelSetupVariant === "wechat-guided"
+                              ? activeChannelSession
+                                ? "Restart WeChat Login"
+                                : "Start WeChat Login"
+                              : copy.channelSaveContinue}
                         </Button>
                       </div>
                     </div>

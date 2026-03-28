@@ -15,6 +15,7 @@ import type {
   MemberCapabilitySettings,
   PluginConfigOverview,
   SendChatMessageRequest,
+  SupportedChannelId,
   ChannelSession,
   ChannelSessionInputRequest,
   ConfiguredChannelEntry,
@@ -236,13 +237,21 @@ export class MockAdapter implements EngineAdapter {
       summary: "Mock Feishu setup has not started yet.",
       detail: "Mock mode simulates the official OpenClaw Feishu plugin setup flow."
     },
+    "wechat-work": {
+      id: "wechat-work",
+      title: "WeChat Work (WeCom)",
+      officialSupport: true,
+      status: "not-started",
+      summary: "Mock WeChat Work setup has not started yet.",
+      detail: "Mock mode simulates the managed WeCom plugin setup flow."
+    },
     wechat: {
       id: "wechat",
-      title: "WeChat workaround",
+      title: "WeChat",
       officialSupport: false,
       status: "not-started",
-      summary: "Mock WeChat workaround has not started yet.",
-      detail: "Mock mode simulates a community plugin workaround."
+      summary: "Mock WeChat setup has not started yet.",
+      detail: "Mock mode keeps personal WeChat distinct from WeChat Work."
     }
   };
   private activeChannelSession?: ChannelSession;
@@ -1140,7 +1149,7 @@ export class MockAdapter implements EngineAdapter {
     };
   }
 
-  async getChannelState(channelId: "telegram" | "whatsapp" | "feishu" | "wechat"): Promise<ChannelSetupState> {
+  async getChannelState(channelId: SupportedChannelId): Promise<ChannelSetupState> {
     return this.channels[channelId];
   }
 
@@ -1214,14 +1223,13 @@ export class MockAdapter implements EngineAdapter {
           domain: request.values.domain,
           botName: request.values.botName
         });
-      case "wechat":
+      case "wechat-work":
         return this.configureWechatWorkaround({
-          corpId: request.values.corpId ?? "",
-          agentId: request.values.agentId ?? "",
+          botId: request.values.botId ?? "",
           secret: request.values.secret ?? "",
-          token: request.values.token ?? "",
-          encodingAesKey: request.values.encodingAesKey ?? ""
         });
+      case "wechat":
+        throw new Error("Mock personal WeChat setup is not available through the generic credential form.");
       default:
         throw new Error("Unsupported mock channel.");
     }
@@ -1229,8 +1237,8 @@ export class MockAdapter implements EngineAdapter {
 
   async removeChannelEntry(
     request: RemoveChannelEntryRequest
-  ): Promise<{ message: string; channelId: "telegram" | "whatsapp" | "feishu" | "wechat"; requiresGatewayApply?: boolean }> {
-    const channelId = (request.channelId ?? request.entryId.split(":")[0]) as "telegram" | "whatsapp" | "feishu" | "wechat";
+  ): Promise<{ message: string; channelId: SupportedChannelId; requiresGatewayApply?: boolean }> {
+    const channelId = (request.channelId ?? request.entryId.split(":")[0]) as SupportedChannelId;
     const template = new MockAdapter().channels[channelId];
     this.channels[channelId] = { ...template };
     if (this.activeChannelSession?.channelId === channelId) {
@@ -1470,7 +1478,7 @@ export class MockAdapter implements EngineAdapter {
         };
         const dependencies = definition.dependencies.map((dependency) => ({
           ...dependency,
-          active: dependency.id === "channel:wechat" ? this.channels.wechat.status !== "not-started" : false
+          active: dependency.id === "channel:wechat" ? this.channels["wechat-work"].status !== "not-started" : false
         }));
         const activeDependentCount = dependencies.filter((dependency) => dependency.active).length;
 
@@ -1681,14 +1689,14 @@ export class MockAdapter implements EngineAdapter {
   private async configureWechatWorkaround(
     _request: WechatSetupRequest
   ): Promise<{ message: string; channel: ChannelSetupState; requiresGatewayApply?: boolean }> {
-    this.channels.wechat = {
-      ...this.channels.wechat,
+    this.channels["wechat-work"] = {
+      ...this.channels["wechat-work"],
       status: "completed",
-      summary: "Mock WeChat workaround configured.",
-      detail: "Mock mode marked the community plugin workaround as configured."
+      summary: "Mock WeChat Work configured.",
+      detail: "Mock mode marked the managed WeCom plugin flow as configured."
     };
     this.markGatewayApplyPending();
-    return { message: "Mock WeChat workaround configured.", channel: this.channels.wechat, requiresGatewayApply: true };
+    return { message: "Mock WeChat Work configured.", channel: this.channels["wechat-work"], requiresGatewayApply: true };
   }
 
   async startGatewayAfterChannels(): Promise<{ message: string; engineStatus: EngineStatus }> {

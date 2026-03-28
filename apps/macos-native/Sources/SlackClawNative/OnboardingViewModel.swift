@@ -62,7 +62,7 @@ final class NativeOnboardingViewModel {
     var isChannelTutorialPresented = false
     var channelTutorialURLString: String?
 
-    var selectedChannelId = ""
+    var selectedChannelId: SupportedChannelId?
     var channelValues: [String: String] = [
         "domain": "feishu",
         "botName": "ChillClaw Assistant",
@@ -143,13 +143,15 @@ final class NativeOnboardingViewModel {
     }
 
     var selectedChannelPresentation: OnboardingChannelPresentation? {
-        curatedChannels.first(where: { $0.id == selectedChannelId })
+        guard let selectedChannelId else { return nil }
+        return curatedChannels.first(where: { $0.id == selectedChannelId })
     }
 
     var selectedChannelEntry: ConfiguredChannelEntry? {
         if let entryId = currentDraft.channel?.entryId {
             return appState.channelConfig?.entries.first(where: { $0.id == entryId })
         }
+        guard let selectedChannelId else { return nil }
         return appState.channelConfig?.entries.first(where: { $0.channelId == selectedChannelId })
     }
 
@@ -509,7 +511,7 @@ final class NativeOnboardingViewModel {
         defer { channelBusy = false }
 
         let request = SaveChannelEntryRequest(
-            channelId: selectedChannelPresentation.id,
+            channelId: selectedChannelPresentation.id.rawValue,
             entryId: selectedChannelEntry?.id,
             values: buildOnboardingChannelSaveValues(channelID: selectedChannelPresentation.id, values: channelValues),
             action: "save"
@@ -696,7 +698,7 @@ final class NativeOnboardingViewModel {
     }
 
     func returnToChannelPicker() async {
-        selectedChannelId = ""
+        selectedChannelId = nil
         channelValues = [
             "domain": "feishu",
             "botName": "ChillClaw Assistant",
@@ -714,11 +716,11 @@ final class NativeOnboardingViewModel {
         await saveChannel()
     }
 
-    func updateSelectedChannel(_ channelID: String) {
+    func updateSelectedChannel(_ channelID: SupportedChannelId) {
         selectedChannelId = channelID
         channelMessage = nil
         channelRequiresApply = false
-        if channelID == "feishu" {
+        if channelID == .feishu {
             channelValues["domain"] = channelValues["domain"] ?? "feishu"
             channelValues["botName"] = channelValues["botName"] ?? "ChillClaw Assistant"
         }
@@ -727,8 +729,7 @@ final class NativeOnboardingViewModel {
     func isSelectedChannelMissingRequiredValues() -> Bool {
         switch selectedChannelSetupVariant {
         case .wechatGuided?:
-            return (channelValues["corpId"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || (channelValues["agentId"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return (channelValues["botId"] ?? channelValues["agentId"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || (channelValues["secret"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .feishuGuided?:
             return (channelValues["appId"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -740,11 +741,11 @@ final class NativeOnboardingViewModel {
         }
     }
 
-    func channelSymbol(for channelID: String) -> String {
+    func channelSymbol(for channelID: SupportedChannelId) -> String {
         switch channelID {
-        case "telegram":
+        case .telegram:
             return "paperplane"
-        case "feishu", "wechat":
+        case .feishu, .wechatWork, .wechat:
             return "message"
         default:
             return "message"
@@ -758,9 +759,7 @@ final class NativeOnboardingViewModel {
 
     func channelPlaceholder(for fieldID: String) -> String {
         switch fieldID {
-        case "corpId":
-            return "ww..."
-        case "agentId":
+        case "botId":
             return "1000002"
         case "secret":
             return "••••••••••••"
@@ -783,16 +782,16 @@ final class NativeOnboardingViewModel {
         selectedChannelPresentation?.secondaryLabel
     }
 
-    private func defaultChannelValues(for channelID: String) -> [String: String] {
+    private func defaultChannelValues(for channelID: SupportedChannelId) -> [String: String] {
         switch channelID {
-        case "feishu":
+        case .feishu:
             return ["domain": "feishu", "botName": "ChillClaw Assistant"]
         default:
             return [:]
         }
     }
 
-    private func channelValuesFromEntry(_ channelID: String) -> [String: String] {
+    private func channelValuesFromEntry(_ channelID: SupportedChannelId) -> [String: String] {
         var values = defaultChannelValues(for: channelID)
         if let editableValues = selectedChannelEntry?.editableValues {
             for (key, value) in editableValues {
@@ -880,7 +879,7 @@ final class NativeOnboardingViewModel {
         }
 
         selectedChannelId = draft.channel?.channelId ?? selectedChannelId
-        if let channelId = draft.channel?.channelId, !channelId.isEmpty {
+        if let channelId = draft.channel?.channelId {
             channelValues = channelValuesFromEntry(channelId)
         }
 

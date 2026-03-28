@@ -22,7 +22,7 @@ let nativeOnboardingAvatarPresets: [NativeOnboardingAvatarPreset] = [
     .init(id: "onboarding-visionary", label: "Onboarding Visionary", emoji: "🚀", accent: "#afc6f0", theme: "onboarding", resourceName: "onboarding-visionary"),
 ]
 
-let nativeOnboardingChannelIDs: Set<String> = ["wechat", "feishu", "telegram"]
+let nativeOnboardingChannelIDs: Set<SupportedChannelId> = [.wechatWork, .feishu, .telegram]
 let nativeOnboardingStepOrder: [OnboardingStep] = [.welcome, .install, .permissions, .model, .channel, .employee, .complete]
 let nativeOnboardingPreferredColorScheme: ColorScheme = .light
 let nativeOnboardingTextPrimary = Color(red: 0.09, green: 0.12, blue: 0.18)
@@ -163,13 +163,13 @@ func nativeOnboardingActionButtonVariant(_ variant: NativeOnboardingActionButton
     }
 }
 
-func nativeOnboardingChannelPresentationTheme(_ theme: String) -> LinearGradient {
+func nativeOnboardingChannelPresentationTheme(_ theme: OnboardingChannelTheme) -> LinearGradient {
     switch theme {
-    case "wechat":
+    case .wechatWork, .wechat:
         return LinearGradient(colors: [Color(red: 0.87, green: 0.98, blue: 0.92), Color(red: 0.78, green: 0.96, blue: 0.88)], startPoint: .topLeading, endPoint: .bottomTrailing)
-    case "telegram":
+    case .telegram:
         return LinearGradient(colors: [Color(red: 0.94, green: 0.93, blue: 1.0), Color(red: 0.90, green: 0.92, blue: 0.99)], startPoint: .topLeading, endPoint: .bottomTrailing)
-    case "feishu":
+    case .feishu:
         fallthrough
     default:
         return LinearGradient(colors: [Color(red: 0.86, green: 0.97, blue: 1.0), Color(red: 0.76, green: 0.90, blue: 1.0)], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -206,6 +206,21 @@ func nativeOnboardingChannelGuideTone(_ kind: String) -> NativeOnboardingGuideTo
         return .getKey
     default:
         return .input
+    }
+}
+
+func nativeChannelDisplayLabel(_ channelId: SupportedChannelId) -> String {
+    switch channelId {
+    case .wechatWork:
+        return "WeChat Work"
+    case .wechat:
+        return "WeChat"
+    case .feishu:
+        return "Feishu"
+    case .telegram:
+        return "Telegram"
+    case .whatsapp:
+        return "WhatsApp"
     }
 }
 
@@ -490,13 +505,13 @@ func buildOnboardingMemberRequest(_ draft: NativeOnboardingEmployeeDraft) -> Sav
     )
 }
 
-func resolveOnboardingChannelSetupVariant(_ setupKind: String?) -> NativeOnboardingChannelSetupVariant {
+func resolveOnboardingChannelSetupVariant(_ setupKind: OnboardingChannelSetupKind?) -> NativeOnboardingChannelSetupVariant {
     switch setupKind {
-    case "wechat-guided":
+    case .wechatWorkGuided, .wechatGuided:
         return .wechatGuided
-    case "telegram-guided":
+    case .telegramGuided:
         return .telegramGuided
-    case "feishu-guided":
+    case .feishuGuided:
         fallthrough
     default:
         return .feishuGuided
@@ -518,19 +533,16 @@ private func nonEmptyTrimmed(_ value: String?) -> String? {
 }
 
 func buildOnboardingChannelSaveValues(
-    channelID: String,
+    channelID: SupportedChannelId,
     values: [String: String]
 ) -> [String: String] {
-    guard channelID == "wechat" else {
+    guard channelID == .wechatWork else {
         return values
     }
 
     return [
-        "corpId": values["corpId"] ?? "",
-        "agentId": values["agentId"] ?? "",
+        "botId": nonEmptyTrimmed(values["botId"]) ?? nonEmptyTrimmed(values["agentId"]) ?? "",
         "secret": values["secret"] ?? "",
-        "token": nonEmptyTrimmed(values["token"]) ?? "slackclaw-\(randomBase62(length: 20))",
-        "encodingAesKey": nonEmptyTrimmed(values["encodingAesKey"]) ?? randomBase62(length: 43),
     ]
 }
 
@@ -885,7 +897,7 @@ func channelEntrySignature(_ entry: ConfiguredChannelEntry?) -> String {
     guard let entry else { return "" }
     return [
         entry.id,
-        entry.channelId,
+        entry.channelId.rawValue,
         entry.status,
         entry.summary,
         String(entry.pairingRequired),
@@ -1180,7 +1192,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
                 "获取 API 凭证：从应用设置中复制您的企业 ID、应用 ID 和 Secret",
             ],
             channelWechatCorpId: "Corp ID",
-            channelWechatAgentId: "Agent ID",
+            channelWechatAgentId: "Bot ID",
             channelWechatSecret: "Secret",
             channelTelegramInstructionsTitle: "Telegram 配置说明",
             channelTelegramInstructionSteps: [
@@ -1328,7 +1340,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
                 "設定画面から Corp ID、Agent ID、Secret をコピーします。",
             ],
             channelWechatCorpId: "Corp ID",
-            channelWechatAgentId: "Agent ID",
+            channelWechatAgentId: "Bot ID",
             channelWechatSecret: "Secret",
             channelTelegramInstructionsTitle: "Telegram のセットアップ手順",
             channelTelegramInstructionSteps: [
@@ -1476,7 +1488,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
                 "설정에서 Corp ID, Agent ID, Secret을 복사하세요.",
             ],
             channelWechatCorpId: "Corp ID",
-            channelWechatAgentId: "Agent ID",
+            channelWechatAgentId: "Bot ID",
             channelWechatSecret: "Secret",
             channelTelegramInstructionsTitle: "Telegram 설정 안내",
             channelTelegramInstructionSteps: [
@@ -1624,7 +1636,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
                 "Copia el Corp ID, Agent ID y Secret desde la configuración.",
             ],
             channelWechatCorpId: "Corp ID",
-            channelWechatAgentId: "Agent ID",
+            channelWechatAgentId: "Bot ID",
             channelWechatSecret: "Secret",
             channelTelegramInstructionsTitle: "Instrucciones para Telegram",
             channelTelegramInstructionSteps: [
@@ -1772,7 +1784,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
                 "Copy your credentials: save the Corp ID, Agent ID, and Secret from the application settings.",
             ],
             channelWechatCorpId: "Corp ID",
-            channelWechatAgentId: "Agent ID",
+            channelWechatAgentId: "Bot ID",
             channelWechatSecret: "Secret",
             channelTelegramInstructionsTitle: "Setup Instructions for Telegram",
             channelTelegramInstructionSteps: [

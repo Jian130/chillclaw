@@ -728,12 +728,13 @@ struct ConfigurationScreen: View {
     }
 
     private var channelsView: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(appState.channelConfig?.entries ?? []) { entry in
+        let entries = appState.channelConfig?.entries ?? []
+        return VStack(alignment: .leading, spacing: 14) {
+            ForEach(entries) { entry in
                 let capability = appState.channelConfig?.capabilities.first(where: { $0.id == entry.channelId })
                 let actionState = configurationChannelActionState(entry: entry, capability: capability)
 
-                SurfaceCard(title: entry.label, subtitle: entry.channelId.capitalized) {
+                SurfaceCard(title: entry.label, subtitle: nativeChannelDisplayLabel(entry.channelId)) {
                     HStack {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(entry.summary)
@@ -801,7 +802,7 @@ struct ConfigurationScreen: View {
 
     private func removeChannel(_ entry: ConfiguredChannelEntry) async {
         do {
-            let response = try await appState.client.deleteChannelEntry(request: RemoveChannelEntryRequest(entryId: entry.id, channelId: entry.channelId, values: nil))
+            let response = try await appState.client.deleteChannelEntry(request: RemoveChannelEntryRequest(entryId: entry.id, channelId: entry.channelId.rawValue, values: nil))
             appState.channelConfig = response.channelConfig
             appState.applyBanner(response.message)
             await appState.refreshAll()
@@ -1817,7 +1818,7 @@ private struct ChannelEntrySheet: View {
     let existingEntry: ConfiguredChannelEntry?
     let preferredAction: NativeConfigurationChannelSheetAction
 
-    @State private var channelId = ""
+    @State private var channelId: SupportedChannelId = .telegram
     @State private var values: [String: String] = [:]
     @State private var busyAction: NativeConfigurationChannelSheetAction?
     @State private var message = ""
@@ -1877,19 +1878,19 @@ private struct ChannelEntrySheet: View {
                 Button(existingEntry == nil ? "Save Channel" : "Save Changes") {
                     Task { await runAction(.save) }
                 }
-                .disabled(channelId.isEmpty)
+                .disabled(false)
                 if currentCapability?.supportsPairing == true {
                     Button("Approve Pairing") {
                         Task { await runAction(.approvePairing) }
                     }
-                    .disabled(channelId.isEmpty || values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
         .padding(24)
         .frame(width: 520)
         .onAppear {
-            channelId = existingEntry?.channelId ?? appState.channelConfig?.capabilities.first?.id ?? ""
+            channelId = existingEntry?.channelId ?? appState.channelConfig?.capabilities.first?.id ?? .telegram
             values = defaultChannelValues.merging(existingEntry?.editableValues ?? [:], uniquingKeysWith: { _, new in new })
             message = ""
             if preferredAction == .approvePairing {

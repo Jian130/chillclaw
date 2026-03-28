@@ -14,6 +14,7 @@ import type {
   AbortChatRequest,
   DeleteAIMemberRequest,
   MemberBindingSummary,
+  SupportedChannelId,
   ChannelSession,
   ChannelSessionInputRequest,
   ConfiguredChannelEntry,
@@ -1537,11 +1538,8 @@ function toInstallDisposition(
   return "installed";
 }
 
-function createChannelState(
-  id: "telegram" | "whatsapp" | "feishu" | "wechat",
-  overrides: Partial<ChannelSetupState>
-): ChannelSetupState {
-  const defaults: Record<string, ChannelSetupState> = {
+function createChannelState(id: SupportedChannelId, overrides: Partial<ChannelSetupState>): ChannelSetupState {
+  const defaults: Record<SupportedChannelId, ChannelSetupState> = {
     telegram: {
       id: "telegram",
       title: "Telegram",
@@ -1566,13 +1564,21 @@ function createChannelState(
       summary: "Feishu bot setup has not started yet.",
       detail: "Install the official Feishu plugin, save the app credentials, restart the gateway, enable long connection, then publish the app and approve pairing."
     },
+    "wechat-work": {
+      id: "wechat-work",
+      title: "WeChat Work (WeCom)",
+      officialSupport: true,
+      status: "not-started",
+      summary: "WeChat Work setup has not started yet.",
+      detail: "Install the managed WeCom plugin, save the bot credentials, then apply the pending gateway changes."
+    },
     wechat: {
       id: "wechat",
-      title: "WeChat workaround",
+      title: "WeChat",
       officialSupport: false,
       status: "not-started",
-      summary: "WeChat requires an experimental workaround plugin.",
-      detail: "Install the plugin workaround, configure the app credentials, then restart the gateway."
+      summary: "WeChat setup has not started yet.",
+      detail: "Complete the QR-first WeChat login flow when that guided path is available."
     }
   };
 
@@ -1614,10 +1620,10 @@ function activeWhatsappSession(): ChannelSession | undefined {
   };
 }
 
-function channelIdFromEntryId(entryId: string): "telegram" | "whatsapp" | "feishu" | "wechat" {
+function channelIdFromEntryId(entryId: string): SupportedChannelId {
   const [channelId] = entryId.split(":");
 
-  if (channelId === "telegram" || channelId === "whatsapp" || channelId === "feishu" || channelId === "wechat") {
+  if (channelId === "telegram" || channelId === "whatsapp" || channelId === "feishu" || channelId === "wechat-work" || channelId === "wechat") {
     return channelId;
   }
 
@@ -3687,7 +3693,7 @@ async function readOpenClawSkillCheckWarnings(options?: { fresh?: boolean }): Pr
 }
 
 function deriveLiveChannelState(
-  channelId: "telegram" | "whatsapp" | "feishu" | "wechat",
+  channelId: SupportedChannelId,
   list?: OpenClawChannelsListJson,
   status?: OpenClawChannelsStatusJson
 ): ChannelSetupState {
@@ -3735,7 +3741,7 @@ function deriveLiveChannelState(
 
   return createChannelState(channelId, {
     status: "completed",
-    summary: `${channelId === "feishu" ? "Feishu" : "WeChat"} is configured in OpenClaw.`,
+    summary: `${channelId === "feishu" ? "Feishu" : channelId === "wechat-work" ? "WeChat Work" : "WeChat"} is configured in OpenClaw.`,
     detail: "SlackClaw detected an existing configuration from the installed OpenClaw runtime."
   });
 }
@@ -3752,7 +3758,7 @@ function buildLiveChannelEntries(
   const entries: ConfiguredChannelEntry[] = [];
 
   for (const channelId of channelIds) {
-    if (channelId !== "telegram" && channelId !== "whatsapp" && channelId !== "feishu" && channelId !== "wechat") {
+    if (channelId !== "telegram" && channelId !== "whatsapp" && channelId !== "feishu" && channelId !== "wechat-work" && channelId !== "wechat") {
       continue;
     }
 
@@ -4216,11 +4222,10 @@ export class OpenClawAdapter implements EngineAdapter {
       config.channels[pluginId] = {
         enabled: true,
         webhookPath: `/${pluginId}`,
-        token: request.token,
-        encodingAESKey: request.encodingAesKey,
-        corpId: request.corpId,
-        corpSecret: request.secret,
-        agentId: Number(request.agentId),
+        botId: request.botId,
+        secret: request.secret,
+        token: `slackclaw-${randomBytes(10).toString("hex")}`,
+        encodingAESKey: randomBytes(32).toString("base64url").slice(0, 43),
         dmPolicy: "pairing",
         groupPolicy: "open"
       };
@@ -7050,7 +7055,7 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async getChannelState(channelId: "telegram" | "whatsapp" | "feishu" | "wechat"): Promise<ChannelSetupState> {
+  async getChannelState(channelId: SupportedChannelId): Promise<ChannelSetupState> {
     if (channelId === "whatsapp" && whatsappLoginSession) {
       return createChannelState("whatsapp", {
         status: whatsappLoginSession.status,
@@ -7091,7 +7096,7 @@ export class OpenClawAdapter implements EngineAdapter {
             ...dependency,
             active:
               dependency.id === "channel:wechat"
-                ? channelConfiguredInFile || channelEntries.some((entry) => entry.channelId === "wechat")
+                ? channelConfiguredInFile || channelEntries.some((entry) => entry.channelId === "wechat-work")
                 : false
           }));
           const activeDependentCount = dependencyStates.filter((dependency) => dependency.active).length;
@@ -7340,14 +7345,13 @@ export class OpenClawAdapter implements EngineAdapter {
           domain: request.values.domain,
           botName: request.values.botName
         });
-      case "wechat":
+      case "wechat-work":
         return this.configureWechatWorkaround({
-          corpId: request.values.corpId ?? "",
-          agentId: request.values.agentId ?? "",
+          botId: request.values.botId ?? "",
           secret: request.values.secret ?? "",
-          token: request.values.token ?? "",
-          encodingAesKey: request.values.encodingAesKey ?? ""
         });
+      case "wechat":
+        throw new Error("Personal WeChat setup is not available through the generic credential form.");
       default:
         throw new Error("Unsupported channel.");
     }
@@ -7355,7 +7359,7 @@ export class OpenClawAdapter implements EngineAdapter {
 
   async removeChannelEntry(
     request: RemoveChannelEntryRequest
-  ): Promise<{ message: string; channelId: "telegram" | "whatsapp" | "feishu" | "wechat"; requiresGatewayApply?: boolean }> {
+  ): Promise<{ message: string; channelId: SupportedChannelId; requiresGatewayApply?: boolean }> {
     const channelId = request.channelId ?? channelIdFromEntryId(request.entryId);
 
     if (channelId === "whatsapp") {
@@ -7392,7 +7396,7 @@ export class OpenClawAdapter implements EngineAdapter {
       if (!remove.usedFallback && remove.result.code !== 0) {
         throw new Error(remove.result.stderr || remove.result.stdout || "SlackClaw could not remove the Feishu configuration.");
       }
-    } else {
+    } else if (channelId === "wechat-work") {
       const wechatPlugin = managedPluginDefinitionForFeature("channel:wechat");
       if (!wechatPlugin) {
         throw new Error("Managed WeChat plugin definition is missing.");
@@ -7408,12 +7412,16 @@ export class OpenClawAdapter implements EngineAdapter {
       if (!remove.usedFallback && remove.result.code !== 0) {
         throw new Error(remove.result.stderr || remove.result.stdout || "SlackClaw could not remove the WeChat configuration.");
       }
+    } else {
+      await this.removeChannelConfig("wechat");
     }
 
     await this.markGatewayApplyPending();
 
     return {
-      message: appendGatewayApplyMessage(`${channelId === "wechat" ? "WeChat workaround" : channelId[0].toUpperCase() + channelId.slice(1)} configuration removed.`),
+      message: appendGatewayApplyMessage(
+        `${channelId === "wechat-work" ? "WeChat Work" : channelId === "wechat" ? "WeChat" : channelId[0].toUpperCase() + channelId.slice(1)} configuration removed.`
+      ),
       channelId,
       requiresGatewayApply: true
     };
@@ -7895,11 +7903,10 @@ export class OpenClawAdapter implements EngineAdapter {
       commandArgs: ["config", "set", "--strict-json", `channels.${wechatPlugin.configKey}`, JSON.stringify({
         enabled: true,
         webhookPath: `/${wechatPlugin.configKey}`,
-        token: request.token,
-        encodingAESKey: request.encodingAesKey,
-        corpId: request.corpId,
-        corpSecret: request.secret,
-        agentId: Number(request.agentId),
+        botId: request.botId,
+        secret: request.secret,
+        token: `slackclaw-${randomBytes(10).toString("hex")}`,
+        encodingAESKey: randomBytes(32).toString("base64url").slice(0, 43),
         dmPolicy: "pairing",
         groupPolicy: "open"
       })],
@@ -7915,10 +7922,10 @@ export class OpenClawAdapter implements EngineAdapter {
 
     return {
       message: "ChillClaw saved the managed WeChat plugin configuration. Apply pending changes from Gateway Manager to make it live.",
-      channel: createChannelState("wechat", {
+      channel: createChannelState("wechat-work", {
         status: "completed",
-        summary: "WeChat workaround configured.",
-        detail: "The WeChat workaround plugin is configured. Apply pending gateway changes to make it live."
+        summary: "WeChat Work configured.",
+        detail: "The managed WeCom plugin is configured. Apply pending gateway changes to make it live."
       }),
       requiresGatewayApply: true
     };

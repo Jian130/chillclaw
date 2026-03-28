@@ -497,26 +497,24 @@ struct OnboardingTests {
         )
         viewModel.onboardingState = makeOnboardingStateResponse(step: .channel)
 
-        #expect(viewModel.curatedChannels.map(\.id) == ["wechat", "feishu", "telegram"])
+        #expect(viewModel.curatedChannels.map(\.id) == [.wechatWork, .feishu, .telegram])
         #expect(viewModel.curatedChannels.map(\.label) == ["WeChat Work", "Feishu", "Telegram"])
     }
 
     @Test
     func buildingOnboardingWechatSaveValuesAddsHiddenDefaults() {
         let values = buildOnboardingChannelSaveValues(
-            channelID: "wechat",
+            channelID: .wechatWork,
             values: [
-                "corpId": "ww123",
-                "agentId": "1000002",
+                "botId": "1000002",
                 "secret": "wechat-secret",
             ]
         )
 
-        #expect(values["corpId"] == "ww123")
-        #expect(values["agentId"] == "1000002")
+        #expect(values["botId"] == "1000002")
         #expect(values["secret"] == "wechat-secret")
-        #expect((values["token"] ?? "").count > 10)
-        #expect((values["encodingAesKey"] ?? "").count == 43)
+        #expect(values["token"] == nil)
+        #expect(values["encodingAesKey"] == nil)
     }
 
     @Test
@@ -1722,31 +1720,31 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
             ],
             channels: [
                 .init(
-                    id: "wechat",
+                    id: .wechatWork,
                     label: "WeChat Work",
                     secondaryLabel: "企业微信",
                     description: "Configure WeChat Work.",
-                    theme: "wechat",
-                    setupKind: "wechat-guided",
+                    theme: .wechatWork,
+                    setupKind: .wechatWorkGuided,
                     docsUrl: "https://work.weixin.qq.com/"
                 ),
                 .init(
-                    id: "feishu",
+                    id: .feishu,
                     label: "Feishu",
                     secondaryLabel: "飞书",
                     description: "Configure Feishu.",
-                    theme: "feishu",
-                    setupKind: "feishu-guided",
+                    theme: .feishu,
+                    setupKind: .feishuGuided,
                     platformUrl: "https://open.feishu.cn/app",
                     tutorialVideoUrl: "https://video.example/feishu"
                 ),
                 .init(
-                    id: "telegram",
+                    id: .telegram,
                     label: "Telegram",
                     secondaryLabel: "Telegram",
                     description: "Configure Telegram.",
-                    theme: "telegram",
-                    setupKind: "telegram-guided",
+                    theme: .telegram,
+                    setupKind: .telegramGuided,
                     docsUrl: "https://core.telegram.org/bots/tutorial"
                 )
             ],

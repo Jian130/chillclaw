@@ -151,20 +151,17 @@ test("channel setup removes a configured entry through the generic path", async 
   assert.equal(state.channelOnboarding?.channels.telegram.status, "not-started");
 });
 
-test("wechat setup auto-installs the managed plugin without persisting a raw plugin package", async () => {
+test("wechat work setup auto-installs the managed plugin without persisting a raw plugin package", async () => {
   const adapter = new MockAdapter();
   const filePath = resolve(process.cwd(), `apps/daemon/.data/channel-setup-wechat-managed-${randomUUID()}.json`);
   const service = new ChannelSetupService(adapter, new StateStore(filePath));
 
   const result = await service.saveEntry(undefined, {
-    channelId: "wechat",
+    channelId: "wechat-work",
     action: "save",
     values: {
-      corpId: "corp-id",
-      agentId: "1000001",
-      secret: "secret-value",
-      token: "token-value",
-      encodingAesKey: "encoding-aes-key"
+      botId: "1000001",
+      secret: "secret-value"
     }
   });
   const pluginConfig = await adapter.plugins.getConfigOverview();

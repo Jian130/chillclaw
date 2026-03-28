@@ -79,3 +79,102 @@ test("state store normalizes legacy wechat channel onboarding state to wechat-wo
   assert.equal(migrated.onboarding?.draft.channel?.channelId, "wechat-work");
   assert.equal(migrated.onboarding?.draft.channel?.entryId, "wechat-work:default");
 });
+
+test("state store preserves canonical wechat-work state when legacy wechat data collides", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/state-store-wechat-collision-${randomUUID()}.json`);
+  const store = new StateStore(filePath);
+
+  await store.write({
+    tasks: [],
+    channelOnboarding: {
+      channels: {
+        "wechat-work": {
+          id: "wechat-work",
+          title: "WeChat Work",
+          officialSupport: false,
+          status: "completed",
+          summary: "Canonical WeChat Work state.",
+          detail: "Canonical channel state should win.",
+          lastUpdatedAt: "2026-03-26T00:00:00.000Z",
+          logs: ["canonical channel"]
+        },
+        wechat: {
+          id: "wechat",
+          title: "Legacy WeChat Work",
+          officialSupport: false,
+          status: "failed",
+          summary: "Legacy state should not overwrite canonical.",
+          detail: "Legacy channel state should lose on collision.",
+          lastUpdatedAt: "2026-03-25T00:00:00.000Z",
+          logs: ["legacy channel"]
+        }
+      },
+      entries: {
+        "wechat-work:default": {
+          id: "wechat-work:default",
+          channelId: "wechat-work",
+          label: "Canonical WeChat Work",
+          editableValues: {
+            botId: "canonical-bot",
+            secret: "canonical-secret"
+          },
+          maskedConfigSummary: [{ label: "Bot ID", value: "canonical-bot" }],
+          lastUpdatedAt: "2026-03-26T00:01:00.000Z"
+        },
+        "wechat:default": {
+          id: "wechat:default",
+          channelId: "wechat",
+          label: "Legacy WeChat Work",
+          editableValues: {
+            corpId: "legacy-corp",
+            agentId: "1000001",
+            secret: "legacy-secret"
+          },
+          maskedConfigSummary: [{ label: "Corp ID", value: "legacy-corp" }],
+          lastUpdatedAt: "2026-03-25T00:01:00.000Z"
+        },
+        "wechat:secondary": {
+          id: "wechat:secondary",
+          channelId: "wechat",
+          label: "Legacy Secondary",
+          editableValues: {
+            corpId: "secondary-corp",
+            agentId: "1000002",
+            secret: "secondary-secret"
+          },
+          maskedConfigSummary: [{ label: "Corp ID", value: "secondary-corp" }],
+          lastUpdatedAt: "2026-03-25T00:02:00.000Z"
+        }
+      }
+    },
+    onboarding: {
+      draft: {
+        currentStep: "channel",
+        channel: {
+          channelId: "wechat",
+          entryId: "wechat:default"
+        }
+      }
+    }
+  });
+
+  const migrated = await store.read();
+
+  assert.equal(migrated.channelOnboarding?.channels["wechat-work"]?.summary, "Canonical WeChat Work state.");
+  assert.deepEqual(migrated.channelOnboarding?.channels["wechat-work"]?.logs, ["canonical channel"]);
+  assert.equal(migrated.channelOnboarding?.channels.wechat, undefined);
+  assert.deepEqual(migrated.channelOnboarding?.entries?.["wechat-work:default"]?.editableValues, {
+    botId: "canonical-bot",
+    secret: "canonical-secret"
+  });
+  assert.equal(migrated.channelOnboarding?.entries?.["wechat:default"], undefined);
+  assert.equal(migrated.channelOnboarding?.entries?.["wechat-work:secondary"]?.id, "wechat-work:secondary");
+  assert.equal(migrated.channelOnboarding?.entries?.["wechat-work:secondary"]?.channelId, "wechat-work");
+  assert.deepEqual(migrated.channelOnboarding?.entries?.["wechat-work:secondary"]?.editableValues, {
+    corpId: "secondary-corp",
+    agentId: "1000002",
+    secret: "secondary-secret"
+  });
+  assert.equal(migrated.onboarding?.draft.channel?.channelId, "wechat-work");
+  assert.equal(migrated.onboarding?.draft.channel?.entryId, "wechat-work:default");
+});

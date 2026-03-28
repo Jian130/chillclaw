@@ -38,6 +38,7 @@ import type {
   ReplaceFallbackModelEntriesRequest,
   SkillReadinessSummary,
   SaveModelEntryRequest,
+  SupportedChannelId,
   SkillOption,
   SetDefaultModelEntryRequest,
   EngineStatus,
@@ -194,14 +195,14 @@ export interface ConfigManager {
   getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse>;
   submitModelAuthSessionInput(sessionId: string, request: ModelAuthSessionInputRequest): Promise<ModelAuthSessionResponse>;
   setDefaultModel(modelKey: string): Promise<ModelConfigActionResponse>;
-  getChannelState(channelId: "telegram" | "whatsapp" | "feishu" | "wechat"): Promise<ChannelSetupState>;
+  getChannelState(channelId: SupportedChannelId): Promise<ChannelSetupState>;
   getConfiguredChannelEntries(): Promise<ConfiguredChannelEntry[]>;
   saveChannelEntry(
     request: SaveChannelEntryRequest
   ): Promise<{ message: string; channel: ChannelSetupState; session?: ChannelSession; requiresGatewayApply?: boolean }>;
   removeChannelEntry(
     request: RemoveChannelEntryRequest
-  ): Promise<{ message: string; channelId: "telegram" | "whatsapp" | "feishu" | "wechat"; requiresGatewayApply?: boolean }>;
+  ): Promise<{ message: string; channelId: SupportedChannelId; requiresGatewayApply?: boolean }>;
   getSkillRuntimeCatalog(): Promise<SkillRuntimeCatalog>;
   getInstalledSkillDetail(skillId: string): Promise<InstalledSkillDetail>;
   listMarketplaceInstalledSkills(): Promise<Array<{ slug: string; version?: string }>>;

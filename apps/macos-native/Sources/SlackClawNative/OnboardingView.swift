@@ -1112,18 +1112,10 @@ struct NativeOnboardingView: View {
                             )
 
                             nativeChannelCredentialCard(title: nil, body: nil) {
-                                nativeChannelField(title: viewModel.copy.channelWechatCorpId) {
-                                    TextField(viewModel.channelPlaceholder(for: "corpId"), text: Binding(
-                                        get: { viewModel.channelFieldValue("corpId") },
-                                        set: { viewModel.updateChannelValue(fieldId: "corpId", value: $0) }
-                                    ))
-                                    .textFieldStyle(.plain)
-                                }
-
                                 nativeChannelField(title: viewModel.copy.channelWechatAgentId) {
-                                    TextField(viewModel.channelPlaceholder(for: "agentId"), text: Binding(
-                                        get: { viewModel.channelFieldValue("agentId") },
-                                        set: { viewModel.updateChannelValue(fieldId: "agentId", value: $0) }
+                                    TextField(viewModel.channelPlaceholder(for: "botId"), text: Binding(
+                                        get: { viewModel.channelFieldValue("botId") },
+                                        set: { viewModel.updateChannelValue(fieldId: "botId", value: $0) }
                                     ))
                                     .textFieldStyle(.plain)
                                 }
@@ -1602,7 +1594,7 @@ struct NativeOnboardingView: View {
             HStack(spacing: 16) {
                 summaryCard(title: viewModel.copy.completionInstall, value: viewModel.onboardingState?.summary.install?.version ?? appState.overview?.engine.version ?? "Not installed")
                 summaryCard(title: viewModel.copy.completionModel, value: viewModel.selectedModelEntry?.label ?? viewModel.onboardingState?.summary.model?.modelKey ?? "Not configured")
-                summaryCard(title: viewModel.copy.completionChannel, value: viewModel.onboardingState?.summary.channel?.channelId.capitalized ?? "Not configured")
+                summaryCard(title: viewModel.copy.completionChannel, value: viewModel.onboardingState?.summary.channel.map { nativeChannelDisplayLabel($0.channelId) } ?? "Not configured")
                 summaryCard(title: viewModel.copy.completionEmployee, value: viewModel.onboardingState?.summary.employee?.name ?? "Not created")
             }
 
@@ -1747,13 +1739,13 @@ private struct NativeOnboardingGuideCard<Trailing: View, Content: View>: View {
     }
 }
 
-private func channelAccentColor(_ channelID: String) -> Color {
+private func channelAccentColor(_ channelID: SupportedChannelId) -> Color {
     switch channelID {
-    case "wechat":
+    case .wechatWork, .wechat:
         return Color(red: 0.05, green: 0.53, blue: 0.34)
-    case "telegram":
+    case .telegram:
         return Color(red: 0.29, green: 0.27, blue: 0.88)
-    case "feishu":
+    case .feishu:
         fallthrough
     default:
         return Color(red: 0.16, green: 0.39, blue: 0.94)

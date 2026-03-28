@@ -7,7 +7,7 @@ struct ConfigurationScreenTests {
     func configurationChannelActionStateShowsApproveForPairingCapabilities() {
         let telegramEntry = ConfiguredChannelEntry(
             id: "telegram:default",
-            channelId: "telegram",
+            channelId: .telegram,
             label: "Telegram",
             status: "completed",
             summary: "Telegram is configured.",
@@ -18,7 +18,7 @@ struct ConfigurationScreenTests {
             lastUpdatedAt: nil
         )
         let telegramCapability = ChannelCapability(
-            id: "telegram",
+            id: .telegram,
             label: "Telegram",
             description: "Telegram bot setup.",
             officialSupport: true,
@@ -32,9 +32,9 @@ struct ConfigurationScreenTests {
             guidedSetupKind: nil
         )
         let wechatCapability = ChannelCapability(
-            id: "wechat",
-            label: "WeChat workaround",
-            description: "WeChat workaround setup.",
+            id: .wechatWork,
+            label: "WeChat Work",
+            description: "WeChat Work setup.",
             officialSupport: false,
             iconKey: "wechat",
             docsUrl: nil,
@@ -43,7 +43,7 @@ struct ConfigurationScreenTests {
             supportsRemove: true,
             supportsPairing: false,
             supportsLogin: false,
-            guidedSetupKind: "wechat"
+            guidedSetupKind: "wechat-work"
         )
 
         #expect(configurationChannelActionState(entry: telegramEntry, capability: telegramCapability) == .init(primaryAction: .edit, showApproveAction: true))
@@ -54,7 +54,7 @@ struct ConfigurationScreenTests {
     @Test
     func approvePairingRequestIncludesTrimmedCode() {
         let request = buildConfigurationChannelRequest(
-            channelId: "telegram",
+            channelId: .telegram,
             entryId: "telegram:default",
             editableValues: ["accountName": "Support Bot"],
             action: .approvePairing,

@@ -27,7 +27,7 @@ func configurationChannelActionState(
 }
 
 func buildConfigurationChannelRequest(
-    channelId: String,
+    channelId: SupportedChannelId,
     entryId: String?,
     editableValues: [String: String],
     action: NativeConfigurationChannelSheetAction,
@@ -40,7 +40,7 @@ func buildConfigurationChannelRequest(
     }
 
     return SaveChannelEntryRequest(
-        channelId: channelId,
+        channelId: channelId.rawValue,
         entryId: entryId,
         values: values,
         action: action == .approvePairing ? "approve-pairing" : "save"

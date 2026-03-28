@@ -22,11 +22,12 @@ import { EventPublisher } from "./event-publisher.js";
 import { fallbackMutationSyncMeta } from "./mutation-sync.js";
 import { StateStore, type StoredChannelEntryState } from "./state-store.js";
 
-const CHANNEL_ORDER: SupportedChannelId[] = ["telegram", "whatsapp", "feishu", "wechat"];
+const CHANNEL_ORDER: SupportedChannelId[] = ["telegram", "whatsapp", "feishu", "wechat-work", "wechat"];
 const CHANNEL_ENTRY_IDS: Record<SupportedChannelId, string> = {
   telegram: "telegram:default",
   whatsapp: "whatsapp:default",
   feishu: "feishu:default",
+  "wechat-work": "wechat-work:default",
   wechat: "wechat:default"
 };
 
@@ -91,23 +92,33 @@ const CHANNEL_CAPABILITIES: ChannelCapability[] = [
     guidedSetupKind: "feishu"
   },
   {
-    id: "wechat",
-    label: "WeChat workaround",
-    description: "ChillClaw manages the required WeChat plugin and saves the app credentials into OpenClaw.",
-    officialSupport: false,
-    iconKey: "WX",
+    id: "wechat-work",
+    label: "WeChat Work (WeCom)",
+    description: "ChillClaw manages the WeCom plugin and saves the bot credentials into OpenClaw.",
+    officialSupport: true,
+    iconKey: "WC",
     docsUrl: "https://docs.openclaw.ai/cli/config",
     fieldDefs: [
-      { id: "corpId", label: "Corp ID", required: true },
-      { id: "agentId", label: "Agent ID", required: true },
-      { id: "secret", label: "Secret", required: true, secret: true },
-      { id: "token", label: "Webhook token", required: true, secret: true },
-      { id: "encodingAesKey", label: "Encoding AES key", required: true, secret: true }
+      { id: "botId", label: "Bot ID", required: true },
+      { id: "secret", label: "Secret", required: true, secret: true }
     ],
     supportsEdit: true,
     supportsRemove: true,
     supportsPairing: false,
     supportsLogin: false,
+    guidedSetupKind: "wechat-work"
+  },
+  {
+    id: "wechat",
+    label: "WeChat",
+    description: "Personal WeChat uses a separate guided login flow.",
+    officialSupport: false,
+    iconKey: "WX",
+    fieldDefs: [],
+    supportsEdit: false,
+    supportsRemove: false,
+    supportsPairing: false,
+    supportsLogin: true,
     guidedSetupKind: "wechat"
   }
 ];
@@ -119,6 +130,7 @@ function defaultChannelMap(): Record<SupportedChannelId, ChannelSetupState> {
     telegram: defaults.find((channel) => channel.id === "telegram")!,
     whatsapp: defaults.find((channel) => channel.id === "whatsapp")!,
     feishu: defaults.find((channel) => channel.id === "feishu")!,
+    "wechat-work": defaults.find((channel) => channel.id === "wechat-work")!,
     wechat: defaults.find((channel) => channel.id === "wechat")!
   };
 }
@@ -133,6 +145,7 @@ function mergeChannelStates(
     telegram: live.telegram ?? stored?.telegram ?? defaults.telegram,
     whatsapp: live.whatsapp ?? stored?.whatsapp ?? defaults.whatsapp,
     feishu: live.feishu ?? stored?.feishu ?? defaults.feishu,
+    "wechat-work": live["wechat-work"] ?? stored?.["wechat-work"] ?? defaults["wechat-work"],
     wechat: live.wechat ?? stored?.wechat ?? defaults.wechat
   };
 }
@@ -179,11 +192,12 @@ function editableValuesFor(channelId: SupportedChannelId, values: Record<string,
         ...(values.domain?.trim() ? { domain: values.domain.trim() } : { domain: "feishu" }),
         ...(values.botName?.trim() ? { botName: values.botName.trim() } : {})
       };
-    case "wechat":
+    case "wechat-work":
       return {
-        ...(values.corpId?.trim() ? { corpId: values.corpId.trim() } : {}),
-        ...(values.agentId?.trim() ? { agentId: values.agentId.trim() } : {})
+        ...(values.botId?.trim() ? { botId: values.botId.trim() } : {})
       };
+    case "wechat":
+      return {};
     case "whatsapp":
     default:
       return {};
@@ -222,14 +236,13 @@ function maskedSummaryFor(channelId: SupportedChannelId, values: Record<string, 
         ...(values.botName?.trim() ? [{ label: "Bot name", value: values.botName.trim() }] : []),
         ...(values.appSecret?.trim() ? [{ label: "App Secret", value: maskValue(values.appSecret) }] : [])
       ];
-    case "wechat":
+    case "wechat-work":
       return [
-        ...(values.corpId?.trim() ? [{ label: "Corp ID", value: values.corpId.trim() }] : []),
-        ...(values.agentId?.trim() ? [{ label: "Agent ID", value: values.agentId.trim() }] : []),
-        ...(values.secret?.trim() ? [{ label: "Secret", value: maskValue(values.secret) }] : []),
-        ...(values.token?.trim() ? [{ label: "Webhook token", value: maskValue(values.token) }] : []),
-        ...(values.encodingAesKey?.trim() ? [{ label: "Encoding AES key", value: maskValue(values.encodingAesKey) }] : [])
+        ...(values.botId?.trim() ? [{ label: "Bot ID", value: values.botId.trim() }] : []),
+        ...(values.secret?.trim() ? [{ label: "Secret", value: maskValue(values.secret) }] : [])
       ];
+    case "wechat":
+      return [];
   }
 }
 
@@ -371,7 +384,7 @@ export class ChannelSetupService {
   }
 
   async saveEntry(entryId: string | undefined, request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
-    const managedFeatureId = managedFeatureIdForChannel(request.channelId);
+    const managedFeatureId = request.channelId === "wechat-work" ? "channel:wechat" : managedFeatureIdForChannel(request.channelId);
     if (managedFeatureId) {
       const pluginConfig = await this.adapter.plugins.ensureFeatureRequirements(managedFeatureId);
       this.eventPublisher?.publishPluginConfigUpdated(pluginConfig);

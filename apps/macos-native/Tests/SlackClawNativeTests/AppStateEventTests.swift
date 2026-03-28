@@ -42,8 +42,8 @@ struct AppStateEventTests {
         #expect(
             shouldRefreshNativeSectionForEvent(
                 SlackClawEvent.channelSessionUpdated(
-                    channelId: "wechat",
-                    session: .init(id: "session-1", channelId: "wechat", entryId: nil, status: "ready", message: "Ready", logs: [])
+                    channelId: .wechat,
+                    session: .init(id: "session-1", channelId: .wechat, entryId: nil, status: "ready", message: "Ready", logs: [])
                 ),
                 selectedSection: .configuration
             ) == true

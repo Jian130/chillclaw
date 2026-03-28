@@ -581,6 +581,34 @@ struct SlackClawProtocolTests {
     }
 
     @Test
+    func daemonEventUsesSupportedChannelIdForChannelSessionUpdates() throws {
+        let event = SlackClawEvent.channelSessionUpdated(
+            channelId: .wechatWork,
+            session: .init(
+                id: "session-1",
+                channelId: .wechatWork,
+                entryId: "wechat-work:default",
+                status: "ready",
+                message: "Ready",
+                logs: [],
+                launchUrl: nil,
+                inputPrompt: nil
+            )
+        )
+
+        let data = try JSONEncoder.slackClaw.encode(event)
+        let decoded = try JSONDecoder.slackClaw.decode(SlackClawEvent.self, from: data)
+
+        guard case let .channelSessionUpdated(channelId, session) = decoded else {
+            Issue.record("Expected channelSessionUpdated event")
+            return
+        }
+        #expect(channelId == .wechatWork)
+        #expect(session.channelId == .wechatWork)
+        #expect(session.entryId == "wechat-work:default")
+    }
+
+    @Test
     func pluginConfigOverviewAndEventsDecodeManagedPlugins() throws {
         let overviewData = """
         {

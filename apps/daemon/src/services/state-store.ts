@@ -179,10 +179,13 @@ function migrateLegacyWechatChannelOnboarding(state: AppState): AppState {
     : channelOnboarding;
 
   const migratedOnboardingChannel =
-    onboardingChannel?.channelId === "wechat"
+    onboardingChannel
       ? {
           ...onboardingChannel,
-          channelId: "wechat-work"
+          channelId: onboardingChannel.channelId === "wechat" ? "wechat-work" : onboardingChannel.channelId,
+          entryId: onboardingChannel.entryId?.startsWith("wechat:")
+            ? onboardingChannel.entryId.replace(/^wechat(?=:)/, "wechat-work")
+            : onboardingChannel.entryId
         }
       : onboardingChannel;
 

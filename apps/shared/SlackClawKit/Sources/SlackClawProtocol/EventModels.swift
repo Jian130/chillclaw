@@ -39,7 +39,7 @@ public enum SlackClawEvent: Codable, Sendable {
     case gatewayStatus(reachable: Bool, pendingGatewayApply: Bool, summary: String)
     case taskProgress(taskId: String, status: SlackClawTaskProgressStatus, message: String)
     case chatStream(threadId: String, sessionKey: String, payload: ChatStreamEvent)
-    case channelSessionUpdated(channelId: String, session: ChannelSession)
+    case channelSessionUpdated(channelId: SupportedChannelId, session: ChannelSession)
     case configApplied(resource: SlackClawConfigResource, summary: String)
 
     private enum CodingKeys: String, CodingKey {
@@ -119,7 +119,7 @@ public enum SlackClawEvent: Codable, Sendable {
             )
         case "channel.session.updated":
             self = .channelSessionUpdated(
-                channelId: try container.decode(String.self, forKey: .channelId),
+                channelId: try container.decode(SupportedChannelId.self, forKey: .channelId),
                 session: try container.decode(ChannelSession.self, forKey: .session)
             )
         case "config.applied":

@@ -1378,10 +1378,10 @@ struct OnboardingTests {
             )
         )
         let channelEvent = SlackClawEvent.channelSessionUpdated(
-            channelId: "wechat",
+            channelId: .wechat,
             session: .init(
                 id: "session-1",
-                channelId: "wechat",
+                channelId: .wechat,
                 entryId: nil,
                 status: "ready",
                 message: "Ready",

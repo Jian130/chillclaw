@@ -43,6 +43,15 @@ test("state store normalizes legacy wechat channel onboarding state to wechat-wo
           lastUpdatedAt: "2026-03-24T00:03:00.000Z"
         }
       }
+    },
+    onboarding: {
+      draft: {
+        currentStep: "channel",
+        channel: {
+          channelId: "wechat",
+          entryId: "wechat:default"
+        }
+      }
     }
   });
 
@@ -67,4 +76,6 @@ test("state store normalizes legacy wechat channel onboarding state to wechat-wo
     { label: "Agent ID", value: "1000001" }
   ]);
   assert.equal(migrated.channelOnboarding?.entries?.["wechat-work:default"]?.lastUpdatedAt, "2026-03-24T00:03:00.000Z");
+  assert.equal(migrated.onboarding?.draft.channel?.channelId, "wechat-work");
+  assert.equal(migrated.onboarding?.draft.channel?.entryId, "wechat-work:default");
 });

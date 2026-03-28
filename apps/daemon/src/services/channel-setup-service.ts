@@ -409,7 +409,7 @@ export class ChannelSetupService {
       this.eventPublisher?.publishPluginConfigUpdated(workflowPreparation.pluginConfig);
     }
 
-    if (workflowPreparation?.feature.setupKind === "session") {
+    if (workflowPreparation?.feature.setupKind === "session" && request.action === "prepare") {
       return this.saveWorkflowPreparedChannel(request, workflowPreparation);
     }
 

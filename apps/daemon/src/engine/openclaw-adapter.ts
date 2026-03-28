@@ -493,10 +493,14 @@ interface NpmManagedSystemOpenClaw {
 }
 
 interface LoginSessionState {
+  channelId: "whatsapp" | "wechat";
+  entryId: string;
   startedAt: string;
   status: "in-progress" | "awaiting-pairing" | "completed" | "failed";
   logs: string[];
   exitCode?: number;
+  inputPrompt?: string;
+  child?: ReturnType<typeof spawn>;
 }
 
 interface RuntimeModelAuthSession extends ModelAuthSession {
@@ -541,7 +545,7 @@ interface PendingSavedModelEntryOperation {
 
 type CommandFallbackDecision = "retry-with-config" | "hard-fail" | "not-applicable";
 
-let whatsappLoginSession: LoginSessionState | undefined;
+let activeChannelLoginSession: LoginSessionState | undefined;
 const modelAuthSessions = new Map<string, RuntimeModelAuthSession>();
 
 const READ_CACHE_TTL_MS = {
@@ -1476,13 +1480,13 @@ const MODEL_PROVIDER_DEFINITIONS: InternalModelProviderConfig[] = [
 function buildCommandEnv(command?: string, envOverrides?: Record<string, string | undefined>): NodeJS.ProcessEnv {
   const pathEntries = [
     command && command.startsWith("/") ? dirname(command) : undefined,
+    ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
     "/bin",
     "/usr/sbin",
-    "/sbin",
-    ...(process.env.PATH ? process.env.PATH.split(delimiter) : [])
+    "/sbin"
   ].filter((value): value is string => Boolean(value));
 
   const env: NodeJS.ProcessEnv = {
@@ -1589,34 +1593,57 @@ function createChannelState(id: SupportedChannelId, overrides: Partial<ChannelSe
   };
 }
 
-function activeWhatsappSession(): ChannelSession | undefined {
-  if (!whatsappLoginSession) {
+function sessionTitle(channelId: "whatsapp" | "wechat"): string {
+  return channelId === "whatsapp" ? "WhatsApp" : "WeChat";
+}
+
+function sessionRunningMessage(channelId: "whatsapp" | "wechat"): string {
+  return `${sessionTitle(channelId)} login is running.`;
+}
+
+function sessionCompletedMessage(channelId: "whatsapp" | "wechat"): string {
+  return `${sessionTitle(channelId)} login completed.`;
+}
+
+function sessionFailedMessage(channelId: "whatsapp" | "wechat"): string {
+  return `${sessionTitle(channelId)} login failed.`;
+}
+
+function sessionAwaitingMessage(session: LoginSessionState): string {
+  if (session.channelId === "whatsapp") {
+    return "WhatsApp login is waiting for pairing approval.";
+  }
+
+  return session.inputPrompt ? "WeChat login is waiting for follow-up input." : "WeChat login is waiting for QR confirmation.";
+}
+
+function activeChannelSession(): ChannelSession | undefined {
+  if (!activeChannelLoginSession) {
     return undefined;
   }
 
   return {
-    id: "whatsapp:default:login",
-    channelId: "whatsapp",
-    entryId: "whatsapp:default",
+    id: `${activeChannelLoginSession.entryId}:login`,
+    channelId: activeChannelLoginSession.channelId,
+    entryId: activeChannelLoginSession.entryId,
     status:
-      whatsappLoginSession.status === "in-progress"
+      activeChannelLoginSession.status === "in-progress"
         ? "running"
-        : whatsappLoginSession.status === "awaiting-pairing"
-          ? "awaiting-input"
-          : whatsappLoginSession.status,
+        : activeChannelLoginSession.status === "awaiting-pairing"
+          ? activeChannelLoginSession.inputPrompt
+            ? "awaiting-input"
+            : "running"
+          : activeChannelLoginSession.status,
     message:
-      whatsappLoginSession.status === "failed"
-        ? "WhatsApp login failed."
-        : whatsappLoginSession.status === "completed"
-          ? "WhatsApp login completed."
-          : whatsappLoginSession.status === "awaiting-pairing"
-            ? "WhatsApp login is waiting for pairing approval."
-            : "WhatsApp login is running.",
-    logs: whatsappLoginSession.logs.slice(-40),
-    inputPrompt:
-      whatsappLoginSession.status === "awaiting-pairing"
-        ? "Paste the WhatsApp pairing code to finish setup."
-        : undefined
+      activeChannelLoginSession.status === "failed"
+        ? sessionFailedMessage(activeChannelLoginSession.channelId)
+        : activeChannelLoginSession.status === "completed"
+          ? sessionCompletedMessage(activeChannelLoginSession.channelId)
+          : activeChannelLoginSession.status === "awaiting-pairing"
+            ? sessionAwaitingMessage(activeChannelLoginSession)
+            : sessionRunningMessage(activeChannelLoginSession.channelId),
+    logs: activeChannelLoginSession.logs.slice(-40),
+    inputPrompt: activeChannelLoginSession.status === "awaiting-pairing" ? activeChannelLoginSession.inputPrompt : undefined
   };
 }
 
@@ -1628,6 +1655,29 @@ function channelIdFromEntryId(entryId: string): SupportedChannelId {
   }
 
   throw new Error(`Unsupported channel entry id: ${entryId}`);
+}
+
+function runtimeChannelKeys(channelId: SupportedChannelId): string[] {
+  switch (channelId) {
+    case "wechat-work":
+      return ["wechat-work", "wechat"];
+    case "wechat":
+      return [];
+    default:
+      return [channelId];
+  }
+}
+
+function normalizeRuntimeChannelId(channelId: string): SupportedChannelId | undefined {
+  if (channelId === "wechat") {
+    return "wechat-work";
+  }
+
+  if (channelId === "telegram" || channelId === "whatsapp" || channelId === "feishu" || channelId === "wechat-work") {
+    return channelId;
+  }
+
+  return undefined;
 }
 
 async function runOpenClaw(
@@ -1714,6 +1764,24 @@ async function fileExists(pathname: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function resolveCommandFromEnvPath(command: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  if (command.includes("/")) {
+    return (await fileExists(command)) ? command : undefined;
+  }
+
+  for (const entry of (env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    const candidate = resolve(entry, command);
+    try {
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
 }
 
 async function resolveCommandFromPath(command: string): Promise<string | undefined> {
@@ -3697,9 +3765,10 @@ function deriveLiveChannelState(
   list?: OpenClawChannelsListJson,
   status?: OpenClawChannelsStatusJson
 ): ChannelSetupState {
-  const configuredAccounts = list?.chat?.[channelId] ?? [];
-  const channel = status?.channels?.[channelId];
-  const accounts = status?.channelAccounts?.[channelId] ?? [];
+  const runtimeKeys = runtimeChannelKeys(channelId);
+  const configuredAccounts = runtimeKeys.flatMap((key) => list?.chat?.[key] ?? []);
+  const channel = runtimeKeys.map((key) => status?.channels?.[key]).find((entry) => entry !== undefined);
+  const accounts = runtimeKeys.flatMap((key) => status?.channelAccounts?.[key] ?? []);
   const anyConfigured = configuredAccounts.length > 0 || Boolean(channel?.configured) || accounts.some((account) => account.configured);
 
   if (!anyConfigured) {
@@ -3750,23 +3819,25 @@ function buildLiveChannelEntries(
   list?: OpenClawChannelsListJson,
   status?: OpenClawChannelsStatusJson
 ): ConfiguredChannelEntry[] {
-  const channelIds = new Set<string>([
+  const channelIds = new Set<SupportedChannelId>([
     ...Object.keys(list?.chat ?? {}),
     ...Object.keys(status?.channelAccounts ?? {})
-  ]);
+  ].flatMap((channelId) => {
+    const normalized = normalizeRuntimeChannelId(channelId);
+    return normalized ? [normalized] : [];
+  }));
 
   const entries: ConfiguredChannelEntry[] = [];
 
   for (const channelId of channelIds) {
-    if (channelId !== "telegram" && channelId !== "whatsapp" && channelId !== "feishu" && channelId !== "wechat-work" && channelId !== "wechat") {
-      continue;
-    }
-
+    const runtimeKeys = runtimeChannelKeys(channelId);
     const accountIds = new Set<string>([
-      ...(list?.chat?.[channelId] ?? []),
-      ...((status?.channelAccounts?.[channelId] ?? []).map((account) => account.accountId).filter(Boolean) as string[])
+      ...runtimeKeys.flatMap((key) => list?.chat?.[key] ?? []),
+      ...runtimeKeys.flatMap((key) =>
+        ((status?.channelAccounts?.[key] ?? []).map((account) => account.accountId).filter(Boolean) as string[])
+      )
     ]);
-    const accounts = status?.channelAccounts?.[channelId] ?? [];
+    const accounts = runtimeKeys.flatMap((key) => status?.channelAccounts?.[key] ?? []);
     const liveState = deriveLiveChannelState(channelId, list, status);
 
     for (const accountId of accountIds) {
@@ -7058,21 +7129,25 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   async getChannelState(channelId: SupportedChannelId): Promise<ChannelSetupState> {
-    if (channelId === "whatsapp" && whatsappLoginSession) {
-      return createChannelState("whatsapp", {
-        status: whatsappLoginSession.status,
+    if (activeChannelLoginSession?.channelId === channelId) {
+      return createChannelState(channelId, {
+        status: activeChannelLoginSession.status,
         summary:
-          whatsappLoginSession.status === "failed"
-            ? "WhatsApp login session failed."
-            : whatsappLoginSession.status === "completed"
-              ? "WhatsApp login session completed."
-              : whatsappLoginSession.status === "awaiting-pairing"
-                ? "WhatsApp login is waiting for pairing approval."
-                : "WhatsApp login is running.",
+          activeChannelLoginSession.status === "failed"
+            ? `${sessionTitle(channelId)} login session failed.`
+            : activeChannelLoginSession.status === "completed"
+              ? `${sessionTitle(channelId)} login session completed.`
+              : activeChannelLoginSession.status === "awaiting-pairing"
+                ? channelId === "whatsapp"
+                  ? "WhatsApp login is waiting for pairing approval."
+                  : "WeChat login is waiting for QR confirmation."
+                : `${sessionTitle(channelId)} login is running.`,
         detail:
-          whatsappLoginSession.logs.at(-1) ??
-          "Scan the QR code or follow the WhatsApp login instructions shown by OpenClaw.",
-        logs: whatsappLoginSession.logs.slice(-20)
+          activeChannelLoginSession.logs.at(-1) ??
+          (channelId === "whatsapp"
+            ? "Scan the QR code or follow the WhatsApp login instructions shown by OpenClaw."
+            : "Scan the QR code or follow the WeChat installer instructions shown in the session log."),
+        logs: activeChannelLoginSession.logs.slice(-20)
       });
     }
 
@@ -7278,11 +7353,11 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   async getActiveChannelSession(): Promise<ChannelSession | undefined> {
-    return activeWhatsappSession();
+    return activeChannelSession();
   }
 
   async getChannelSession(sessionId: string): Promise<ChannelSession> {
-    const session = activeWhatsappSession();
+    const session = activeChannelSession();
 
     if (!session || session.id !== sessionId) {
       throw new Error("Channel session not found.");
@@ -7294,17 +7369,28 @@ export class OpenClawAdapter implements EngineAdapter {
   async submitChannelSessionInput(sessionId: string, request: ChannelSessionInputRequest): Promise<ChannelSession> {
     const session = await this.getChannelSession(sessionId);
 
-    if (session.channelId !== "whatsapp") {
-      throw new Error("SlackClaw only supports direct channel session input for WhatsApp right now.");
+    if (session.channelId === "whatsapp") {
+      await this.approvePairing("whatsapp", { code: request.value });
+      return (await this.getActiveChannelSession()) ?? {
+        ...session,
+        status: "completed",
+        message: "WhatsApp pairing approved.",
+        logs: [...session.logs, "WhatsApp pairing approved."]
+      };
     }
 
-    await this.approvePairing("whatsapp", { code: request.value });
-    return (await this.getActiveChannelSession()) ?? {
-      ...session,
-      status: "completed",
-      message: "WhatsApp pairing approved.",
-      logs: [...session.logs, "WhatsApp pairing approved."]
-    };
+    if (!activeChannelLoginSession || activeChannelLoginSession.channelId !== "wechat") {
+      throw new Error("WeChat login session not found.");
+    }
+
+    if (activeChannelLoginSession.child?.stdin && !activeChannelLoginSession.child.stdin.destroyed) {
+      activeChannelLoginSession.child.stdin.write(`${request.value}\n`);
+      activeChannelLoginSession.logs.push("Submitted follow-up WeChat input to the installer.");
+    } else {
+      activeChannelLoginSession.logs.push("SlackClaw recorded the WeChat follow-up input, but the installer is no longer accepting stdin.");
+    }
+
+    return (await this.getActiveChannelSession()) ?? session;
   }
 
   private async saveChannelEntry(
@@ -7350,10 +7436,16 @@ export class OpenClawAdapter implements EngineAdapter {
       case "wechat-work":
         return this.configureWechatWorkaround({
           botId: request.values.botId ?? "",
-          secret: request.values.secret ?? "",
+          secret: request.values.secret ?? ""
         });
       case "wechat":
-        throw new Error("Personal WeChat setup is not available through the generic credential form.");
+        {
+          const result = await this.startWechatLogin();
+          return {
+            ...result,
+            session: await this.getActiveChannelSession()
+          };
+        }
       default:
         throw new Error("Unsupported channel.");
     }
@@ -7372,7 +7464,7 @@ export class OpenClawAdapter implements EngineAdapter {
         throw new Error(remove.stderr || remove.stdout || "SlackClaw could not remove the WhatsApp configuration.");
       }
 
-      whatsappLoginSession = undefined;
+      activeChannelLoginSession = undefined;
     } else if (channelId === "telegram") {
       const remove = await this.runMutationWithConfigFallback({
         commandArgs: ["channels", "remove", "--channel", "telegram", "--account", "default", "--delete"],
@@ -7415,6 +7507,7 @@ export class OpenClawAdapter implements EngineAdapter {
         throw new Error(remove.result.stderr || remove.result.stdout || "SlackClaw could not remove the WeChat configuration.");
       }
     } else {
+      activeChannelLoginSession = undefined;
       await this.removeChannelConfig("wechat");
     }
 
@@ -7784,7 +7877,7 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   private async startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
-    if (whatsappLoginSession?.status === "in-progress") {
+    if (activeChannelLoginSession?.channelId === "whatsapp" && activeChannelLoginSession.status === "in-progress") {
       return {
         message: "WhatsApp login is already running.",
         channel: await this.getChannelState("whatsapp")
@@ -7796,10 +7889,13 @@ export class OpenClawAdapter implements EngineAdapter {
     });
     await this.restartGatewayAndRequireHealthy("WhatsApp configuration");
 
-    whatsappLoginSession = {
+    activeChannelLoginSession = {
+      channelId: "whatsapp",
+      entryId: "whatsapp:default",
       startedAt: new Date().toISOString(),
       status: "in-progress",
-      logs: ["Starting WhatsApp login. OpenClaw may print a QR code or pairing instructions here."]
+      logs: ["Starting WhatsApp login. OpenClaw may print a QR code or pairing instructions here."],
+      inputPrompt: "Paste the WhatsApp pairing code to finish setup."
     };
 
     const command = await resolveOpenClawCommand();
@@ -7813,9 +7909,10 @@ export class OpenClawAdapter implements EngineAdapter {
     const child = spawn(command, loginArgs, {
       env: buildCommandEnv(command)
     });
+    activeChannelLoginSession.child = child;
 
     const pushLog = (text: string) => {
-      if (!whatsappLoginSession) {
+      if (!activeChannelLoginSession || activeChannelLoginSession.channelId !== "whatsapp") {
         return;
       }
 
@@ -7823,9 +7920,9 @@ export class OpenClawAdapter implements EngineAdapter {
         .split(/\r?\n/)
         .map((line) => line.trimEnd())
         .filter(Boolean);
-      whatsappLoginSession.logs.push(...lines);
-      whatsappLoginSession.logs = whatsappLoginSession.logs.slice(-40);
-      whatsappLoginSession.status = "awaiting-pairing";
+      activeChannelLoginSession.logs.push(...lines);
+      activeChannelLoginSession.logs = activeChannelLoginSession.logs.slice(-40);
+      activeChannelLoginSession.status = "awaiting-pairing";
     };
 
     child.stdout.on("data", (chunk) => {
@@ -7837,23 +7934,23 @@ export class OpenClawAdapter implements EngineAdapter {
     });
 
     child.on("error", (error) => {
-      if (!whatsappLoginSession) {
+      if (!activeChannelLoginSession || activeChannelLoginSession.channelId !== "whatsapp") {
         return;
       }
 
-      whatsappLoginSession.status = "failed";
-      whatsappLoginSession.logs.push(`Failed to start WhatsApp login: ${error instanceof Error ? error.message : String(error)}`);
+      activeChannelLoginSession.status = "failed";
+      activeChannelLoginSession.logs.push(`Failed to start WhatsApp login: ${error instanceof Error ? error.message : String(error)}`);
       void writeErrorLog("WhatsApp login session failed to start.", errorToLogDetails(error));
     });
 
     child.on("exit", (code) => {
-      if (!whatsappLoginSession) {
+      if (!activeChannelLoginSession || activeChannelLoginSession.channelId !== "whatsapp") {
         return;
       }
 
-      whatsappLoginSession.exitCode = code ?? 1;
-      whatsappLoginSession.status = code === 0 ? "awaiting-pairing" : "failed";
-      whatsappLoginSession.logs.push(
+      activeChannelLoginSession.exitCode = code ?? 1;
+      activeChannelLoginSession.status = code === 0 ? "awaiting-pairing" : "failed";
+      activeChannelLoginSession.logs.push(
         code === 0
           ? "WhatsApp login command finished. If pairing is pending, approve the code below."
           : `WhatsApp login command exited with code ${code ?? 1}.`
@@ -7876,9 +7973,9 @@ export class OpenClawAdapter implements EngineAdapter {
       throw new Error(result.stderr || result.stdout || `SlackClaw could not approve the ${channelId} pairing code.`);
     }
 
-    if (channelId === "whatsapp" && whatsappLoginSession) {
-      whatsappLoginSession.status = "completed";
-      whatsappLoginSession.logs.push("WhatsApp pairing approved.");
+    if (channelId === "whatsapp" && activeChannelLoginSession?.channelId === "whatsapp") {
+      activeChannelLoginSession.status = "completed";
+      activeChannelLoginSession.logs.push("WhatsApp pairing approved.");
     }
 
     const label = channelId === "telegram" ? "Telegram" : channelId === "whatsapp" ? "WhatsApp" : "Feishu";
@@ -7930,6 +8027,115 @@ export class OpenClawAdapter implements EngineAdapter {
         detail: "The managed WeCom plugin is configured. Apply pending gateway changes to make it live."
       }),
       requiresGatewayApply: true
+    };
+  }
+
+  private async startWechatLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
+    if (activeChannelLoginSession?.channelId === "wechat" && activeChannelLoginSession.status === "in-progress") {
+      return {
+        message: "WeChat login is already running.",
+        channel: await this.getChannelState("wechat")
+      };
+    }
+
+    const env = buildCommandEnv();
+    const command = (await resolveCommandFromEnvPath("npx", env)) ?? "npx";
+
+    const installerArgs = ["-y", "@tencent-weixin/openclaw-weixin-cli@latest", "install"];
+    logExternalCommand(command, installerArgs);
+    const child = spawn(command, installerArgs, {
+      env
+    });
+    let settleStartup: (() => void) | undefined;
+    const startupReady = new Promise<void>((resolve) => {
+      settleStartup = resolve;
+    });
+    const startupTimer = setTimeout(() => {
+      settleStartup?.();
+      settleStartup = undefined;
+    }, 200);
+
+    activeChannelLoginSession = {
+      channelId: "wechat",
+      entryId: "wechat:default",
+      startedAt: new Date().toISOString(),
+      status: "in-progress",
+      logs: [
+        `Running installer: ${["npx", ...installerArgs].join(" ")}`,
+        "Starting the personal WeChat installer.",
+        "Follow the QR code and login guidance printed below."
+      ],
+      child
+    };
+
+    const pushLog = (text: string) => {
+      if (!activeChannelLoginSession || activeChannelLoginSession.channelId !== "wechat") {
+        return;
+      }
+
+      const lines = text
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter(Boolean);
+      if (lines.length === 0) {
+        return;
+      }
+      activeChannelLoginSession.logs.push(...lines);
+      activeChannelLoginSession.logs = activeChannelLoginSession.logs.slice(-40);
+      activeChannelLoginSession.status = "awaiting-pairing";
+      settleStartup?.();
+      settleStartup = undefined;
+    };
+
+    child.stdout.on("data", (chunk) => {
+      pushLog(chunk.toString());
+    });
+
+    child.stderr.on("data", (chunk) => {
+      pushLog(chunk.toString());
+    });
+
+    child.on("error", (error) => {
+      if (!activeChannelLoginSession || activeChannelLoginSession.channelId !== "wechat") {
+        return;
+      }
+
+      activeChannelLoginSession.status = "failed";
+      activeChannelLoginSession.logs.push(`Failed to start WeChat login: ${error instanceof Error ? error.message : String(error)}`);
+      settleStartup?.();
+      settleStartup = undefined;
+      void writeErrorLog("WeChat login session failed to start.", errorToLogDetails(error));
+    });
+
+    child.on("exit", (code) => {
+      if (!activeChannelLoginSession || activeChannelLoginSession.channelId !== "wechat") {
+        return;
+      }
+
+      activeChannelLoginSession.exitCode = code ?? 1;
+      activeChannelLoginSession.child = undefined;
+      activeChannelLoginSession.status = code === 0 ? "awaiting-pairing" : "failed";
+      activeChannelLoginSession.logs.push(
+        code === 0
+          ? "WeChat installer finished. If login is still pending, continue following the QR or log instructions above."
+          : `WeChat installer exited with code ${code ?? 1}.`
+      );
+      settleStartup?.();
+      settleStartup = undefined;
+    });
+
+    await startupReady.finally(() => {
+      clearTimeout(startupTimer);
+    });
+
+    return {
+      message:
+        "SlackClaw started the personal WeChat installer. Follow the QR-first login instructions in the channel session log.",
+      channel: createChannelState("wechat", {
+        status: "awaiting-pairing",
+        summary: "Personal WeChat login started.",
+        detail: "Follow the QR-first WeChat installer logs, then complete any remaining confirmation steps from the session."
+      })
     };
   }
 

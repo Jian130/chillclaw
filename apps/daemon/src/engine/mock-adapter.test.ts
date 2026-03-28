@@ -94,6 +94,27 @@ test("mock adapter supports generic channel save and remove flows", async () => 
   assert.equal((await adapter.config.getChannelState("telegram")).status, "not-started");
 });
 
+test("mock adapter keeps wechat-work credentials distinct from personal wechat session login", async () => {
+  const adapter = new MockAdapter();
+
+  const wechatWork = await adapter.config.saveChannelEntry({
+    channelId: "wechat-work",
+    action: "save",
+    values: { botId: "1000001", secret: "secret-value" }
+  });
+  const personalWechat = await adapter.config.saveChannelEntry({
+    channelId: "wechat",
+    action: "save",
+    values: {}
+  });
+
+  assert.equal(wechatWork.channel.id, "wechat-work");
+  assert.equal(wechatWork.session, undefined);
+  assert.ok(personalWechat.session);
+  assert.equal(personalWechat.session?.channelId, "wechat");
+  assert.equal(personalWechat.session?.logs.some((line) => /qr|scan/i.test(line)), true);
+});
+
 test("mock adapter supports target-specific uninstall flows", async () => {
   const adapter = new MockAdapter();
 

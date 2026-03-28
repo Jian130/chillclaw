@@ -206,16 +206,23 @@ test("channel setup routes WeChat Work through plugin prerequisites and personal
     action: "save",
     values: {}
   });
+  const sessionId = personalWechat.session?.id;
+  const sessionDetail = sessionId ? await service.getSession(sessionId) : undefined;
+  const sessionAfterInput = sessionId ? await service.submitSessionInput(sessionId, { value: "confirm" }) : undefined;
   const state = await store.read();
 
   assert.equal(wechatWork.status, "completed");
   assert.deepEqual(adapter.ensureCalls, ["channel:wechat-work"]);
-  assert.deepEqual(configSaveCalls, [{ channelId: "wechat-work", action: "save" }]);
-  assert.equal(personalWechat.status, "completed");
-  assert.match(personalWechat.message, /installer|guided login/i);
-  assert.equal(personalWechat.channelConfig.entries.some((entry) => entry.channelId === "wechat"), false);
-  assert.equal(state.channelOnboarding?.channels.wechat.status, "ready");
-  assert.equal(state.channelOnboarding?.entries?.["wechat:default"], undefined);
+  assert.deepEqual(configSaveCalls, [
+    { channelId: "wechat-work", action: "save" },
+    { channelId: "wechat", action: "save" }
+  ]);
+  assert.equal(personalWechat.status, "interactive");
+  assert.equal(personalWechat.session?.channelId, "wechat");
+  assert.equal(sessionDetail?.session.channelId, "wechat");
+  assert.equal(sessionAfterInput?.session.channelId, "wechat");
+  assert.equal(state.channelOnboarding?.channels.wechat.status, "awaiting-pairing");
+  assert.ok(state.channelOnboarding?.entries?.["wechat:default"]);
 });
 
 test("channel setup publishes snapshot and session events for save and input flows", async () => {

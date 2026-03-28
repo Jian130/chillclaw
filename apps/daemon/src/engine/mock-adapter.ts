@@ -1182,8 +1182,33 @@ export class MockAdapter implements EngineAdapter {
     return this.activeChannelSession;
   }
 
-  async submitChannelSessionInput(_sessionId: string, _request: ChannelSessionInputRequest): Promise<ChannelSession> {
-    throw new Error("Mock channel sessions do not accept direct input.");
+  async submitChannelSessionInput(sessionId: string, request: ChannelSessionInputRequest): Promise<ChannelSession> {
+    if (!this.activeChannelSession || this.activeChannelSession.id !== sessionId) {
+      throw new Error("Mock channel session not found.");
+    }
+
+    if (this.activeChannelSession.channelId === "whatsapp") {
+      await this.approvePairing("whatsapp", { code: request.value });
+      return this.activeChannelSession;
+    }
+
+    if (this.activeChannelSession.channelId === "wechat") {
+      this.activeChannelSession = {
+        ...this.activeChannelSession,
+        status: "completed",
+        message: "Mock WeChat login confirmed.",
+        logs: [...this.activeChannelSession.logs, `Mock WeChat input received: ${request.value}`]
+      };
+      this.channels.wechat = {
+        ...this.channels.wechat,
+        status: "completed",
+        summary: "Mock WeChat login completed.",
+        detail: "Mock mode marked the QR-first WeChat flow as completed."
+      };
+      return this.activeChannelSession;
+    }
+
+    throw new Error("Mock channel sessions only support WhatsApp or WeChat.");
   }
 
   private async saveChannelEntry(
@@ -1226,10 +1251,16 @@ export class MockAdapter implements EngineAdapter {
       case "wechat-work":
         return this.configureWechatWorkaround({
           botId: request.values.botId ?? "",
-          secret: request.values.secret ?? "",
+          secret: request.values.secret ?? ""
         });
       case "wechat":
-        throw new Error("Mock personal WeChat setup is not available through the generic credential form.");
+        {
+          const result = await this.startWechatLogin();
+          return {
+            ...result,
+            session: this.activeChannelSession
+          };
+        }
       default:
         throw new Error("Unsupported mock channel.");
     }
@@ -1697,6 +1728,27 @@ export class MockAdapter implements EngineAdapter {
     };
     this.markGatewayApplyPending();
     return { message: "Mock WeChat Work configured.", channel: this.channels["wechat-work"], requiresGatewayApply: true };
+  }
+
+  private async startWechatLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
+    this.channels.wechat = {
+      ...this.channels.wechat,
+      status: "awaiting-pairing",
+      summary: "Mock WeChat login started.",
+      detail: "Pretend the installer printed a QR code, then optionally submit follow-up input through the session."
+    };
+    this.activeChannelSession = {
+      id: "wechat:default:login",
+      channelId: "wechat",
+      entryId: "wechat:default",
+      status: "running",
+      message: "Mock WeChat login started.",
+      logs: [
+        "Mock WeChat installer started.",
+        "Scan the QR code from the installer output to continue."
+      ]
+    };
+    return { message: "Mock WeChat login started.", channel: this.channels.wechat };
   }
 
   async startGatewayAfterChannels(): Promise<{ message: string; engineStatus: EngineStatus }> {

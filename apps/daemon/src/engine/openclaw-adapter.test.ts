@@ -300,6 +300,7 @@ async function withFakeOpenClaw(
     failTelegramChannelsAdd?: boolean;
     failFeishuConfigSet?: boolean;
     failWechatConfigSet?: boolean;
+    legacyWechatRuntime?: boolean;
     pluginInstalled?: boolean;
     pluginEnabled?: boolean;
     pluginUpdateAvailable?: boolean;
@@ -320,6 +321,8 @@ async function withFakeOpenClaw(
   const pluginInstalledMarkerPath = join(tempDir, "plugin-installed.txt");
   const pluginEnabledMarkerPath = join(tempDir, "plugin-enabled.txt");
   const pluginUpdateMarkerPath = join(tempDir, "plugin-update-marker.txt");
+  const binDir = join(tempDir, "bin");
+  const npxPath = join(binDir, "npx");
   const agentDirPath = join(tempDir, "main-agent");
   const dataDir = join(tempDir, "data");
   const binaryPath = join(dataDir, "openclaw-runtime", "node_modules", ".bin", "openclaw");
@@ -338,6 +341,7 @@ async function withFakeOpenClaw(
   const failTelegramChannelsAdd = options?.failTelegramChannelsAdd === true;
   const failFeishuConfigSet = options?.failFeishuConfigSet === true;
   const failWechatConfigSet = options?.failWechatConfigSet === true;
+  const legacyWechatRuntime = options?.legacyWechatRuntime === true;
   const pluginInstalled = options?.pluginInstalled === true;
   const pluginEnabled = options?.pluginEnabled === true;
   const pluginUpdateAvailable = options?.pluginUpdateAvailable === true;
@@ -357,7 +361,21 @@ async function withFakeOpenClaw(
     await writeFile(pluginUpdateMarkerPath, "1\n");
   }
   await mkdir(agentDirPath, { recursive: true });
+  await mkdir(binDir, { recursive: true });
   await mkdir(join(dataDir, "openclaw-runtime", "node_modules", ".bin"), { recursive: true });
+  await writeFile(
+    npxPath,
+    `#!/bin/sh
+echo "$0 $*" >> "$OPENCLAW_TEST_LOG"
+if [ "$1" = "-y" ] && [ "$2" = "@tencent-weixin/openclaw-weixin-cli@latest" ] && [ "$3" = "install" ]; then
+  echo 'Installing WeChat runtime helper'
+  echo 'Scan the QR code from WeChat on your phone to continue.'
+  exit 0
+fi
+exit 1
+`
+  );
+  await chmod(npxPath, 0o755);
   await writeFile(
     binaryPath,
     `#!/bin/sh
@@ -403,9 +421,17 @@ EOF
   echo 'Open this URL to continue sign-in: https://auth.openai.example/authorize'
   sleep 0.1
 elif [ "$1" = "channels" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
-  echo '{"chat":{"telegram":["default"]}}'
+  if [ "${legacyWechatRuntime ? "1" : "0"}" = "1" ]; then
+    echo '{"chat":{"wechat":["default"]}}'
+  else
+    echo '{"chat":{"telegram":["default"]}}'
+  fi
 elif [ "$1" = "channels" ] && [ "$2" = "status" ] && [ "$3" = "--json" ] && [ "$4" = "--probe" ]; then
-  echo '{"channels":{"telegram":{"configured":true,"running":true,"linked":true}},"channelAccounts":{"telegram":[{"accountId":"default","configured":true,"linked":true,"probe":{"bot":{"username":"support_bot"}}}]}}'
+  if [ "${legacyWechatRuntime ? "1" : "0"}" = "1" ]; then
+    echo '{"channels":{"wechat":{"configured":true,"running":true,"linked":true}},"channelAccounts":{"wechat":[{"accountId":"default","configured":true,"linked":true}]}}'
+  else
+    echo '{"channels":{"telegram":{"configured":true,"running":true,"linked":true}},"channelAccounts":{"telegram":[{"accountId":"default","configured":true,"linked":true,"probe":{"bot":{"username":"support_bot"}}}]}}'
+  fi
 elif [ "$1" = "plugins" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
   if [ -f "$OPENCLAW_TEST_PLUGIN_INSTALLED_MARKER" ]; then
     plugin_status="ready"
@@ -473,11 +499,7 @@ fi
   );
   await chmod(binaryPath, 0o755);
 
-  if (originalPath === undefined) {
-    delete process.env.PATH;
-  } else {
-    process.env.PATH = originalPath;
-  }
+  process.env.PATH = originalPath ? `${binDir}:${originalPath}` : binDir;
   process.env.SLACKCLAW_DATA_DIR = dataDir;
   process.env.OPENCLAW_TEST_LOG = logPath;
   process.env.OPENCLAW_TEST_VERSION_FILE = versionPath;
@@ -664,6 +686,23 @@ test("OpenClaw channel reads reuse one list and one probe across channel state a
   });
 });
 
+test("legacy runtime wechat channel state is normalized to wechat-work", async () => {
+  await withFakeOpenClaw(async ({ adapter }) => {
+    const entries = await adapter.getConfiguredChannelEntries();
+    const legacyEntry = entries.find((entry) => entry.id === "wechat-work:default");
+    const wechatWorkState = await adapter.getChannelState("wechat-work");
+    const personalWechatState = await adapter.getChannelState("wechat");
+
+    assert.ok(legacyEntry);
+    assert.equal(legacyEntry.channelId, "wechat-work");
+    assert.equal(entries.some((entry) => entry.channelId === "wechat"), false);
+    assert.equal(wechatWorkState.status, "completed");
+    assert.equal(personalWechatState.status, "not-started");
+  }, {
+    legacyWechatRuntime: true
+  });
+});
+
 test("configureTelegram falls back to direct config writes when the command path rejects telegram", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath, configPath }) => {
     const result = await adapter.config.saveChannelEntry({
@@ -828,8 +867,30 @@ test("configureWechatWorkaround falls back to direct config writes when config s
     assert.equal(saved?.enabled, true);
     assert.equal(saved?.botId, "bot-id");
     assert.equal(saved?.secret, "corp-secret");
+    assert.equal("corpId" in (saved ?? {}), false);
   }, {
     failWechatConfigSet: true
+  });
+});
+
+test("personal WeChat runs the installer command and starts a channel session log flow", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath }) => {
+    const result = await adapter.config.saveChannelEntry({
+      channelId: "wechat",
+      action: "save",
+      values: {}
+    });
+    const commands = await readCommands(logPath);
+
+    assert.ok(result.session);
+    assert.equal(result.session?.channelId, "wechat");
+    assert.match(result.session?.message ?? "", /wechat login|qr/i);
+    assert.equal(result.session?.logs.some((line) => /qr code|scan/i.test(line)), true);
+    assert.equal(
+      result.session?.logs.some((line) => line.includes("npx -y @tencent-weixin/openclaw-weixin-cli@latest install")),
+      true
+    );
+    assert.equal(commands.some((command) => command.startsWith("plugins install ")), false);
   });
 });
 

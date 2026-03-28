@@ -172,6 +172,52 @@ test("wechat work setup auto-installs the managed plugin without persisting a ra
   assert.equal(pluginConfig.entries[0]?.activeDependentCount, 1);
 });
 
+test("channel setup routes WeChat Work through plugin prerequisites and personal WeChat through installer preparation", async () => {
+  class RecordingAdapter extends MockAdapter {
+    ensureCalls: string[] = [];
+
+    override async ensureFeatureRequirements(featureId: string) {
+      this.ensureCalls.push(featureId);
+      return super.ensureFeatureRequirements(featureId);
+    }
+  }
+
+  const adapter = new RecordingAdapter();
+  const configSaveCalls: Array<{ channelId: string; action?: string }> = [];
+  const originalSave = adapter.config.saveChannelEntry.bind(adapter.config);
+  adapter.config.saveChannelEntry = async (request) => {
+    configSaveCalls.push({ channelId: request.channelId, action: request.action });
+    return originalSave(request);
+  };
+
+  const { service, store } = createServices("channel-setup-wechat-branching", { adapter });
+
+  const wechatWork = await service.saveEntry(undefined, {
+    channelId: "wechat-work",
+    action: "save",
+    values: {
+      botId: "1000001",
+      secret: "secret-value"
+    }
+  });
+
+  const personalWechat = await service.saveEntry(undefined, {
+    channelId: "wechat",
+    action: "save",
+    values: {}
+  });
+  const state = await store.read();
+
+  assert.equal(wechatWork.status, "completed");
+  assert.deepEqual(adapter.ensureCalls, ["channel:wechat-work"]);
+  assert.deepEqual(configSaveCalls, [{ channelId: "wechat-work", action: "save" }]);
+  assert.equal(personalWechat.status, "completed");
+  assert.match(personalWechat.message, /installer|guided login/i);
+  assert.equal(personalWechat.channelConfig.entries.some((entry) => entry.channelId === "wechat"), false);
+  assert.equal(state.channelOnboarding?.channels.wechat.status, "ready");
+  assert.equal(state.channelOnboarding?.entries?.["wechat:default"], undefined);
+});
+
 test("channel setup publishes snapshot and session events for save and input flows", async () => {
   class InteractiveMockAdapter extends MockAdapter {
     override async submitChannelSessionInput(sessionId: string) {

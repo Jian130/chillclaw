@@ -15,10 +15,10 @@ import type {
 import { createDefaultProductOverview } from "@slackclaw/contracts";
 
 import type { EngineAdapter } from "../engine/adapter.js";
-import { managedFeatureIdForChannel } from "../config/managed-plugins.js";
 import { channelSecretName, NoopSecretsAdapter, type SecretsAdapter } from "../platform/secrets-adapter.js";
 import type { AppState } from "./state-store.js";
 import { EventPublisher } from "./event-publisher.js";
+import { FeatureWorkflowService, type FeaturePreparationResult } from "./feature-workflow-service.js";
 import { fallbackMutationSyncMeta } from "./mutation-sync.js";
 import { StateStore, type StoredChannelEntryState } from "./state-store.js";
 
@@ -313,12 +313,32 @@ function gatewaySummary(
   return "All channel setup steps are complete.";
 }
 
+function workflowMessage(result: FeaturePreparationResult): string {
+  const installer = result.prerequisites.find((prerequisite) => prerequisite.type === "external-installer");
+  if (!installer) {
+    return `${result.feature.label} prerequisites are ready.`;
+  }
+
+  return `${installer.displayName} is queued. Personal WeChat will continue through the guided login flow on the existing channel session transport.`;
+}
+
+function workflowDetail(result: FeaturePreparationResult): string {
+  return result.prerequisites
+    .map((prerequisite) =>
+      prerequisite.type === "openclaw-plugin"
+        ? `${prerequisite.displayName} is ready.`
+        : `${prerequisite.displayName} queued: ${prerequisite.command.join(" ")}`
+    )
+    .join(" ");
+}
+
 export class ChannelSetupService {
   constructor(
     private readonly adapter: EngineAdapter,
     private readonly store: StateStore,
     private readonly eventPublisher?: EventPublisher,
-    private readonly secrets: SecretsAdapter = new NoopSecretsAdapter()
+    private readonly secrets: SecretsAdapter = new NoopSecretsAdapter(),
+    private readonly featureWorkflowService: FeatureWorkflowService = new FeatureWorkflowService(adapter)
   ) {}
 
   async getOverviewFromState(state?: AppState): Promise<ChannelSetupOverview> {
@@ -384,10 +404,13 @@ export class ChannelSetupService {
   }
 
   async saveEntry(entryId: string | undefined, request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
-    const managedFeatureId = managedFeatureIdForChannel(request.channelId);
-    if (managedFeatureId) {
-      const pluginConfig = await this.adapter.plugins.ensureFeatureRequirements(managedFeatureId);
-      this.eventPublisher?.publishPluginConfigUpdated(pluginConfig);
+    const workflowPreparation = await this.featureWorkflowService.prepareChannel(request.channelId);
+    if (workflowPreparation?.pluginConfig) {
+      this.eventPublisher?.publishPluginConfigUpdated(workflowPreparation.pluginConfig);
+    }
+
+    if (workflowPreparation?.feature.setupKind === "session") {
+      return this.saveWorkflowPreparedChannel(request, workflowPreparation);
     }
 
     const result = await this.adapter.config.saveChannelEntry({ ...request, entryId });
@@ -537,6 +560,43 @@ export class ChannelSetupService {
     return {
       session,
       channelConfig: await this.getConfigOverview()
+    };
+  }
+
+  private async saveWorkflowPreparedChannel(
+    request: SaveChannelEntryRequest,
+    workflowPreparation: FeaturePreparationResult
+  ): Promise<ChannelConfigActionResponse> {
+    const now = new Date().toISOString();
+    const channelId = request.channelId;
+    const nextState = await this.store.update((current) => ({
+      ...current,
+      channelOnboarding: {
+        baseOnboardingCompletedAt: current.channelOnboarding?.baseOnboardingCompletedAt ?? now,
+        gatewayStartedAt: current.channelOnboarding?.gatewayStartedAt,
+        channels: {
+          ...mergeChannelStates(current.channelOnboarding?.channels, {}),
+          [channelId]: {
+            ...mergeChannelStates(current.channelOnboarding?.channels, {})[channelId],
+            status: "ready",
+            summary: `${workflowPreparation.feature.label} prerequisites are ready.`,
+            detail: workflowDetail(workflowPreparation),
+            lastUpdatedAt: now
+          }
+        },
+        entries: current.channelOnboarding?.entries ?? {}
+      }
+    }));
+
+    const channelConfig = await this.getConfigOverview(nextState);
+    const sync = this.eventPublisher?.publishChannelConfigUpdated(channelConfig) ?? fallbackMutationSyncMeta();
+
+    return {
+      ...sync,
+      status: "completed",
+      message: workflowMessage(workflowPreparation),
+      channelConfig,
+      requiresGatewayApply: false
     };
   }
 

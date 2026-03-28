@@ -46,3 +46,46 @@ test("plugin service blocks removal while WeChat still depends on the managed pl
 
   await assert.rejects(() => service.removePlugin("wecom"), /still required/i);
 });
+
+test("plugin service excludes non-plugin-backed managed features from the overview", async () => {
+  class MixedOverviewAdapter extends MockAdapter {
+    override async getPluginConfigOverview() {
+      const overview = await super.getPluginConfigOverview();
+      return {
+        entries: [
+          ...overview.entries,
+          {
+            id: "wechat-personal",
+            label: "WeChat Personal Installer",
+            packageSpec: "npx -y @tencent-weixin/openclaw-weixin-cli@latest install",
+            runtimePluginId: "wechat-personal-installer",
+            configKey: "wechat-personal-installer",
+            status: "ready" as const,
+            summary: "Installer is ready.",
+            detail: "This is an external installer, not an OpenClaw plugin.",
+            enabled: true,
+            installed: true,
+            hasUpdate: false,
+            hasError: false,
+            activeDependentCount: 1,
+            dependencies: [
+              {
+                id: "channel:wechat",
+                label: "WeChat",
+                kind: "channel" as const,
+                summary: "Personal WeChat guided login depends on this installer.",
+                active: true
+              }
+            ]
+          }
+        ]
+      };
+    }
+  }
+
+  const service = new PluginService(new MixedOverviewAdapter());
+  const overview = await service.getConfigOverview();
+
+  assert.deepEqual(overview.entries.map((entry) => entry.id), ["wecom"]);
+  assert.equal(overview.entries.some((entry) => entry.dependencies.some((dependency) => dependency.id === "channel:wechat")), false);
+});

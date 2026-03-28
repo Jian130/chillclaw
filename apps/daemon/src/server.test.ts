@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import type { AppState } from "./services/state-store.js";
 import {
@@ -160,4 +162,12 @@ test("runtime uninstall reset clears setup and channel onboarding state but pres
   assert.equal(next.introCompletedAt, current.introCompletedAt);
   assert.deepEqual(next.tasks, current.tasks);
   assert.deepEqual(next.skills, current.skills);
+});
+
+test("server keeps channel session transport instead of adding a workflow-session API", async () => {
+  const source = await readFile(resolve(process.cwd(), "apps/daemon/src/server.ts"), "utf8");
+
+  assert.match(source, /\/api\/channels\/session\//);
+  assert.doesNotMatch(source, /\/api\/workflow-session\//);
+  assert.doesNotMatch(source, /\/api\/workflows\/session\//);
 });

@@ -1,4 +1,4 @@
-export type ManagedFeatureId = "channel:wechat-work";
+import type { ManagedFeatureId } from "./managed-features.js";
 
 export interface ManagedPluginDefinition {
   id: string;
@@ -42,13 +42,4 @@ export function managedPluginDefinitionById(pluginId: string): ManagedPluginDefi
 
 export function managedPluginDefinitionForFeature(featureId: ManagedFeatureId): ManagedPluginDefinition | undefined {
   return managedPluginDefinitions.find((plugin) => plugin.dependencies.some((dependency) => dependency.id === featureId));
-}
-
-export function managedFeatureIdForChannel(channelId: string): ManagedFeatureId | undefined {
-  switch (channelId) {
-    case "wechat-work":
-      return "channel:wechat-work";
-    default:
-      return undefined;
-  }
 }

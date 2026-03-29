@@ -615,7 +615,7 @@ struct NativeOnboardingView: View {
                                 )
                             }
 
-                            NativeOnboardingActionButton(variant: .primary) {
+                            NativeOnboardingActionButton(variant: nativeOnboardingForwardActionVariant()) {
                                 Task {
                                     if installViewState.kind == .found {
                                         await viewModel.useExistingInstall()
@@ -972,13 +972,15 @@ struct NativeOnboardingView: View {
                                 .frame(maxWidth: .infinity)
 
                                 NativeOnboardingActionButton(
-                                    variant: .primary,
+                                    variant: nativeOnboardingForwardActionVariant(),
                                     disabled: viewModel.modelBusy == "save" || requiredModelFieldsMissing(viewModel.selectedMethod, values: viewModel.modelValues)
                                 ) {
                                     Task { await viewModel.saveModel() }
                                 } label: {
                                     if viewModel.modelBusy == "save" {
-                                        ProgressView().controlSize(.small)
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .tint(.white)
                                     } else {
                                         Text(viewModel.copy.modelSave)
                                             .font(.system(size: 15, weight: .semibold))
@@ -1020,7 +1022,7 @@ struct NativeOnboardingView: View {
                                         )
                                 )
 
-                                NativeOnboardingActionButton(variant: .primary) {
+                                NativeOnboardingActionButton(variant: nativeOnboardingForwardActionVariant()) {
                                     Task { await viewModel.advancePastModel() }
                                 } label: {
                                     Text(viewModel.copy.next)
@@ -1052,7 +1054,7 @@ struct NativeOnboardingView: View {
                         .font(.system(size: 15, weight: .semibold))
                 }
 
-                NativeOnboardingActionButton(variant: .primary, disabled: viewModel.permissionsNextBusy) {
+                NativeOnboardingActionButton(variant: nativeOnboardingForwardActionVariant(), disabled: viewModel.permissionsNextBusy) {
                     Task { await viewModel.advancePastPermissions() }
                 } label: {
                     HStack(spacing: 10) {
@@ -1307,7 +1309,7 @@ struct NativeOnboardingView: View {
                             }
 
                             NativeOnboardingActionButton(
-                                variant: .primary,
+                                variant: nativeOnboardingForwardActionVariant(),
                                 disabled: viewModel.channelPrimaryActionBusy || (viewModel.activeChannelSession?.inputPrompt != nil
                                     ? viewModel.channelSessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     : viewModel.isSelectedChannelMissingRequiredValues())
@@ -1606,7 +1608,7 @@ struct NativeOnboardingView: View {
 
     private var createEmployeeButton: some View {
         NativeOnboardingActionButton(
-            variant: .primary,
+            variant: nativeOnboardingForwardActionVariant(),
             disabled: viewModel.selectedEmployeePreset == nil
                 || viewModel.selectedBrainEntryId == nil
                 || viewModel.employeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1616,7 +1618,9 @@ struct NativeOnboardingView: View {
             Task { await viewModel.createEmployee() }
         } label: {
             if viewModel.employeeBusy {
-                ProgressView().controlSize(.small)
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
             } else {
                 Text(viewModel.copy.createEmployee)
                     .font(.system(size: 15, weight: .semibold))

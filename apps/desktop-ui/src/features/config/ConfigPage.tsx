@@ -206,18 +206,6 @@ export function activeSavedModelEntries(
   return savedEntries.filter((entry) => runtimeKeys.has(entry.modelKey));
 }
 
-export function inactiveSavedModelEntries(
-  savedEntries: SavedModelEntry[],
-  runtimeModels: Array<{ key: string }>
-) {
-  const runtimeKeys = new Set(runtimeModels.map((model) => model.key));
-  return savedEntries.filter((entry) => !runtimeKeys.has(entry.modelKey));
-}
-
-export function showInactiveSavedEntries(runtimeModelCount: number, inactiveEntryCount: number) {
-  return runtimeModelCount === 0 && inactiveEntryCount > 0;
-}
-
 export const providerIcon = providerFallbackGlyph;
 export const MODEL_KEY_CUSTOM_OPTION = "__custom_model_key__";
 
@@ -269,12 +257,12 @@ export function applyModelEntryRole(role: ModelEntryRole): { makeDefault: boolea
   };
 }
 
-export function defaultModelEntryRole(savedEntries: SavedModelEntry[], initialEntry?: SavedModelEntry): ModelEntryRole {
+export function defaultModelEntryRole(liveConfiguredModelCount: number, initialEntry?: SavedModelEntry): ModelEntryRole {
   if (initialEntry) {
     return resolveModelEntryRole(Boolean(initialEntry.isDefault), Boolean(initialEntry.isFallback));
   }
 
-  return savedEntries.length === 0 ? "default" : "normal";
+  return liveConfiguredModelCount === 0 ? "default" : "normal";
 }
 
 export function validateModelEntryDraft(
@@ -394,13 +382,10 @@ function ModelDialog(props: {
   const provider = props.modelConfig?.providers.find((item) => item.id === providerId);
   const method = provider?.authMethods.find((item) => item.id === methodId);
   const models = modelOptions(props.modelConfig, provider);
+  const runtimeModels = useMemo(() => runtimeConfiguredModels(props.modelConfig), [props.modelConfig]);
   const selectedModelValue = modelSelectValue(models, modelKey);
   const showCustomModelInput = models.length === 0 || selectedModelValue === MODEL_KEY_CUSTOM_OPTION;
   const isEdit = Boolean(props.initialEntry);
-  const savedEntries = useMemo(
-    () => (props.modelConfig?.savedEntries ?? []).filter((entry) => !entry.id.startsWith("runtime:")),
-    [props.modelConfig?.savedEntries]
-  );
   const validationError = validateModelEntryDraft(method, values, resolveModelEntryRole(makeDefault, useAsFallback));
 
   useEffect(() => {
@@ -415,11 +400,11 @@ function ModelDialog(props: {
     setValues({});
     setSession(undefined);
     setSessionInput("");
-    const nextRole = defaultModelEntryRole(savedEntries, props.initialEntry);
+    const nextRole = defaultModelEntryRole(runtimeModels.length, props.initialEntry);
     const nextFlags = applyModelEntryRole(nextRole);
     setMakeDefault(nextFlags.makeDefault);
     setUseAsFallback(nextFlags.useAsFallback);
-  }, [props.initialEntry, props.open, savedEntries]);
+  }, [props.initialEntry, props.open, runtimeModels.length]);
 
   useEffect(() => {
     if (!props.open || !provider) {
@@ -1103,9 +1088,7 @@ export default function ConfigPage() {
   const runtimeModels = runtimeConfiguredModels(modelConfig);
   const runtimeModelsByKey = new Map(runtimeModels.map((model) => [model.key, model]));
   const runtimeManagedEntries = activeSavedModelEntries(savedEntries, runtimeModels);
-  const inactiveEntries = inactiveSavedModelEntries(savedEntries, runtimeModels);
   const runtimeOnlyModels = runtimeModels.filter((model) => !runtimeManagedEntries.some((entry) => entry.modelKey === model.key));
-  const showSavedEntriesSection = showInactiveSavedEntries(runtimeModels.length, inactiveEntries.length);
   const configuredChannels = channelConfig?.entries ?? [];
   const modelBusy = busy.startsWith("models:");
 
@@ -1300,63 +1283,7 @@ export default function ConfigPage() {
             </Card>
           ) : null}
 
-          {showSavedEntriesSection ? (
-            <Card>
-              <CardContent className="panel-stack">
-                <div>
-                  <strong>{copy.savedEntriesTitle}</strong>
-                  <p className="card__description">{copy.savedEntriesBody}</p>
-                </div>
-                <div className="panel-stack">
-                  {inactiveEntries.map((entry) => {
-                    const provider = modelConfig?.providers.find((item) => item.id === entry.providerId);
-                    const authLabel = entryAuthLabel(entry);
-
-                    return (
-                      <div className="configured-model-card" key={entry.id}>
-                        <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
-                          <div className="actions-row">
-                            <ProviderLogo label={provider?.label ?? entry.providerId} providerId={entry.providerId} />
-                            <div className="provider-details">
-                              <strong>{entry.label}</strong>
-                              <span className="card__description">{provider?.label ?? entry.providerId}</span>
-                              <div className="actions-row">
-                                <Badge tone="info">{entry.modelKey}</Badge>
-                                {authLabel ? <Badge tone="neutral">{authLabel}</Badge> : null}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="actions-row">
-                            <Button
-                              onClick={() => {
-                                setSelectedModelEntry(entry);
-                                setModelDialogOpen(true);
-                              }}
-                              variant="outline"
-                            >
-                              Edit
-                            </Button>
-                            <Button disabled={modelBusy && busy !== `models:remove:${entry.id}`} loading={busy === `models:remove:${entry.id}`} onClick={() => void handleRemoveModelEntry(entry)} variant="outline">
-                              <Trash2 size={14} />
-                              {busy === `models:remove:${entry.id}` ? "Removing..." : "Remove"}
-                            </Button>
-                            {provider?.docsUrl ? (
-                              <Button onClick={() => window.open(provider.docsUrl, "_blank", "noopener,noreferrer")} variant="outline">
-                                <ExternalLink size={14} />
-                                {copy.docs}
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {!runtimeManagedEntries.length && !runtimeOnlyModels.length && !inactiveEntries.length ? (
+          {!runtimeManagedEntries.length && !runtimeOnlyModels.length ? (
             <EmptyState
               title={copy.modelsEmptyTitle}
               description={copy.modelsEmptyBody}

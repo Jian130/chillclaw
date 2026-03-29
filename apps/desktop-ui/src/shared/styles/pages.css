@@ -2383,7 +2383,8 @@
 }
 
 .onboarding-install-cta.button--primary,
-.onboarding-install-next.button--primary {
+.onboarding-install-next.button--primary,
+.onboarding-primary-action.button--primary {
   min-height: var(--onboarding-cta-height);
   border-radius: var(--onboarding-feature-radius);
   font-size: 15px;
@@ -2400,13 +2401,21 @@
   background: linear-gradient(90deg, var(--primary-strong) 0%, var(--accent-strong) 100%);
 }
 
-.onboarding-install-next.button--primary {
-  background: var(--ink-deep);
-  box-shadow: none;
+.onboarding-primary-action.button--primary {
+  border-color: color-mix(in srgb, var(--primary-strong) 46%, var(--accent-strong));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary-bright) 78%, white) 0%,
+    var(--primary) 48%,
+    color-mix(in srgb, var(--accent-strong) 86%, var(--primary-bright)) 100%
+  );
+  box-shadow: var(--shadow-primary-bright), var(--shadow-inset-highlight-soft);
 }
 
-.onboarding-install-next.button--primary:hover {
-  background: color-mix(in srgb, var(--ink-deep) 92%, transparent);
+.onboarding-primary-action.button--primary:hover {
+  border-color: color-mix(in srgb, var(--primary-strong) 58%, var(--accent-strong));
+  background: linear-gradient(135deg, var(--primary-bright) 0%, var(--primary-strong) 48%, var(--accent-strong) 100%);
+  box-shadow: var(--shadow-primary-hero-strong), var(--shadow-inset-highlight);
 }
 
 .onboarding-install-button__content {

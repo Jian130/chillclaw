@@ -31,6 +31,7 @@ enum SurfaceCardTone: Equatable {
 
 enum ActionButtonVariant: Equatable {
     case primary
+    case onboardingProminent
     case secondary
     case outline
     case ghost

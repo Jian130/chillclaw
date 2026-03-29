@@ -383,6 +383,70 @@ function channelStateFromSession(
   };
 }
 
+function liveOnlyChannelStates(
+  live: Partial<Record<SupportedChannelId, ChannelSetupState>>,
+  activeSession?: ChannelSession
+): Record<SupportedChannelId, ChannelSetupState> {
+  const channels = mergeChannelStates(undefined, live);
+
+  if (activeSession) {
+    channels[activeSession.channelId] = channelStateFromSession(activeSession, channels[activeSession.channelId]);
+  }
+
+  return channels;
+}
+
+function pruneHistoricalChannelState(
+  current: AppState,
+  liveChannels: Partial<Record<SupportedChannelId, ChannelSetupState>>,
+  liveEntries: ConfiguredChannelEntry[],
+  activeSession?: ChannelSession
+): AppState {
+  const currentOnboarding = current.channelOnboarding;
+  if (!currentOnboarding) {
+    return current;
+  }
+
+  const liveEntryIds = new Set(liveEntries.map((entry) => entry.id));
+  const liveChannelIds = new Set(liveEntries.map((entry) => entry.channelId));
+  const sessionChannelId = activeSession?.channelId;
+  const mergedChannels = mergeChannelStates(currentOnboarding.channels, liveChannels);
+  const defaults = defaultChannelMap();
+  const nextEntriesRecord = Object.fromEntries(
+    Object.entries(currentOnboarding.entries ?? {}).filter(([, entry]) => liveEntryIds.has(entry.id) || entry.channelId === sessionChannelId)
+  );
+  const nextEntries = Object.keys(nextEntriesRecord).length > 0 ? nextEntriesRecord : undefined;
+  const nextChannels = Object.fromEntries(
+    CHANNEL_ORDER.map((channelId) => {
+      if (sessionChannelId === channelId && activeSession) {
+        return [channelId, channelStateFromSession(activeSession, mergedChannels[channelId])] as const;
+      }
+
+      if (liveChannelIds.has(channelId)) {
+        return [channelId, mergedChannels[channelId]] as const;
+      }
+
+      return [channelId, defaults[channelId]] as const;
+    })
+  ) as Record<SupportedChannelId, ChannelSetupState>;
+
+  if (
+    JSON.stringify(nextEntries ?? {}) === JSON.stringify(currentOnboarding.entries ?? {}) &&
+    JSON.stringify(nextChannels) === JSON.stringify(currentOnboarding.channels)
+  ) {
+    return current;
+  }
+
+  return {
+    ...current,
+    channelOnboarding: {
+      ...currentOnboarding,
+      channels: nextChannels,
+      entries: nextEntries
+    }
+  };
+}
+
 export class ChannelSetupService {
   constructor(
     private readonly adapter: EngineAdapter,
@@ -414,26 +478,20 @@ export class ChannelSetupService {
     const current = state ?? (await this.store.read());
     const liveChannels = await this.readLiveChannelStates();
     const liveEntries = await this.adapter.config.getConfiguredChannelEntries();
+    const activeSession = await this.adapter.gateway.getActiveChannelSession();
     const engine = await this.adapter.instances.status();
-    const channels = mergeChannelStates(current.channelOnboarding?.channels, liveChannels);
+    let effectiveState = pruneHistoricalChannelState(current, liveChannels, liveEntries, activeSession);
+    if (JSON.stringify(effectiveState) !== JSON.stringify(current)) {
+      effectiveState = await this.store.update(() => effectiveState);
+    }
+
+    const channels = liveOnlyChannelStates(liveChannels, activeSession);
     const onboardingCompleted = true;
-    const storedEntries = current.channelOnboarding?.entries ?? {};
+    const storedEntries = effectiveState.channelOnboarding?.entries ?? {};
     const entriesById = new Map<string, ConfiguredChannelEntry>();
 
     for (const liveEntry of liveEntries) {
       entriesById.set(liveEntry.id, mergeLiveAndStoredEntry(liveEntry, storedEntries[liveEntry.id]));
-    }
-
-    for (const channelId of CHANNEL_ORDER) {
-      const record = storedEntries[entryIdFor(channelId)] ?? legacyEntryFromState(channels[channelId]);
-      const fallbackEntry = record ? buildEntry(record, channels[channelId]) : undefined;
-      if (!fallbackEntry) {
-        continue;
-      }
-
-      if (!entriesById.has(fallbackEntry.id)) {
-        entriesById.set(fallbackEntry.id, fallbackEntry);
-      }
     }
 
     const entries = [...entriesById.values()].sort((left, right) => {
@@ -449,7 +507,7 @@ export class ChannelSetupService {
       baseOnboardingCompleted: onboardingCompleted,
       capabilities: CHANNEL_CAPABILITIES,
       entries,
-      activeSession: await this.adapter.gateway.getActiveChannelSession(),
+      activeSession,
       gatewaySummary: gatewaySummary(engine.pendingGatewayApply === true, engine.pendingGatewayApplySummary, channels)
     };
   }

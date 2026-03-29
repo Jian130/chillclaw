@@ -136,4 +136,143 @@ struct ConfigurationScreenTests {
         #expect(source.contains("label = existingEntry.label"))
         #expect(source.contains("modelKey = existingEntry.modelKey"))
     }
+
+    @Test
+    func configurationScreenShowsOnlyLiveManagedModelsAndRuntimeOnlyModels() {
+        let savedEntry = SavedModelEntry(
+            id: "saved-anthropic",
+            label: "Claude Opus 4.6",
+            providerId: "anthropic",
+            modelKey: "anthropic/claude-opus-4-6",
+            agentId: "main",
+            authMethodId: nil,
+            authModeLabel: nil,
+            profileLabel: nil,
+            isDefault: true,
+            isFallback: false,
+            createdAt: "2026-03-18T00:00:00.000Z",
+            updatedAt: "2026-03-18T00:00:00.000Z"
+        )
+        let staleEntry = SavedModelEntry(
+            id: "saved-openai",
+            label: "OpenAI GPT-5",
+            providerId: "openai",
+            modelKey: "openai/gpt-5",
+            agentId: "main",
+            authMethodId: nil,
+            authModeLabel: nil,
+            profileLabel: nil,
+            isDefault: false,
+            isFallback: false,
+            createdAt: "2026-03-18T00:00:00.000Z",
+            updatedAt: "2026-03-18T00:00:00.000Z"
+        )
+        let runtimePlaceholder = SavedModelEntry(
+            id: "runtime:minimax-minimax-chat",
+            label: "MiniMax Chat",
+            providerId: "minimax",
+            modelKey: "minimax/minimax-chat",
+            agentId: "main",
+            authMethodId: nil,
+            authModeLabel: "API key",
+            profileLabel: nil,
+            isDefault: false,
+            isFallback: true,
+            createdAt: "2026-03-18T00:00:00.000Z",
+            updatedAt: "2026-03-18T00:00:00.000Z"
+        )
+        let config = makeConfigurationModelConfig(savedEntries: [savedEntry, staleEntry, runtimePlaceholder], configuredModelKeys: [
+            "anthropic/claude-opus-4-6",
+            "minimax/minimax-chat"
+        ])
+
+        #expect(nativeManagedConfiguredModelEntries(config).map(\.id) == ["saved-anthropic"])
+        #expect(nativeRuntimeOnlyModels(config).map(\.key) == ["minimax/minimax-chat"])
+    }
+
+    @Test
+    func newModelDefaultsOnlyWhenNoLiveModelIsConfigured() {
+        #expect(nativeShouldDefaultNewModelEntry(makeConfigurationModelConfig(configuredModelKeys: [])))
+        #expect(!nativeShouldDefaultNewModelEntry(makeConfigurationModelConfig(configuredModelKeys: ["anthropic/claude-opus-4-6"])))
+    }
+}
+
+private func makeConfigurationModelConfig(
+    savedEntries: [SavedModelEntry] = [],
+    configuredModelKeys: [String]
+) -> ModelConfigOverview {
+    ModelConfigOverview(
+        providers: [
+            ModelProviderConfig(
+                id: "anthropic",
+                label: "Anthropic",
+                description: "Anthropic models",
+                docsUrl: "https://docs.openclaw.ai/providers/anthropic",
+                providerRefs: ["anthropic/"],
+                authMethods: [],
+                configured: !configuredModelKeys.filter { $0.hasPrefix("anthropic/") }.isEmpty,
+                modelCount: 1,
+                sampleModels: ["anthropic/claude-opus-4-6"]
+            ),
+            ModelProviderConfig(
+                id: "minimax",
+                label: "MiniMax",
+                description: "MiniMax models",
+                docsUrl: "https://docs.openclaw.ai/providers/minimax",
+                providerRefs: ["minimax/"],
+                authMethods: [],
+                configured: !configuredModelKeys.filter { $0.hasPrefix("minimax/") }.isEmpty,
+                modelCount: 1,
+                sampleModels: ["minimax/minimax-chat"]
+            ),
+            ModelProviderConfig(
+                id: "openai",
+                label: "OpenAI",
+                description: "OpenAI models",
+                docsUrl: "https://docs.openclaw.ai/providers/openai",
+                providerRefs: ["openai/"],
+                authMethods: [],
+                configured: !configuredModelKeys.filter { $0.hasPrefix("openai/") }.isEmpty,
+                modelCount: 1,
+                sampleModels: ["openai/gpt-5"]
+            )
+        ],
+        models: [
+            ModelCatalogEntry(
+                key: "anthropic/claude-opus-4-6",
+                name: "Claude Opus 4.6",
+                input: "text+image",
+                contextWindow: 977000,
+                local: false,
+                available: true,
+                tags: configuredModelKeys.contains("anthropic/claude-opus-4-6") ? ["default", "configured"] : [],
+                missing: false
+            ),
+            ModelCatalogEntry(
+                key: "minimax/minimax-chat",
+                name: "MiniMax Chat",
+                input: "text",
+                contextWindow: 256000,
+                local: false,
+                available: true,
+                tags: configuredModelKeys.contains("minimax/minimax-chat") ? ["fallback#1", "configured"] : [],
+                missing: false
+            ),
+            ModelCatalogEntry(
+                key: "openai/gpt-5",
+                name: "GPT-5",
+                input: "text",
+                contextWindow: 400000,
+                local: false,
+                available: true,
+                tags: configuredModelKeys.contains("openai/gpt-5") ? ["configured"] : [],
+                missing: false
+            )
+        ],
+        defaultModel: configuredModelKeys.first,
+        configuredModelKeys: configuredModelKeys,
+        savedEntries: savedEntries,
+        defaultEntryId: savedEntries.first?.id,
+        fallbackEntryIds: savedEntries.dropFirst().map(\.id)
+    )
 }

@@ -147,7 +147,10 @@ export class OnboardingService {
     return this.buildStateResponse(state);
   }
 
-  async updateState(request: UpdateOnboardingStateRequest): Promise<OnboardingStateResponse> {
+  async updateState(
+    request: UpdateOnboardingStateRequest,
+    options?: { responseSummaryMode?: "draft" | "resolved" }
+  ): Promise<OnboardingStateResponse> {
     let reuseDraftSummary = false;
     const nextState = await this.store.update((current) => {
       const existingDraft = current.onboarding?.draft ?? defaultOnboardingDraftState();
@@ -184,7 +187,10 @@ export class OnboardingService {
     const presetSkillSync = this.presetSkillService
       ? await this.presetSkillService.getOverview()
       : undefined;
-    const summary = reuseDraftSummary ? this.buildDraftSummary(draft) : await this.buildSummary(draft);
+    const summary =
+      options?.responseSummaryMode === "draft" || reuseDraftSummary
+        ? this.buildDraftSummary(draft)
+        : await this.buildSummary(draft);
 
     return {
       firstRun: {
@@ -387,15 +393,18 @@ export class OnboardingService {
 
   async saveEmployeeDraft(employee: OnboardingEmployeeState): Promise<OnboardingStateResponse> {
     const { draft } = await this.readResolvedDraftState();
-    const summary = await this.buildSummary(draft);
-    if (!this.isChannelStaged(draft) || !summary.channel?.entryId) {
+    if (!this.isChannelStaged(draft) || !draft.channel?.entryId) {
       throw new Error("Finish staging the first channel before naming the AI employee.");
     }
 
-    return this.updateState({
-      currentStep: "employee",
-      employee: normalizedEmployeeState(employee)
-    });
+    // Employee autosave should stay lightweight and rely on the already-staged draft state.
+    return this.updateState(
+      {
+        currentStep: "employee",
+        employee: normalizedEmployeeState(employee)
+      },
+      { responseSummaryMode: "draft" }
+    );
   }
 
   async resetModelDraft(): Promise<OnboardingStateResponse> {

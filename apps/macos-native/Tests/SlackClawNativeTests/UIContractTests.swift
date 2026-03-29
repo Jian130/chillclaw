@@ -52,6 +52,11 @@ struct UIContractTests {
     }
 
     @Test
+    func onboardingForwardActionsMapToProminentNativeCTAStyle() {
+        #expect(nativeOnboardingActionButtonVariant(nativeOnboardingForwardActionVariant()) == .onboardingProminent)
+    }
+
+    @Test
     func onboardingProgressAndSelectionStatesMapToSharedSemantics() {
         #expect(nativeOnboardingProgressState(active: true, complete: false) == .active)
         #expect(nativeOnboardingProgressState(active: false, complete: true) == .complete)

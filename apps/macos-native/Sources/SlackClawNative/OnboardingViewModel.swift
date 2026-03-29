@@ -118,6 +118,14 @@ private func onboardingWechatSessionIsAwaitingVisibleQRCode(_ session: ChannelSe
     return !onboardingWechatSessionHasVisibleQRCode(session)
 }
 
+private func onboardingWechatSessionIsAwaitingCompletion(_ session: ChannelSession?) -> Bool {
+    guard let session, session.channelId == .wechat, session.inputPrompt == nil else {
+        return false
+    }
+
+    return session.status == "running"
+}
+
 func isRecoverableOnboardingCompletionTimeout(_ error: Error) -> Bool {
     if error is CancellationError {
         return false
@@ -317,20 +325,28 @@ final class NativeOnboardingViewModel {
     }
 
     var channelPrimaryActionBusy: Bool {
-        channelBusy || (selectedChannelSetupVariant == .wechatGuided && onboardingWechatSessionIsAwaitingVisibleQRCode(activeChannelSession))
+        channelBusy || (selectedChannelSetupVariant == .wechatGuided && onboardingWechatSessionIsAwaitingCompletion(activeChannelSession))
     }
 
     var channelPrimaryActionLabel: String {
         if activeChannelSession?.inputPrompt != nil {
-            return "Submit Session Input"
+            return copy.channelSessionSubmitInput
         }
 
         if selectedChannelSetupVariant == .wechatGuided {
-            if channelPrimaryActionBusy {
-                return activeChannelSession == nil ? "Starting WeChat Login" : "Waiting for QR Code"
+            if let activeChannelSession,
+               onboardingWechatSessionIsAwaitingCompletion(activeChannelSession)
+            {
+                return onboardingWechatSessionIsAwaitingVisibleQRCode(activeChannelSession)
+                    ? copy.channelWechatWaitingForQR
+                    : copy.channelWechatWaitingForConfirmation
             }
 
-            return activeChannelSession == nil ? "Start WeChat Login" : "Restart WeChat Login"
+            if channelBusy {
+                return copy.channelWechatStartingLogin
+            }
+
+            return activeChannelSession == nil ? copy.channelWechatStartLogin : copy.channelWechatRestartLogin
         }
 
         return copy.channelSaveContinue

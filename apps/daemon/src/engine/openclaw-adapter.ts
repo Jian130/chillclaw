@@ -580,6 +580,7 @@ const READ_CACHE_TTL_MS = {
 type ReadCacheEntry = {
   expiresAt: number;
   promise: Promise<unknown>;
+  settled: boolean;
 };
 
 type CommandResolutionCacheEntry = {
@@ -656,7 +657,18 @@ function invalidateReadCache(...prefixes: string[]): void {
 
   for (const key of [...readCache.keys()]) {
     if (prefixes.some((prefix) => key.startsWith(prefix))) {
-      readCache.delete(key);
+      const entry = readCache.get(key);
+      if (!entry) {
+        continue;
+      }
+
+      // Preserve in-flight reads so overlapping fresh requests share the same
+      // snapshot load instead of stampeding the OpenClaw CLI.
+      if (entry.settled) {
+        readCache.delete(key);
+      } else {
+        entry.expiresAt = 0;
+      }
     }
   }
 }
@@ -689,24 +701,38 @@ async function readThroughCache<T>(
   const now = Date.now();
   const existing = readCache.get(key);
 
-  if (!options?.fresh && existing && existing.expiresAt > now) {
-    return existing.promise as Promise<T>;
+  if (existing) {
+    if (!existing.settled) {
+      return existing.promise as Promise<T>;
+    }
+    if (!options?.fresh && existing.expiresAt > now) {
+      return existing.promise as Promise<T>;
+    }
   }
 
-  let promise: Promise<T>;
-  promise = Promise.resolve()
+  const entry: ReadCacheEntry = {
+    expiresAt: now + ttlMs,
+    promise: Promise.resolve(),
+    settled: false
+  };
+
+  const promise = Promise.resolve()
     .then(loader)
     .catch((error) => {
       if (readCache.get(key)?.promise === promise) {
         readCache.delete(key);
       }
       throw error;
+    })
+    .finally(() => {
+      entry.settled = true;
+      if (entry.expiresAt <= Date.now() && readCache.get(key)?.promise === promise) {
+        readCache.delete(key);
+      }
     });
 
-  readCache.set(key, {
-    expiresAt: now + ttlMs,
-    promise
-  });
+  entry.promise = promise;
+  readCache.set(key, entry);
 
   return promise;
 }
@@ -3576,16 +3602,9 @@ export function reconcileSavedEntriesWithRuntime(
 
   const defaultEntryId = activeEntries[0]?.id;
   const fallbackEntryIds = activeEntries.slice(1).map((entry) => entry.id);
-  const allEntries = [...entries];
-
-  for (const entry of activeEntries) {
-    if (!allEntries.some((item) => item.id === entry.id)) {
-      allEntries.push(entry);
-    }
-  }
 
   return {
-    entries: allEntries.map((entry) => ({
+    entries: activeEntries.map((entry) => ({
       ...entry,
       isDefault: entry.id === defaultEntryId,
       isFallback: fallbackEntryIds.includes(entry.id)
@@ -7670,12 +7689,31 @@ export class OpenClawAdapter implements EngineAdapter {
       if (!remove.usedFallback && remove.result.code !== 0) {
         throw new Error(remove.result.stderr || remove.result.stdout || "SlackClaw could not remove the WeChat configuration.");
       }
-    } else {
+    } else if (channelId === "wechat") {
+      const remove = await this.runMutationWithConfigFallback({
+        commandArgs: ["channels", "remove", "--channel", PERSONAL_WECHAT_RUNTIME_CHANNEL_KEY, "--account", "default", "--delete"],
+        fallbackDescription: "channels.wechat remove",
+        fallbackPatterns: [
+          "Unknown channel",
+          "does not support delete",
+          "plugins.allow is empty"
+        ],
+        applyFallback: async () => {
+          await this.removeChannelConfig(PERSONAL_WECHAT_RUNTIME_CHANNEL_KEY);
+        }
+      });
+
+      if (!remove.usedFallback && remove.result.code !== 0) {
+        throw new Error(remove.result.stderr || remove.result.stdout || "SlackClaw could not remove the WeChat configuration.");
+      }
+
       activeChannelLoginSession = undefined;
-      await this.removeChannelConfig("wechat");
+    } else {
+      await this.removeChannelConfig(String(channelId));
     }
 
     await this.markGatewayApplyPending();
+    invalidateReadCache("channels:");
 
     return {
       message: appendGatewayApplyMessage(

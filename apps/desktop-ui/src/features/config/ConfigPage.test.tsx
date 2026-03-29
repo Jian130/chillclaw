@@ -13,7 +13,6 @@ import {
   entryAuthLabel,
   feishuDirectLinks,
   feishuGuideSteps,
-  inactiveSavedModelEntries,
   MODEL_KEY_CUSTOM_OPTION,
   modelSelectValue,
   modelOptions,
@@ -22,7 +21,6 @@ import {
   providerIcon,
   runtimeConfiguredModels,
   shouldCloseChannelDialogAfterAction,
-  showInactiveSavedEntries,
   resolveModelEntryRole,
   validateModelEntryDraft
 } from "./ConfigPage.js";
@@ -178,7 +176,7 @@ describe("ConfigPage helpers", () => {
     ).toEqual(["openai/gpt-5", "openai/gpt-4.1", "openai/gpt-4o-mini"]);
   });
 
-  it("splits saved model entries into active runtime entries and inactive saved entries", () => {
+  it("keeps only saved model entries that still match the live runtime", () => {
     const runtimeModels = runtimeConfiguredModels({
       ...modelConfig,
       models: [
@@ -222,13 +220,6 @@ describe("ConfigPage helpers", () => {
     ];
 
     expect(activeSavedModelEntries(savedEntries, runtimeModels).map((entry) => entry.id)).toEqual(["saved-anthropic"]);
-    expect(inactiveSavedModelEntries(savedEntries, runtimeModels).map((entry) => entry.id)).toEqual(["saved-openai"]);
-  });
-
-  it("hides inactive saved entries from the main models view when live runtime models already exist", () => {
-    expect(showInactiveSavedEntries(1, 1)).toBe(false);
-    expect(showInactiveSavedEntries(1, 0)).toBe(false);
-    expect(showInactiveSavedEntries(0, 1)).toBe(true);
   });
 
   it("falls back to provider sample models when the runtime has none for that provider", () => {
@@ -250,23 +241,9 @@ describe("ConfigPage helpers", () => {
     expect(modelSelectValue(models, "openai/custom-preview-model")).toBe(MODEL_KEY_CUSTOM_OPTION);
   });
 
-  it("defaults the first saved entry to default and later entries to normal", () => {
-    expect(defaultModelEntryRole([])).toBe("default");
-    expect(
-      defaultModelEntryRole([
-        {
-          id: "saved-openai",
-          label: "OpenAI GPT-5",
-          providerId: "openai",
-          modelKey: "openai/gpt-5",
-          agentId: "main",
-          isDefault: true,
-          isFallback: false,
-          createdAt: "2026-03-18T00:00:00.000Z",
-          updatedAt: "2026-03-18T00:00:00.000Z"
-        }
-      ])
-    ).toBe("normal");
+  it("defaults a new entry only when no live runtime model is configured", () => {
+    expect(defaultModelEntryRole(0)).toBe("default");
+    expect(defaultModelEntryRole(1)).toBe("normal");
   });
 
   it("uses stable provider glyphs for known providers", () => {

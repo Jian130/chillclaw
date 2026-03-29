@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-03-29 20:26 CST
+
+- changed Configuration in the daemon, React UI, and native macOS UI to show only models and channels that are currently live in OpenClaw, pruning stale historical model and channel state during refresh while keeping active interactive channel sessions separate from configured entries
+- fixed overlapping fresh model reads so concurrent dashboard and configuration refreshes reuse the same in-flight OpenClaw model snapshot instead of repeating `models list --all --json`, and added fallback cleanup for personal WeChat removal when the upstream runtime rejects delete
+- improved onboarding reliability by keeping personal WeChat in a waiting-for-scan state until login actually completes, speeding up AI employee creation by avoiding heavy autosave rebuilds, and updating onboarding model/channel consumers to recover cleanly from pruned live-only configuration entries
+- polished onboarding across web and native clients with clearer install copy in English, Chinese, Japanese, Korean, and Spanish, stronger onboarding-only primary Next button styling, and lighter native loading-card treatment plus supporting regression coverage
+
 ### 2026-03-29 14:32 CST
 
 - moved curated onboarding AI employee preset presentation and bundled preset-skill ownership into the daemon `ai-member-presets` catalog, made onboarding config selector-only, deleted the separate preset-skill definition file, and stopped first-run install from treating onboarding preset-skill sync as a blocking setup step

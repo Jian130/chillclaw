@@ -134,6 +134,172 @@ test("channel config overview includes live configured entries even without stor
   assert.ok(overview.entries.some((entry) => entry.id === "whatsapp:default"));
 });
 
+test("channel config overview prunes stale stored entries that are no longer live", async () => {
+  const adapter = new MockAdapter();
+  const mockChannels = adapter as unknown as {
+    channels: Record<string, { id: string; title: string; status: string; summary: string; detail: string; lastUpdatedAt?: string }>;
+  };
+  mockChannels.channels.telegram = {
+    ...mockChannels.channels.telegram,
+    status: "completed",
+    summary: "Telegram is configured in OpenClaw.",
+    detail: "OpenClaw detected an existing Telegram bot.",
+    lastUpdatedAt: new Date().toISOString()
+  };
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/channel-setup-prune-stale-${randomUUID()}.json`);
+  const store = new StateStore(filePath);
+  await store.update((current) => ({
+    ...current,
+    channelOnboarding: {
+      baseOnboardingCompletedAt: new Date().toISOString(),
+      gatewayStartedAt: undefined,
+      channels: {
+        telegram: mockChannels.channels.telegram as never,
+        whatsapp: {
+          id: "whatsapp",
+          title: "WhatsApp",
+          officialSupport: true,
+          status: "completed",
+          summary: "Old WhatsApp state",
+          detail: "Should be pruned."
+        },
+        feishu: {
+          id: "feishu",
+          title: "Feishu (飞书)",
+          officialSupport: true,
+          status: "not-started",
+          summary: "Not started",
+          detail: "Not started"
+        },
+        "wechat-work": {
+          id: "wechat-work",
+          title: "WeChat Work",
+          officialSupport: true,
+          status: "not-started",
+          summary: "Not started",
+          detail: "Not started"
+        },
+        wechat: {
+          id: "wechat",
+          title: "WeChat",
+          officialSupport: false,
+          status: "not-started",
+          summary: "Not started",
+          detail: "Not started"
+        }
+      },
+      entries: {
+        "whatsapp:default": {
+          id: "whatsapp:default",
+          channelId: "whatsapp",
+          label: "Old WhatsApp",
+          editableValues: {},
+          maskedConfigSummary: [],
+          lastUpdatedAt: "2026-03-18T00:00:00.000Z"
+        }
+      }
+    }
+  }));
+
+  const service = new ChannelSetupService(adapter, store);
+  const overview = await service.getConfigOverview();
+  const state = await store.read();
+
+  assert.deepEqual(overview.entries.map((entry) => entry.id), ["telegram:default"]);
+  assert.equal(state.channelOnboarding?.entries?.["whatsapp:default"], undefined);
+  assert.equal(state.channelOnboarding?.channels.whatsapp.status, "not-started");
+});
+
+test("channel config overview keeps active sessions separate from configured entries", async () => {
+  const adapter = new MockAdapter();
+  const mock = adapter as unknown as {
+    activeChannelSession?: {
+      id: string;
+      channelId: "wechat";
+      status: string;
+      message: string;
+      logs: string[];
+    };
+  };
+  mock.activeChannelSession = {
+    id: "session-wechat",
+    channelId: "wechat",
+    status: "running",
+    message: "Waiting for QR confirmation.",
+    logs: ["QR code generated."]
+  };
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/channel-setup-session-separate-${randomUUID()}.json`);
+  const store = new StateStore(filePath);
+  await store.update((current) => ({
+    ...current,
+    channelOnboarding: {
+      baseOnboardingCompletedAt: new Date().toISOString(),
+      gatewayStartedAt: undefined,
+      channels: {
+        telegram: {
+          id: "telegram",
+          title: "Telegram",
+          officialSupport: true,
+          status: "not-started",
+          summary: "Not started",
+          detail: "Not started"
+        },
+        whatsapp: {
+          id: "whatsapp",
+          title: "WhatsApp",
+          officialSupport: true,
+          status: "not-started",
+          summary: "Not started",
+          detail: "Not started"
+        },
+        feishu: {
+          id: "feishu",
+          title: "Feishu (飞书)",
+          officialSupport: true,
+          status: "not-started",
+          summary: "Not started",
+          detail: "Not started"
+        },
+        "wechat-work": {
+          id: "wechat-work",
+          title: "WeChat Work",
+          officialSupport: true,
+          status: "not-started",
+          summary: "Not started",
+          detail: "Not started"
+        },
+        wechat: {
+          id: "wechat",
+          title: "WeChat",
+          officialSupport: false,
+          status: "awaiting-pairing",
+          summary: "Waiting for QR confirmation.",
+          detail: "Scan the code."
+        }
+      },
+      entries: {
+        "wechat:default": {
+          id: "wechat:default",
+          channelId: "wechat",
+          label: "WeChat",
+          editableValues: {},
+          maskedConfigSummary: [],
+          lastUpdatedAt: "2026-03-18T00:00:00.000Z"
+        }
+      }
+    }
+  }));
+
+  const service = new ChannelSetupService(adapter, store);
+  const overview = await service.getConfigOverview();
+  const state = await store.read();
+
+  assert.equal(overview.entries.some((entry) => entry.id === "wechat:default"), false);
+  assert.equal(overview.activeSession?.channelId, "wechat");
+  assert.ok(state.channelOnboarding?.entries?.["wechat:default"]);
+  assert.equal(state.channelOnboarding?.channels.wechat.status, "awaiting-pairing");
+});
+
 test("channel setup removes a configured entry through the generic path", async () => {
   const { service, store } = createServices("channel-setup-remove");
   await service.saveEntry(undefined, {

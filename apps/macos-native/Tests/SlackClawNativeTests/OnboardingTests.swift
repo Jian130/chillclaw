@@ -83,6 +83,21 @@ struct OnboardingTests {
     }
 
     @Test
+    func forwardOnboardingActionsUseSharedProminentVariantHook() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/OnboardingView.swift"),
+            encoding: .utf8
+        )
+        let occurrences = source.components(separatedBy: "variant: nativeOnboardingForwardActionVariant()").count - 1
+
+        #expect(occurrences == 6)
+    }
+
+    @Test
     func channelSaveButtonDisablesWhileSaving() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -632,7 +647,7 @@ struct OnboardingTests {
     }
 
     @Test
-    func personalWechatPrimaryActionStaysBusyUntilQrOutputIsVisible() {
+    func personalWechatPrimaryActionWaitsForScanAndLoginAfterQrAppears() {
         let appState = SlackClawAppState()
         let viewModel = NativeOnboardingViewModel(
             appState: appState,
@@ -662,6 +677,7 @@ struct OnboardingTests {
         )
 
         #expect(viewModel.channelPrimaryActionBusy == true)
+        #expect(viewModel.channelPrimaryActionLabel == "Waiting for QR Code")
 
         appState.channelConfig = ChannelConfigOverview(
             baseOnboardingCompleted: true,
@@ -683,7 +699,8 @@ struct OnboardingTests {
             gatewaySummary: "Gateway ready"
         )
 
-        #expect(viewModel.channelPrimaryActionBusy == false)
+        #expect(viewModel.channelPrimaryActionBusy == true)
+        #expect(viewModel.channelPrimaryActionLabel == "Waiting for WeChat confirmation")
     }
 
     @Test

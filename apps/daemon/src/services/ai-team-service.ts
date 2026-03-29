@@ -247,6 +247,7 @@ export class AITeamService {
     const memberPresets = resolveMemberPresets(baseOverview.knowledgePacks, baseOverview.skillOptions);
     const runtimeMembers = await this.adapter.aiEmployees.listAIMemberRuntimeCandidates();
     const storedByAgentId = new Map(Object.values(aiTeam.members).map((member) => [member.agentId, member]));
+    const availableBrainIds = new Set(modelConfig.savedEntries.map((entry) => entry.id));
 
     const members = runtimeMembers
       .map((candidate) => {
@@ -263,7 +264,7 @@ export class AITeamService {
           teamIds: withTeamIds((stored ?? inferred).id, teams),
           bindingCount: candidate.bindingCount || stored?.bindingCount || stored?.bindings.length || 0,
           bindings: stored?.bindings ?? inferred.bindings,
-          brain: stored?.brain?.entryId ? stored.brain : inferred.brain,
+          brain: stored?.brain?.entryId && availableBrainIds.has(stored.brain.entryId) ? stored.brain : inferred.brain,
           agentDir: candidate.agentDir ?? stored?.agentDir,
           workspaceDir: candidate.workspaceDir ?? stored?.workspaceDir
         };

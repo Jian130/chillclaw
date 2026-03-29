@@ -151,7 +151,7 @@ test("reconcileSavedEntriesWithRuntime aligns saved entries with the live OpenCl
   assert.equal(openAi?.isFallback, true);
 
   const duplicateAnthropic = reconciled.entries.find((entry) => entry.id === "normal-anthropic");
-  assert.equal(duplicateAnthropic?.isFallback, false);
+  assert.equal(duplicateAnthropic, undefined);
 });
 
 test("AI member detection includes every real OpenClaw agent id", () => {
@@ -295,6 +295,7 @@ async function withFakeOpenClaw(
     updateNoChange?: boolean;
     updatePackageManager?: "npm" | "pnpm" | "bun";
     chatHistoryPayload?: string;
+    slowModelReads?: boolean;
     agentsListJsonOnStderr?: boolean;
     cleanModelRuntime?: boolean;
     failTelegramChannelsAdd?: boolean;
@@ -304,6 +305,7 @@ async function withFakeOpenClaw(
     canonicalWecomRuntime?: boolean;
     legacyWechatRuntime?: boolean;
     openclawWeixinRuntime?: boolean;
+    failPersonalWechatDelete?: boolean;
     longRunningWechatInstaller?: boolean;
     pluginInstalled?: boolean;
     pluginEnabled?: boolean;
@@ -343,6 +345,7 @@ async function withFakeOpenClaw(
   const originalPluginUpdateMarkerPath = process.env.OPENCLAW_TEST_PLUGIN_UPDATE_MARKER;
   const updateNoChange = options?.updateNoChange === true;
   const updatePackageManager = options?.updatePackageManager ?? "npm";
+  const slowModelReads = options?.slowModelReads === true;
   const agentsListJsonOnStderr = options?.agentsListJsonOnStderr === true;
   const cleanModelRuntime = options?.cleanModelRuntime === true;
   const failTelegramChannelsAdd = options?.failTelegramChannelsAdd === true;
@@ -352,6 +355,7 @@ async function withFakeOpenClaw(
   const canonicalWecomRuntime = options?.canonicalWecomRuntime === true;
   const legacyWechatRuntime = options?.legacyWechatRuntime === true;
   const openclawWeixinRuntime = options?.openclawWeixinRuntime === true;
+  const failPersonalWechatDelete = options?.failPersonalWechatDelete === true;
   const longRunningWechatInstaller = options?.longRunningWechatInstaller === true;
   const pluginInstalled = options?.pluginInstalled === true;
   const pluginEnabled = options?.pluginEnabled === true;
@@ -464,14 +468,23 @@ elif [ "$1" = "update" ] && [ "$2" = "--json" ] && [ "$3" = "--yes" ] && [ "$4" 
     echo '{"currentVersion":"2026.3.7","targetVersion":"2026.3.12","changed":true}'
   fi
 elif [ "$1" = "models" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  if [ "${slowModelReads ? "1" : "0"}" = "1" ]; then
+    sleep 0.2
+  fi
   if [ "${cleanModelRuntime ? "1" : "0"}" = "1" ]; then
     echo '{"models":[]}'
   else
     echo '{"models":[{"key":"openai/gpt-5","name":"GPT-5","input":"text","contextWindow":400000,"local":false,"available":true,"tags":["default","configured"],"missing":false},{"key":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","input":"text+image","contextWindow":200000,"local":false,"available":true,"tags":["fallback#1","configured"],"missing":false}]}'
   fi
 elif [ "$1" = "models" ] && [ "$2" = "list" ] && [ "$3" = "--all" ] && [ "$4" = "--json" ]; then
+  if [ "${slowModelReads ? "1" : "0"}" = "1" ]; then
+    sleep 0.2
+  fi
   echo '{"models":[{"key":"openai/gpt-5","name":"GPT-5","input":"text","contextWindow":400000,"local":false,"available":true,"tags":["default","configured"],"missing":false},{"key":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","input":"text+image","contextWindow":200000,"local":false,"available":true,"tags":["fallback#1","configured"],"missing":false},{"key":"google/gemini-2.5-pro","name":"Gemini 2.5 Pro","input":"text+image","contextWindow":1000000,"local":false,"available":true,"tags":[],"missing":false}]}'
 elif [ "$1" = "models" ] && [ "$2" = "status" ] && [ "$3" = "--json" ]; then
+  if [ "${slowModelReads ? "1" : "0"}" = "1" ]; then
+    sleep 0.2
+  fi
   if [ "${cleanModelRuntime ? "1" : "0"}" = "1" ]; then
     echo '{"configPath":${JSON.stringify(configPath)},"agentDir":${JSON.stringify(agentDirPath)},"auth":{"providers":[],"oauth":{"providers":[]}}}'
   else
@@ -561,6 +574,10 @@ elif [ "$1" = "config" ] && [ "$2" = "set" ] && [ "$3" = "--strict-json" ] && [ 
   exit 1
 elif [ "$1" = "config" ] && [ "$2" = "set" ] && [ "$3" = "--strict-json" ] && [ "$4" = "channels.wecom-openclaw-plugin" ] && [ "${failWechatConfigSet ? "1" : "0"}" = "1" ]; then
   >&2 echo 'unknown option --strict-json'
+  exit 1
+elif [ "$1" = "channels" ] && [ "$2" = "remove" ] && [ "$3" = "--channel" ] && [ "$4" = "openclaw-weixin" ] && [ "$5" = "--account" ] && [ "$6" = "default" ] && [ "$7" = "--delete" ] && [ "${failPersonalWechatDelete ? "1" : "0"}" = "1" ]; then
+  >&2 echo '[plugins] plugins.allow is empty; discovered non-bundled plugins may auto-load: openclaw-weixin (/Users/home/.openclaw/extensions/openclaw-weixin/index.ts). Set plugins.allow to explicit trusted ids.'
+  >&2 echo 'Channel openclaw-weixin does not support delete.'
   exit 1
 elif [ "$1" = "skills" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
   echo '{"workspaceDir":"/tmp/skills","managedSkillsDir":"/tmp/skills","skills":[]}'
@@ -675,6 +692,24 @@ test("OpenClaw model config uses the full provider catalog and one status read p
   });
 });
 
+test("fresh model invalidation reuses an in-flight model snapshot instead of starting a duplicate reload", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath }) => {
+    const firstRead = adapter.config.getModelConfig();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    adapter.invalidateReadCaches(["models"]);
+
+    await Promise.all([firstRead, adapter.config.getModelConfig()]);
+
+    const commands = await readCommands(logPath);
+
+    assert.equal(countCommands(commands, "models list --json"), 1);
+    assert.equal(countCommands(commands, "models status --json"), 1);
+    assert.equal(countCommands(commands, "models list --all --json"), 1);
+  }, {
+    slowModelReads: true
+  });
+});
+
 test("OpenClaw model config clears stale configured models when the live runtime is clean", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
     const statePath = resolve(process.cwd(), "apps/daemon/.data", "openclaw-state.json");
@@ -707,10 +742,16 @@ test("OpenClaw model config clears stale configured models when the live runtime
       adapter.invalidateReadCaches();
 
       const config = await adapter.config.getModelConfig();
+      const persistedState = JSON.parse(await readFile(statePath, "utf8")) as {
+        modelEntries?: Array<{ id: string }>;
+        defaultModelEntryId?: string;
+      };
 
       assert.equal(config.models.length, 0);
       assert.equal(config.savedEntries.length, 0);
       assert.equal(config.defaultModel, undefined);
+      assert.deepEqual(persistedState.modelEntries, []);
+      assert.equal(persistedState.defaultModelEntryId, undefined);
     } finally {
       if (previousState === undefined) {
         await rm(statePath, { force: true });
@@ -1131,6 +1172,35 @@ test("personal WeChat does not start a second installer while the QR session is 
     assert.equal(second.session?.id, first.session?.id);
   }, {
     longRunningWechatInstaller: true
+  });
+});
+
+test("personal WeChat removal falls back to config cleanup when runtime delete is unsupported", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath, configPath }) => {
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        "openclaw-weixin": {
+          enabled: true
+        }
+      }
+    }));
+
+    const result = await adapter.config.removeChannelEntry({
+      entryId: "wechat:default",
+      channelId: "wechat"
+    });
+    const commands = await readCommands(logPath);
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      channels?: Record<string, unknown>;
+    };
+
+    assert.equal(result.channelId, "wechat");
+    assert.equal(result.requiresGatewayApply, true);
+    assert.match(result.message, /wechat configuration removed/i);
+    assert.equal(countCommands(commands, "channels remove --channel openclaw-weixin --account default --delete"), 1);
+    assert.equal("openclaw-weixin" in (config.channels ?? {}), false);
+  }, {
+    failPersonalWechatDelete: true
   });
 });
 

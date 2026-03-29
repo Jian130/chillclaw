@@ -657,6 +657,57 @@ struct DeployScreen: View {
     }
 }
 
+func nativeRuntimeConfiguredModels(_ modelConfig: ModelConfigOverview?) -> [ModelCatalogEntry] {
+    guard let modelConfig else { return [] }
+
+    return modelConfig.models
+        .filter { modelConfig.configuredModelKeys.contains($0.key) }
+        .sorted { left, right in
+            if left.key == modelConfig.defaultModel { return true }
+            if right.key == modelConfig.defaultModel { return false }
+
+            let leftFallback = nativeModelFallbackOrder(left)
+            let rightFallback = nativeModelFallbackOrder(right)
+            if leftFallback != rightFallback {
+                return leftFallback < rightFallback
+            }
+
+            return left.key < right.key
+        }
+}
+
+func nativeManagedConfiguredModelEntries(_ modelConfig: ModelConfigOverview?) -> [SavedModelEntry] {
+    let runtimeKeys = Set(nativeRuntimeConfiguredModels(modelConfig).map(\.key))
+    return (modelConfig?.savedEntries ?? []).filter { !$0.id.hasPrefix("runtime:") && runtimeKeys.contains($0.modelKey) }
+}
+
+func nativeRuntimeOnlyModels(_ modelConfig: ModelConfigOverview?) -> [ModelCatalogEntry] {
+    let managedKeys = Set(nativeManagedConfiguredModelEntries(modelConfig).map(\.modelKey))
+    return nativeRuntimeConfiguredModels(modelConfig).filter { !managedKeys.contains($0.key) }
+}
+
+func nativeShouldDefaultNewModelEntry(_ modelConfig: ModelConfigOverview?) -> Bool {
+    nativeRuntimeConfiguredModels(modelConfig).isEmpty
+}
+
+private func nativeModelFallbackOrder(_ model: ModelCatalogEntry) -> Int {
+    for tag in model.tags {
+        guard tag.hasPrefix("fallback#") else { continue }
+        let suffix = String(tag.dropFirst("fallback#".count))
+        if let value = Int(suffix) {
+            return value
+        }
+    }
+
+    return Int.max
+}
+
+private func nativeProviderForModel(_ model: ModelCatalogEntry, modelConfig: ModelConfigOverview?) -> ModelProviderConfig? {
+    modelConfig?.providers.first { provider in
+        provider.providerRefs.contains { prefix in model.key.hasPrefix(prefix) }
+    }
+}
+
 @MainActor
 struct ConfigurationScreen: View {
     @Bindable var appState: SlackClawAppState
@@ -703,35 +754,78 @@ struct ConfigurationScreen: View {
     }
 
     private var modelsView: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(appState.modelConfig?.savedEntries ?? []) { entry in
-                SurfaceCard(title: entry.label, subtitle: entry.modelKey) {
-                    HStack {
-                        Text(entry.providerId)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        if entry.isDefault {
-                            TagBadge("Default", tone: .success)
+        let runtimeManagedEntries = nativeManagedConfiguredModelEntries(appState.modelConfig)
+        let runtimeOnlyModels = nativeRuntimeOnlyModels(appState.modelConfig)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            if runtimeManagedEntries.isEmpty && runtimeOnlyModels.isEmpty {
+                EmptyState(
+                    title: "No configured models",
+                    description: "ChillClaw only shows models that are live in the current OpenClaw runtime.",
+                    symbol: "sparkles"
+                )
+            } else {
+                if !runtimeManagedEntries.isEmpty {
+                    SurfaceCard(title: "Installed AI models", subtitle: "Managed entries that are active in the current OpenClaw runtime.") {
+                        ForEach(runtimeManagedEntries) { entry in
+                            HStack {
+                                Text(entry.providerId)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                if entry.isDefault {
+                                    TagBadge("Default", tone: .success)
+                                }
+                                if entry.isFallback {
+                                    TagBadge("Fallback", tone: .info)
+                                }
+                                ActionButton("Edit", variant: .outline) {
+                                    presentModelSheet(for: entry)
+                                }
+                                .disabled(hasPendingConfigurationAction)
+                                ActionButton(
+                                    "Set Default",
+                                    variant: .secondary,
+                                    isBusy: pendingConfigurationAction == .setDefaultModel(entry.id),
+                                    isDisabled: entry.isDefault || blocksConfigurationAction(.setDefaultModel(entry.id))
+                                ) {
+                                    Task { await setDefaultModel(entry.id) }
+                                }
+                                ActionButton(
+                                    "Remove",
+                                    variant: .destructive,
+                                    isBusy: pendingConfigurationAction == .removeModel(entry.id),
+                                    isDisabled: blocksConfigurationAction(.removeModel(entry.id))
+                                ) {
+                                    Task { await removeModel(entry.id) }
+                                }
+                            }
                         }
-                        ActionButton("Edit", variant: .outline) {
-                            presentModelSheet(for: entry)
-                        }
-                        .disabled(hasPendingConfigurationAction)
-                        ActionButton(
-                            "Set Default",
-                            variant: .secondary,
-                            isBusy: pendingConfigurationAction == .setDefaultModel(entry.id),
-                            isDisabled: entry.isDefault || blocksConfigurationAction(.setDefaultModel(entry.id))
-                        ) {
-                            Task { await setDefaultModel(entry.id) }
-                        }
-                        ActionButton(
-                            "Remove",
-                            variant: .destructive,
-                            isBusy: pendingConfigurationAction == .removeModel(entry.id),
-                            isDisabled: blocksConfigurationAction(.removeModel(entry.id))
-                        ) {
-                            Task { await removeModel(entry.id) }
+                    }
+                }
+
+                if !runtimeOnlyModels.isEmpty {
+                    SurfaceCard(title: "Detected from current OpenClaw runtime", subtitle: "These live models were detected in OpenClaw but do not have managed ChillClaw metadata yet.") {
+                        ForEach(runtimeOnlyModels) { model in
+                            let provider = nativeProviderForModel(model, modelConfig: appState.modelConfig)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(model.name)
+                                        .fontWeight(.semibold)
+                                    Text(provider?.label ?? model.key)
+                                        .foregroundStyle(.secondary)
+                                    HStack(spacing: 8) {
+                                        TagBadge(model.key, tone: .neutral)
+                                        if model.key == appState.modelConfig?.defaultModel {
+                                            TagBadge("Default", tone: .success)
+                                        }
+                                        if model.local {
+                                            TagBadge("Local", tone: .neutral)
+                                        }
+                                        TagBadge("Detected from runtime", tone: .info)
+                                    }
+                                }
+                                Spacer()
+                            }
                         }
                     }
                 }
@@ -1873,7 +1967,7 @@ private struct ModelEntrySheet: View {
                 methodId: methodId,
                 modelKey: modelKey,
                 values: secretValue.isEmpty ? [:] : ["token": secretValue, "apiKey": secretValue],
-                makeDefault: appState.modelConfig?.savedEntries.isEmpty == true,
+                makeDefault: nativeShouldDefaultNewModelEntry(appState.modelConfig),
                 useAsFallback: false
             )
             let response: ModelConfigActionResponse

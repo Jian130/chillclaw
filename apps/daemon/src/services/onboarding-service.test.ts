@@ -60,6 +60,48 @@ test("onboarding service persists draft progress and uses full completion as the
   assert.equal(persisted.setupCompletedAt, undefined);
 });
 
+test("saving the employee draft stays lightweight once the channel draft is already staged", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-employee-draft-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  Object.assign(channelSetupService, {
+    async getConfigOverview() {
+      throw new Error("Employee draft saves should not fetch the channel overview.");
+    }
+  });
+  const aiTeamService = new AITeamService(adapter, store);
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
+
+  await store.update((current) => ({
+    ...current,
+    onboarding: {
+      draft: {
+        currentStep: "employee",
+        channel: {
+          channelId: "wechat",
+          entryId: "wechat:default"
+        },
+        channelProgress: {
+          status: "staged",
+          message: "WeChat is staged."
+        }
+      }
+    }
+  }));
+
+  const result = await service.saveEmployeeDraft({
+    name: "Alex Morgan",
+    jobTitle: "Research Analyst",
+    avatarPresetId: "onboarding-analyst"
+  });
+
+  assert.equal(result.draft.employee?.name, "Alex Morgan");
+  assert.equal(result.draft.employee?.jobTitle, "Research Analyst");
+  assert.equal(result.summary.channel?.entryId, "wechat:default");
+});
+
 test("onboarding completion clears the draft, marks setup completed, and returns a destination summary", async () => {
   const { service, store } = createService("onboarding-service-complete");
 

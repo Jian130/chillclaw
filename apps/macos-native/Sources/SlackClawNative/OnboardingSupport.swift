@@ -55,6 +55,7 @@ let nativeOnboardingCTAHeight: CGFloat = 50
 
 enum NativeOnboardingActionButtonVariant: Sendable {
     case accent
+    case prominent
     case primary
     case secondary
 }
@@ -156,11 +157,17 @@ func nativeOnboardingActionButtonVariant(_ variant: NativeOnboardingActionButton
     switch variant {
     case .accent:
         return .primary
+    case .prominent:
+        return .onboardingProminent
     case .primary:
         return .outline
     case .secondary:
         return .secondary
     }
+}
+
+func nativeOnboardingForwardActionVariant() -> NativeOnboardingActionButtonVariant {
+    .prominent
 }
 
 func nativeOnboardingChannelPresentationTheme(_ theme: OnboardingChannelTheme) -> LinearGradient {
@@ -1008,6 +1015,12 @@ struct NativeOnboardingCopy: Sendable {
     let channelPickerHint: String
     let channelSave: String
     let channelSaveContinue: String
+    let channelSessionSubmitInput: String
+    let channelWechatStartLogin: String
+    let channelWechatStartingLogin: String
+    let channelWechatWaitingForQR: String
+    let channelWechatWaitingForConfirmation: String
+    let channelWechatRestartLogin: String
     let channelSaved: String
     let channelApplyHint: String
     let channelTutorialTitle: String
@@ -1132,7 +1145,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installUpdatingTitle: "正在更新 OpenClaw...",
             installUpdatingBody: "ChillClaw 正在下载并应用最新可用版本。请不要关闭此窗口。",
             installCompleteTitle: "安装完成！",
-            installCompleteBody: "OpenClaw 现在已经可以使用",
+            installCompleteBody: "OpenClaw 已安装完毕，可以开始设置",
             installVersionLabel: "版本",
             installUpdateAvailable: "有可用更新：{version}",
             installUpdateCta: "更新 OpenClaw",
@@ -1180,6 +1193,12 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelPickerHint: "选择一个渠道开始",
             channelSave: "保存渠道",
             channelSaveContinue: "保存并继续",
+            channelSessionSubmitInput: "提交会话输入",
+            channelWechatStartLogin: "开始微信登录",
+            channelWechatStartingLogin: "正在启动微信登录",
+            channelWechatWaitingForQR: "正在等待二维码",
+            channelWechatWaitingForConfirmation: "正在等待微信确认",
+            channelWechatRestartLogin: "重新开始微信登录",
             channelSaved: "渠道配置已保存。",
             channelApplyHint: "该渠道已正确保存，待网关应用挂起变更后即可生效。",
             channelTutorialTitle: "观看教学视频",
@@ -1280,7 +1299,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installUpdatingTitle: "OpenClaw を更新しています...",
             installUpdatingBody: "ChillClaw が最新の利用可能バージョンをダウンロードして適用しています。このウィンドウは閉じないでください。",
             installCompleteTitle: "インストール完了！",
-            installCompleteBody: "OpenClaw を使用する準備ができました",
+            installCompleteBody: "OpenClaw のインストールが完了し、セットアップを開始できます",
             installVersionLabel: "バージョン",
             installUpdateAvailable: "利用可能なアップデート: {version}",
             installUpdateCta: "OpenClaw を更新",
@@ -1328,6 +1347,12 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelPickerHint: "開始するチャネルを選択してください",
             channelSave: "チャネルを保存",
             channelSaveContinue: "保存して続行",
+            channelSessionSubmitInput: "セッション入力を送信",
+            channelWechatStartLogin: "WeChat ログインを開始",
+            channelWechatStartingLogin: "WeChat ログインを開始しています",
+            channelWechatWaitingForQR: "QRコードを待機中",
+            channelWechatWaitingForConfirmation: "WeChat の確認を待機中",
+            channelWechatRestartLogin: "WeChat ログインをやり直す",
             channelSaved: "チャネル設定を保存しました。",
             channelApplyHint: "このチャネル設定は保存済みです。保留中の変更をゲートウェイに適用すると有効になります。",
             channelTutorialTitle: "チュートリアル動画を見る",
@@ -1428,7 +1453,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installUpdatingTitle: "OpenClaw 업데이트 중...",
             installUpdatingBody: "ChillClaw가 최신 사용 가능 버전을 내려받아 적용하고 있습니다. 이 창을 닫지 마세요.",
             installCompleteTitle: "설치 완료!",
-            installCompleteBody: "이제 OpenClaw를 사용할 수 있습니다",
+            installCompleteBody: "OpenClaw 설치가 완료되어 설정을 시작할 수 있습니다",
             installVersionLabel: "버전",
             installUpdateAvailable: "사용 가능한 업데이트: {version}",
             installUpdateCta: "OpenClaw 업데이트",
@@ -1476,6 +1501,12 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelPickerHint: "시작할 채널을 선택하세요",
             channelSave: "채널 저장",
             channelSaveContinue: "저장 후 계속",
+            channelSessionSubmitInput: "세션 입력 제출",
+            channelWechatStartLogin: "WeChat 로그인 시작",
+            channelWechatStartingLogin: "WeChat 로그인 시작 중",
+            channelWechatWaitingForQR: "QR 코드 대기 중",
+            channelWechatWaitingForConfirmation: "WeChat 확인 대기 중",
+            channelWechatRestartLogin: "WeChat 로그인 다시 시작",
             channelSaved: "채널 구성이 저장되었습니다.",
             channelApplyHint: "이 채널은 올바르게 저장되었습니다. 게이트웨이가 대기 중인 변경을 적용하면 활성화됩니다.",
             channelTutorialTitle: "튜토리얼 영상 보기",
@@ -1576,7 +1607,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installUpdatingTitle: "Actualizando OpenClaw...",
             installUpdatingBody: "ChillClaw está descargando y aplicando la última versión disponible. No cierres esta ventana.",
             installCompleteTitle: "¡Instalación completa!",
-            installCompleteBody: "OpenClaw ya está listo para usarse",
+            installCompleteBody: "OpenClaw está instalado y listo para configurarse",
             installVersionLabel: "Versión",
             installUpdateAvailable: "Actualización disponible: {version}",
             installUpdateCta: "Actualizar OpenClaw",
@@ -1624,6 +1655,12 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelPickerHint: "Selecciona un canal para empezar",
             channelSave: "Guardar canal",
             channelSaveContinue: "Guardar y continuar",
+            channelSessionSubmitInput: "Enviar entrada de sesión",
+            channelWechatStartLogin: "Iniciar inicio de sesión en WeChat",
+            channelWechatStartingLogin: "Iniciando inicio de sesión en WeChat",
+            channelWechatWaitingForQR: "Esperando el código QR",
+            channelWechatWaitingForConfirmation: "Esperando la confirmación en WeChat",
+            channelWechatRestartLogin: "Reiniciar inicio de sesión en WeChat",
             channelSaved: "Configuración del canal guardada.",
             channelApplyHint: "Este canal quedó guardado correctamente y se activará cuando el gateway aplique los cambios pendientes.",
             channelTutorialTitle: "Ver video tutorial",
@@ -1724,7 +1761,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             installUpdatingTitle: "Updating OpenClaw...",
             installUpdatingBody: "ChillClaw is downloading and applying the latest available version. Please keep this window open.",
             installCompleteTitle: "Installation Complete!",
-            installCompleteBody: "OpenClaw is now ready to use",
+            installCompleteBody: "OpenClaw is installed and ready for setup",
             installVersionLabel: "Version",
             installUpdateAvailable: "Update available: {version}",
             installUpdateCta: "Update OpenClaw",
@@ -1772,6 +1809,12 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelPickerHint: "Select a channel to get started",
             channelSave: "Save channel",
             channelSaveContinue: "Save & Continue",
+            channelSessionSubmitInput: "Submit Session Input",
+            channelWechatStartLogin: "Start WeChat Login",
+            channelWechatStartingLogin: "Starting WeChat Login",
+            channelWechatWaitingForQR: "Waiting for QR Code",
+            channelWechatWaitingForConfirmation: "Waiting for WeChat confirmation",
+            channelWechatRestartLogin: "Restart WeChat Login",
             channelSaved: "Channel configuration saved.",
             channelApplyHint: "This channel is saved correctly and will become live after the gateway applies pending changes.",
             channelTutorialTitle: "Watch Tutorial Video",

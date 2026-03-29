@@ -1281,7 +1281,7 @@ export default function OnboardingPage() {
 
                     {installViewState.kind === "found" ? (
                       <div className="onboarding-install-actions">
-                        <Button className="onboarding-install-cta" fullWidth size="lg" onClick={() => void handleUseExistingInstall()}>
+                        <Button className="onboarding-install-cta onboarding-primary-action" fullWidth size="lg" onClick={() => void handleUseExistingInstall()}>
                           {copy.installContinue}
                         </Button>
                         <button className="onboarding-install-back" onClick={() => void goToStep("welcome")} type="button">
@@ -1292,7 +1292,7 @@ export default function OnboardingPage() {
 
                     {installViewState.kind === "complete" ? (
                       <div className="onboarding-install-actions">
-                        <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToPermissions()}>
+                        <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToPermissions()}>
                           {copy.installContinue}
                         </Button>
                         <button className="onboarding-install-back" onClick={() => void goToStep("welcome")} type="button">
@@ -1323,7 +1323,7 @@ export default function OnboardingPage() {
                 </div>
 
                 <div className="onboarding-install-actions">
-                  <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToModel()}>
+                  <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToModel()}>
                     {copy.installContinue}
                   </Button>
                   <button className="onboarding-install-back" onClick={() => void goToStep("install")} type="button">
@@ -1569,6 +1569,7 @@ export default function OnboardingPage() {
                                 {common.back}
                               </Button>
                               <Button
+                                className="onboarding-primary-action"
                                 fullWidth
                                 onClick={() => void handleSaveModel()}
                                 disabled={!selectedProviderPresentation || !selectedMethod || !modelKey.trim() || requiredModelFieldsMissing(selectedMethod, modelValues)}
@@ -1590,7 +1591,7 @@ export default function OnboardingPage() {
                             </div>
                           </div>
                           <div className="onboarding-model-actions onboarding-model-actions--connected">
-                            <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToChannel()}>
+                            <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToChannel()}>
                               {common.next}
                             </Button>
                           </div>
@@ -1882,6 +1883,7 @@ export default function OnboardingPage() {
                           {common.back}
                         </Button>
                         <Button
+                          className="onboarding-primary-action"
                           fullWidth
                           onClick={() =>
                             void (activeChannelSession?.inputPrompt
@@ -2064,6 +2066,7 @@ export default function OnboardingPage() {
                           {common.back}
                         </Button>
                         <Button
+                          className="onboarding-primary-action"
                           onClick={() => void handleCreateEmployee()}
                           disabled={
                             !selectedBrainEntryId ||

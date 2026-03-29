@@ -281,25 +281,22 @@ struct LoadingState: View {
                     }
                 }
             case .hero:
-                SurfaceCard(tone: .standard, padding: 28, spacing: 22) {
-                    VStack(spacing: 18) {
-                        NativeLoadingOrb()
+                VStack(spacing: 18) {
+                    NativeLoadingOrb()
 
-                        VStack(spacing: 8) {
-                            Text(title)
-                                .font(.system(size: 25, weight: .bold))
-                                .foregroundStyle(nativeOnboardingTextPrimary)
+                    VStack(spacing: 8) {
+                        Text(title)
+                            .font(.system(size: 25, weight: .bold))
+                            .foregroundStyle(nativeOnboardingTextPrimary)
+                            .multilineTextAlignment(.center)
+                        if let description {
+                            Text(description)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(nativeOnboardingTextSecondary)
                                 .multilineTextAlignment(.center)
-                            if let description {
-                                Text(description)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(nativeOnboardingTextSecondary)
-                                    .multilineTextAlignment(.center)
-                                    .lineSpacing(2)
-                            }
+                                .lineSpacing(2)
                         }
                     }
-                    .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: 440)
             }
@@ -508,6 +505,16 @@ private struct NativeBusyGlyph: View {
 struct NativeActionButtonStyle: ButtonStyle {
     let variant: ActionButtonVariant
 
+    private struct Palette {
+        let fill: AnyShapeStyle
+        let pressedFill: AnyShapeStyle
+        let foreground: Color
+        let stroke: Color
+        let shadowColor: Color
+        let shadowRadius: CGFloat
+        let shadowY: CGFloat
+    }
+
     func makeBody(configuration: Configuration) -> some View {
         let palette = palette(for: variant)
 
@@ -517,7 +524,8 @@ struct NativeActionButtonStyle: ButtonStyle {
             .padding(.vertical, 11)
             .background(
                 RoundedRectangle(cornerRadius: NativeUI.controlCornerRadius, style: .continuous)
-                    .fill(palette.background.opacity(configuration.isPressed ? palette.pressedOpacity : 1))
+                    .fill(configuration.isPressed ? palette.pressedFill : palette.fill)
+                    .shadow(color: palette.shadowColor, radius: palette.shadowRadius, x: 0, y: palette.shadowY)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: NativeUI.controlCornerRadius, style: .continuous)
@@ -527,18 +535,88 @@ struct NativeActionButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
     }
 
-    private func palette(for variant: ActionButtonVariant) -> (background: Color, foreground: Color, stroke: Color, pressedOpacity: Double) {
+    private func palette(for variant: ActionButtonVariant) -> Palette {
         switch variant {
         case .primary:
-            return (.blue, .white, .clear, 0.88)
+            return Palette(
+                fill: AnyShapeStyle(Color.blue),
+                pressedFill: AnyShapeStyle(Color.blue.opacity(0.88)),
+                foreground: .white,
+                stroke: .clear,
+                shadowColor: .clear,
+                shadowRadius: 0,
+                shadowY: 0
+            )
+        case .onboardingProminent:
+            return Palette(
+                fill: AnyShapeStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.30, green: 0.53, blue: 1.0),
+                            Color(red: 0.19, green: 0.40, blue: 0.98),
+                            Color(red: 0.32, green: 0.30, blue: 0.92),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                ),
+                pressedFill: AnyShapeStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.24, green: 0.46, blue: 0.97),
+                            Color(red: 0.15, green: 0.33, blue: 0.91),
+                            Color(red: 0.24, green: 0.22, blue: 0.84),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                ),
+                foreground: .white,
+                stroke: Color(red: 0.35, green: 0.56, blue: 1.0).opacity(0.52),
+                shadowColor: Color(red: 0.15, green: 0.31, blue: 0.83).opacity(0.24),
+                shadowRadius: 14,
+                shadowY: 8
+            )
         case .secondary:
-            return (Color.primary.opacity(0.08), .primary, .clear, 0.78)
+            return Palette(
+                fill: AnyShapeStyle(Color.primary.opacity(0.08)),
+                pressedFill: AnyShapeStyle(Color.primary.opacity(0.06)),
+                foreground: .primary,
+                stroke: .clear,
+                shadowColor: .clear,
+                shadowRadius: 0,
+                shadowY: 0
+            )
         case .outline:
-            return (.white, .primary, Color(red: 0.84, green: 0.88, blue: 0.94), 0.94)
+            return Palette(
+                fill: AnyShapeStyle(Color.white),
+                pressedFill: AnyShapeStyle(Color.white.opacity(0.94)),
+                foreground: .primary,
+                stroke: Color(red: 0.84, green: 0.88, blue: 0.94),
+                shadowColor: .clear,
+                shadowRadius: 0,
+                shadowY: 0
+            )
         case .ghost:
-            return (.clear, .blue, .clear, 0.12)
+            return Palette(
+                fill: AnyShapeStyle(Color.clear),
+                pressedFill: AnyShapeStyle(Color.blue.opacity(0.12)),
+                foreground: .blue,
+                stroke: .clear,
+                shadowColor: .clear,
+                shadowRadius: 0,
+                shadowY: 0
+            )
         case .destructive:
-            return (.red, .white, .clear, 0.88)
+            return Palette(
+                fill: AnyShapeStyle(Color.red),
+                pressedFill: AnyShapeStyle(Color.red.opacity(0.88)),
+                foreground: .white,
+                stroke: .clear,
+                shadowColor: .clear,
+                shadowRadius: 0,
+                shadowY: 0
+            )
         }
     }
 }

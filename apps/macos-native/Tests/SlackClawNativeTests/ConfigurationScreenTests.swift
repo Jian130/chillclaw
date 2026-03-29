@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import SlackClawNative
 @testable import SlackClawProtocol
 
@@ -97,5 +98,42 @@ struct ConfigurationScreenTests {
         #expect(request.action == "approve-pairing")
         #expect(request.values["accountName"] == "Support Bot")
         #expect(request.values["code"] == "123456")
+    }
+
+    @Test
+    func configurationScreenRunsMutationsOnMainActorAndRefreshesInBackground() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("@MainActor\nstruct ConfigurationScreen: View"))
+        #expect(source.contains("private func refreshConfigurationStateInBackground()"))
+        #expect(source.contains("Task { await appState.refreshAll() }"))
+    }
+
+    @Test
+    func configurationScreenKeepsModelEditInteractive() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("@State private var selectedModelEntry: SavedModelEntry?"))
+        #expect(source.contains("ModelEntrySheet(appState: appState, existingEntry: selectedModelEntry)"))
+        #expect(source.contains(".disabled(hasPendingConfigurationAction)"))
+        #expect(!source.contains(".disabled(true || hasPendingConfigurationAction)"))
+        #expect(source.contains("selectedModelEntry = entry"))
+        #expect(source.contains("providerId = existingEntry.providerId"))
+        #expect(source.contains("label = existingEntry.label"))
+        #expect(source.contains("modelKey = existingEntry.modelKey"))
     }
 }

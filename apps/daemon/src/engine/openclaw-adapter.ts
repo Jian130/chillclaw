@@ -563,6 +563,9 @@ const LEGACY_WECOM_CHANNEL_KEY = "wecom-openclaw-plugin";
 const CANONICAL_WECOM_CHANNEL_KEY = "wecom";
 
 let activeChannelLoginSession: LoginSessionState | undefined;
+let pendingWechatLoginStart:
+  | Promise<{ message: string; channel: ChannelSetupState }>
+  | undefined;
 const modelAuthSessions = new Map<string, RuntimeModelAuthSession>();
 
 const READ_CACHE_TTL_MS = {
@@ -8187,135 +8190,154 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   private async startWechatLogin(): Promise<{ message: string; channel: ChannelSetupState }> {
-    if (activeChannelLoginSession?.channelId === "wechat" && activeChannelLoginSession.status === "in-progress") {
+    if (
+      activeChannelLoginSession?.channelId === "wechat" &&
+      activeChannelLoginSession.status !== "failed" &&
+      activeChannelLoginSession.status !== "completed"
+    ) {
       return {
         message: "WeChat login is already running.",
         channel: await this.getChannelState("wechat")
       };
     }
 
-    const env = buildCommandEnv();
-    const command = await this.ensureWechatInstallerCommand();
+    if (pendingWechatLoginStart) {
+      return pendingWechatLoginStart;
+    }
 
-    const installerArgs = ["install"];
-    logExternalCommand(command, installerArgs);
-    const child = spawnInteractiveCommand(command, installerArgs, env);
-    let settleStartup: (() => void) | undefined;
-    const startupReady = new Promise<void>((resolve) => {
-      settleStartup = resolve;
-    });
-    let startupFlushTimer: ReturnType<typeof setTimeout> | undefined;
-    const settleStartupSoon = (delayMs = 150) => {
-      if (!settleStartup) {
-        return;
-      }
+    const startPromise = (async () => {
+      const env = buildCommandEnv();
+      const command = await this.ensureWechatInstallerCommand();
 
-      if (startupFlushTimer) {
-        clearTimeout(startupFlushTimer);
-      }
+      const installerArgs = ["install"];
+      logExternalCommand(command, installerArgs);
+      const child = spawnInteractiveCommand(command, installerArgs, env);
+      let settleStartup: (() => void) | undefined;
+      const startupReady = new Promise<void>((resolve) => {
+        settleStartup = resolve;
+      });
+      let startupFlushTimer: ReturnType<typeof setTimeout> | undefined;
+      const settleStartupSoon = (delayMs = 150) => {
+        if (!settleStartup) {
+          return;
+        }
 
-      startupFlushTimer = setTimeout(() => {
+        if (startupFlushTimer) {
+          clearTimeout(startupFlushTimer);
+        }
+
+        startupFlushTimer = setTimeout(() => {
+          settleStartup?.();
+          settleStartup = undefined;
+          startupFlushTimer = undefined;
+        }, delayMs);
+      };
+      const settleStartupNow = () => {
+        if (startupFlushTimer) {
+          clearTimeout(startupFlushTimer);
+          startupFlushTimer = undefined;
+        }
         settleStartup?.();
         settleStartup = undefined;
-        startupFlushTimer = undefined;
-      }, delayMs);
-    };
-    const settleStartupNow = () => {
-      if (startupFlushTimer) {
-        clearTimeout(startupFlushTimer);
-        startupFlushTimer = undefined;
+      };
+      const startupTimer = setTimeout(() => {
+        settleStartupNow();
+      }, 1000);
+
+      const sessionState: LoginSessionState = {
+        channelId: "wechat",
+        entryId: "wechat:default",
+        startedAt: new Date().toISOString(),
+        status: "in-progress",
+        logs: [
+          `Installing WeChat runtime helper: ${WECHAT_INSTALLER_INSTALL_DISPLAY}`,
+          `Running installer: ${[command, ...installerArgs].join(" ")}`,
+          "Starting the personal WeChat installer.",
+          "Follow the QR code and login guidance printed below."
+        ],
+        child
+      };
+      activeChannelLoginSession = sessionState;
+
+      const pushLog = (text: string) => {
+        if (activeChannelLoginSession !== sessionState) {
+          return;
+        }
+
+        const lines = text
+          .split(/\r?\n/)
+          .map((line) => line.trimEnd())
+          .filter(Boolean);
+        if (lines.length === 0) {
+          return;
+        }
+        activeChannelLoginSession.logs.push(...lines);
+        activeChannelLoginSession.logs = activeChannelLoginSession.logs.slice(-40);
+        activeChannelLoginSession.status = "awaiting-pairing";
+        settleStartupSoon();
+      };
+
+      child.stdout.on("data", (chunk) => {
+        pushLog(chunk.toString());
+      });
+
+      child.stderr.on("data", (chunk) => {
+        pushLog(chunk.toString());
+      });
+
+      child.on("error", (error) => {
+        if (activeChannelLoginSession !== sessionState) {
+          return;
+        }
+
+        activeChannelLoginSession.status = "failed";
+        activeChannelLoginSession.logs.push(`Failed to start WeChat login: ${error instanceof Error ? error.message : String(error)}`);
+        settleStartupNow();
+        void writeErrorLog("WeChat login session failed to start.", errorToLogDetails(error));
+      });
+
+      child.on("close", (code) => {
+        if (activeChannelLoginSession !== sessionState) {
+          return;
+        }
+
+        activeChannelLoginSession.exitCode = code ?? 1;
+        activeChannelLoginSession.child = undefined;
+        activeChannelLoginSession.status = code === 0 ? "completed" : "failed";
+        activeChannelLoginSession.logs.push(
+          code === 0
+            ? "WeChat installer finished and SlackClaw staged the login artifacts for final apply."
+            : `WeChat installer exited with code ${code ?? 1}.`
+        );
+        settleStartupNow();
+      });
+
+      await startupReady.finally(() => {
+        if (startupFlushTimer) {
+          clearTimeout(startupFlushTimer);
+        }
+        clearTimeout(startupTimer);
+      });
+
+      return {
+        message:
+          "SlackClaw started the personal WeChat installer. Follow the QR-first login instructions in the channel session log.",
+        channel: createChannelState("wechat", {
+          status: "awaiting-pairing",
+          summary: "Personal WeChat login started.",
+          detail: "Follow the QR-first WeChat installer logs, then complete any remaining confirmation steps from the session."
+        })
+      };
+    })();
+
+    pendingWechatLoginStart = startPromise;
+    try {
+      return await startPromise;
+    } finally {
+      if (pendingWechatLoginStart === startPromise) {
+        pendingWechatLoginStart = undefined;
       }
-      settleStartup?.();
-      settleStartup = undefined;
-    };
-    const startupTimer = setTimeout(() => {
-      settleStartupNow();
-    }, 1000);
-
-    const sessionState: LoginSessionState = {
-      channelId: "wechat",
-      entryId: "wechat:default",
-      startedAt: new Date().toISOString(),
-      status: "in-progress",
-      logs: [
-        `Installing WeChat runtime helper: ${WECHAT_INSTALLER_INSTALL_DISPLAY}`,
-        `Running installer: ${[command, ...installerArgs].join(" ")}`,
-        "Starting the personal WeChat installer.",
-        "Follow the QR code and login guidance printed below."
-      ],
-      child
-    };
-    activeChannelLoginSession = sessionState;
-
-    const pushLog = (text: string) => {
-      if (activeChannelLoginSession !== sessionState) {
-        return;
-      }
-
-      const lines = text
-        .split(/\r?\n/)
-        .map((line) => line.trimEnd())
-        .filter(Boolean);
-      if (lines.length === 0) {
-        return;
-      }
-      activeChannelLoginSession.logs.push(...lines);
-      activeChannelLoginSession.logs = activeChannelLoginSession.logs.slice(-40);
-      activeChannelLoginSession.status = "awaiting-pairing";
-      settleStartupSoon();
-    };
-
-    child.stdout.on("data", (chunk) => {
-      pushLog(chunk.toString());
-    });
-
-    child.stderr.on("data", (chunk) => {
-      pushLog(chunk.toString());
-    });
-
-    child.on("error", (error) => {
-      if (activeChannelLoginSession !== sessionState) {
-        return;
-      }
-
-      activeChannelLoginSession.status = "failed";
-      activeChannelLoginSession.logs.push(`Failed to start WeChat login: ${error instanceof Error ? error.message : String(error)}`);
-      settleStartupNow();
-      void writeErrorLog("WeChat login session failed to start.", errorToLogDetails(error));
-    });
-
-    child.on("close", (code) => {
-      if (activeChannelLoginSession !== sessionState) {
-        return;
-      }
-
-      activeChannelLoginSession.exitCode = code ?? 1;
-      activeChannelLoginSession.child = undefined;
-      activeChannelLoginSession.status = code === 0 ? "awaiting-pairing" : "failed";
-      activeChannelLoginSession.logs.push(
-        code === 0
-          ? "WeChat installer finished. If login is still pending, continue following the QR or log instructions above."
-          : `WeChat installer exited with code ${code ?? 1}.`
-      );
-      settleStartupNow();
-    });
-
-    await startupReady.finally(() => {
-      if (startupFlushTimer) {
-        clearTimeout(startupFlushTimer);
-      }
-      clearTimeout(startupTimer);
-    });
-
-    return {
-      message:
-        "SlackClaw started the personal WeChat installer. Follow the QR-first login instructions in the channel session log.",
-      channel: createChannelState("wechat", {
-        status: "awaiting-pairing",
-        summary: "Personal WeChat login started.",
-        detail: "Follow the QR-first WeChat installer logs, then complete any remaining confirmation steps from the session."
-      })
-    };
+    }
   }
 
   private async ensureWechatInstallerCommand(): Promise<string> {

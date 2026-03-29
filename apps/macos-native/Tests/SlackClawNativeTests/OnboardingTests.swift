@@ -108,9 +108,26 @@ struct OnboardingTests {
         )
 
         #expect(source.contains("ScrollView([.horizontal, .vertical])"))
-        #expect(source.contains("Text(verbatim: viewModel.displayedChannelSessionLogText)"))
+        #expect(source.contains("viewModel.displayedChannelSessionQRCodePayload"))
+        #expect(source.contains("nativeOnboardingQRCodeImage(payload: qrPayload)"))
+        #expect(source.contains("Text(verbatim: sessionLogText)"))
         #expect(source.contains("if viewModel.channelPrimaryActionBusy"))
         #expect(source.contains(".frame(minHeight: 180, maxHeight: 360)"))
+    }
+
+    @Test
+    func nativeCreateEmployeeRecoversAfterFinalizeTimeouts() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/OnboardingViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("recoverOnboardingCompletionAfterTimeout"))
+        #expect(source.contains("isRecoverableOnboardingCompletionTimeout"))
     }
 
     @Test
@@ -144,10 +161,10 @@ struct OnboardingTests {
 
     @Test
     func nativeOnboardingInsertsPermissionsStepAfterInstall() {
-        #expect(nativeOnboardingStepOrder == [.welcome, .install, .permissions, .model, .channel, .employee, .complete])
+        #expect(nativeOnboardingStepOrder == [.welcome, .install, .permissions, .model, .channel, .employee])
 
         let copy = nativeOnboardingCopy(localeIdentifier: "en")
-        #expect(copy.stepLabels == ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee", "Complete"])
+        #expect(copy.stepLabels == ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee"])
     }
 
     @Test
@@ -335,7 +352,7 @@ struct OnboardingTests {
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("PATCH", "/api/onboarding/state"):
+            case ("POST", "/api/onboarding/navigate"):
                 let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .permissions))
                 return (jsonResponse(url: url), body)
             default:
@@ -378,9 +395,9 @@ struct OnboardingTests {
 
         let request = try #require(await recorder.recordedRequests().first)
         let body = try #require(bodyData(for: request))
-        let payload = try JSONDecoder.slackClaw.decode(UpdateOnboardingStateRequest.self, from: body)
+        let payload = try JSONDecoder.slackClaw.decode(OnboardingStepNavigationRequest.self, from: body)
 
-        #expect(payload.currentStep == .permissions)
+        #expect(payload.step == .permissions)
     }
 
     @Test
@@ -390,7 +407,7 @@ struct OnboardingTests {
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("PATCH", "/api/onboarding/state"):
+            case ("POST", "/api/onboarding/permissions/confirm"):
                 await gate.wait()
                 let body = try JSONEncoder.slackClaw.encode(makeOnboardingStateResponse(step: .model))
                 return (jsonResponse(url: url), body)
@@ -709,6 +726,54 @@ struct OnboardingTests {
     }
 
     @Test
+    func personalWechatDisplaysScannableQRCodePayloadAndKeepsSupplementalLogs() {
+        let appState = SlackClawAppState()
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .channel)
+        viewModel.updateSelectedChannel(.wechat)
+
+        appState.channelConfig = ChannelConfigOverview(
+            baseOnboardingCompleted: true,
+            capabilities: [],
+            entries: [],
+            activeSession: .init(
+                id: "wechat:default:login",
+                channelId: .wechat,
+                entryId: "wechat:default",
+                status: "running",
+                message: "WeChat login is waiting for QR confirmation.",
+                logs: [
+                    "████ ████",
+                    "如果二维码未能成功展示，请用浏览器打开以下链接扫码：",
+                    "https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=3791d2c717d3d13eec9eb071bb8ebcd3&bot_type=3",
+                    "等待连接结果..."
+                ],
+                launchUrl: nil,
+                inputPrompt: nil
+            ),
+            gatewaySummary: "Gateway ready"
+        )
+
+        #expect(viewModel.displayedChannelSessionQRCodePayload == "https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=3791d2c717d3d13eec9eb071bb8ebcd3&bot_type=3")
+        #expect(viewModel.displayedChannelSessionDetailLogText.contains("如果二维码未能成功展示"))
+        #expect(viewModel.displayedChannelSessionDetailLogText.contains("等待连接结果"))
+        #expect(viewModel.displayedChannelSessionDetailLogText.contains("████ ████") == false)
+        #expect(viewModel.displayedChannelSessionDetailLogText.contains("liteapp.weixin.qq.com") == false)
+    }
+
+    @Test
+    func onboardingCompletionTimeoutRecoveryRecognizesRecoverableErrors() {
+        #expect(isRecoverableOnboardingCompletionTimeout(URLError(.timedOut)))
+        #expect(isRecoverableOnboardingCompletionTimeout(SlackClawClientError.server(status: 500, message: "Operation timed out while finishing onboarding.")))
+        #expect(isRecoverableOnboardingCompletionTimeout(SlackClawClientError.server(status: 504, message: "Gateway Timeout")))
+        #expect(isRecoverableOnboardingCompletionTimeout(NativeClientError.runtime("Request timeout from daemon gateway.")))
+        #expect(isRecoverableOnboardingCompletionTimeout(SlackClawClientError.server(status: 500, message: "Gateway finalization failed.")) == false)
+    }
+
+    @Test
     func openingModelTutorialUsesInAppTutorialState() {
         let appState = SlackClawAppState()
         let viewModel = NativeOnboardingViewModel(
@@ -994,7 +1059,7 @@ struct OnboardingTests {
         let recorder = NativeRequestRecorder()
         let session = await recorder.session { request in
             let path = request.url?.path ?? ""
-            if path == "/api/onboarding/state" {
+            if path == "/api/onboarding/navigate" {
                 throw CancellationError()
             }
 
@@ -1032,7 +1097,7 @@ struct OnboardingTests {
         )
         viewModel.onboardingState = makeOnboardingStateResponse(step: .model)
 
-        await viewModel.persistDraftSafely(.init(currentStep: .model))
+        await viewModel.goToStep(.model)
 
         #expect(viewModel.pageError == nil)
     }
@@ -1120,29 +1185,24 @@ struct OnboardingTests {
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("POST", "/api/models/entries"):
+            case ("POST", "/api/onboarding/model/entries"):
+                var nextState = makeOnboardingStateResponse(step: .channel)
+                nextState.draft.model = .init(
+                    providerId: savedEntry.providerId,
+                    modelKey: savedEntry.modelKey,
+                    methodId: savedEntry.authMethodId,
+                    entryId: savedEntry.id
+                )
                 let body = try JSONEncoder.slackClaw.encode(
                     ModelConfigActionResponse(
                         status: "completed",
                         message: "Saved",
                         modelConfig: savedConfig,
                         authSession: nil,
-                        requiresGatewayApply: false
+                        requiresGatewayApply: false,
+                        onboarding: nextState
                     )
                 )
-                return (jsonResponse(url: url), body)
-            case ("GET", "/api/models/config"):
-                let body = try JSONEncoder.slackClaw.encode(savedConfig)
-                return (jsonResponse(url: url), body)
-            case ("PATCH", "/api/onboarding/state"):
-                let patchBody = try #require(bodyData(for: request))
-                let payload = try JSONDecoder.slackClaw.decode(UpdateOnboardingStateRequest.self, from: patchBody)
-                #expect(payload.currentStep == .channel)
-                #expect(payload.model?.entryId == savedEntry.id)
-
-                var nextState = makeOnboardingStateResponse(step: .channel)
-                nextState.draft.model = payload.model
-                let body = try JSONEncoder.slackClaw.encode(nextState)
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -1216,27 +1276,20 @@ struct OnboardingTests {
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("POST", "/api/channels/entries"):
+            case ("POST", "/api/onboarding/channel/entries"):
+                var nextState = makeOnboardingStateResponse(step: .employee)
+                nextState.draft.channel = .init(channelId: .wechatWork, entryId: savedEntry.id)
+                nextState.draft.channelProgress = .init(status: .staged, sessionId: nil, message: "Saved", requiresGatewayApply: true)
                 let body = try JSONEncoder.slackClaw.encode(
                     ChannelConfigActionResponse(
                         status: "completed",
                         message: "Saved",
                         channelConfig: savedConfig,
                         session: nil,
-                        requiresGatewayApply: true
+                        requiresGatewayApply: true,
+                        onboarding: nextState
                     )
                 )
-                return (jsonResponse(url: url), body)
-            case ("PATCH", "/api/onboarding/state"):
-                let patchBody = try #require(bodyData(for: request))
-                let payload = try JSONDecoder.slackClaw.decode(UpdateOnboardingStateRequest.self, from: patchBody)
-                #expect(payload.currentStep == .employee)
-                #expect(payload.channel?.channelId == .wechatWork)
-                #expect(payload.channel?.entryId == savedEntry.id)
-
-                var nextState = makeOnboardingStateResponse(step: .employee)
-                nextState.draft.channel = payload.channel
-                let body = try JSONEncoder.slackClaw.encode(nextState)
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -1280,8 +1333,7 @@ struct OnboardingTests {
         await viewModel.saveChannel()
 
         let urls = await recorder.recordedURLs()
-        #expect(urls.contains("http://127.0.0.1:4545/api/channels/entries"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/entries"))
         #expect(urls.filter { $0.contains("/api/channels/config") }.isEmpty)
         #expect(viewModel.currentStep == OnboardingStep.employee)
         #expect(viewModel.currentDraft.channel?.entryId == savedEntry.id)
@@ -1343,18 +1395,26 @@ struct OnboardingTests {
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("POST", "/api/channels/entries"):
+            case ("POST", "/api/onboarding/channel/entries"):
+                var nextState = makeOnboardingStateResponse(step: .channel)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: awaitingEntry.id)
+                nextState.draft.activeChannelSessionId = sessionId
+                nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let body = try JSONEncoder.slackClaw.encode(
                     ChannelConfigActionResponse(
                         status: "interactive",
                         message: "Started WeChat login",
                         channelConfig: initialConfig,
                         session: initialConfig.activeSession,
-                        requiresGatewayApply: false
+                        requiresGatewayApply: false,
+                        onboarding: nextState
                     )
                 )
                 return (jsonResponse(url: url), body)
-            case ("GET", "/api/channels/session/wechat:default:login"):
+            case ("GET", "/api/onboarding/channel/session/wechat:default:login"):
+                var nextState = makeOnboardingStateResponse(step: .employee)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: completedEntry.id)
+                nextState.draft.channelProgress = .init(status: .staged, sessionId: sessionId, message: "WeChat login is waiting for QR confirmation.", requiresGatewayApply: false)
                 let body = try JSONEncoder.slackClaw.encode(
                     ChannelSessionResponse(
                         session: .init(
@@ -1370,35 +1430,10 @@ struct OnboardingTests {
                             launchUrl: nil,
                             inputPrompt: nil
                         ),
-                        channelConfig: completedConfig
+                        channelConfig: completedConfig,
+                        onboarding: nextState
                     )
                 )
-                return (jsonResponse(url: url), body)
-            case ("PATCH", "/api/onboarding/state"):
-                let patchBody = try #require(bodyData(for: request))
-                let payload = try JSONDecoder.slackClaw.decode(UpdateOnboardingStateRequest.self, from: patchBody)
-
-                if payload.currentStep == .channel {
-                    #expect(payload.channel?.channelId == .wechat)
-                    #expect(payload.channel?.entryId == awaitingEntry.id)
-                    #expect(payload.activeChannelSessionId == sessionId)
-
-                    var nextState = makeOnboardingStateResponse(step: .channel)
-                    nextState.draft.channel = payload.channel
-                    nextState.draft.activeChannelSessionId = payload.activeChannelSessionId
-                    let body = try JSONEncoder.slackClaw.encode(nextState)
-                    return (jsonResponse(url: url), body)
-                }
-
-                #expect(payload.currentStep == .employee)
-                #expect(payload.channel?.channelId == .wechat)
-                #expect(payload.channel?.entryId == completedEntry.id)
-                #expect(payload.activeChannelSessionId == "")
-
-                var nextState = makeOnboardingStateResponse(step: .employee)
-                nextState.draft.channel = payload.channel
-                nextState.draft.activeChannelSessionId = nil
-                let body = try JSONEncoder.slackClaw.encode(nextState)
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -1438,11 +1473,11 @@ struct OnboardingTests {
         viewModel.updateSelectedChannel(.wechat)
 
         await viewModel.saveChannel()
-        await waitForRecordedURLCount(recorder, expectedCount: 4)
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         let urls = await recorder.recordedURLs()
-        #expect(urls.contains("http://127.0.0.1:4545/api/channels/entries"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/channels/session/\(sessionId)?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/entries"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)?fresh=1"))
         #expect(viewModel.currentStep == .employee)
         #expect(viewModel.currentDraft.channel?.entryId == completedEntry.id)
         #expect(viewModel.currentDraft.activeChannelSessionId == nil)
@@ -1506,37 +1541,30 @@ struct OnboardingTests {
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("POST", "/api/channels/entries"):
+            case ("POST", "/api/onboarding/channel/entries"):
+                var nextState = makeOnboardingStateResponse(step: .channel)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: awaitingEntry.id)
+                nextState.draft.activeChannelSessionId = sessionId
+                nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let body = try JSONEncoder.slackClaw.encode(
                     ChannelConfigActionResponse(
                         status: "interactive",
                         message: "Started WeChat login",
                         channelConfig: initialConfig,
                         session: initialSession,
-                        requiresGatewayApply: false
+                        requiresGatewayApply: false,
+                        onboarding: nextState
                     )
                 )
                 return (jsonResponse(url: url), body)
-            case ("GET", "/api/channels/session/wechat:default:login"):
+            case ("GET", "/api/onboarding/channel/session/wechat:default:login"):
                 let body = try JSONEncoder.slackClaw.encode(
                     ChannelSessionResponse(
                         session: updatedSession,
-                        channelConfig: stalePolledConfig
+                        channelConfig: stalePolledConfig,
+                        onboarding: nil
                     )
                 )
-                return (jsonResponse(url: url), body)
-            case ("PATCH", "/api/onboarding/state"):
-                let patchBody = try #require(bodyData(for: request))
-                let payload = try JSONDecoder.slackClaw.decode(UpdateOnboardingStateRequest.self, from: patchBody)
-                #expect(payload.currentStep == .channel)
-                #expect(payload.channel?.channelId == .wechat)
-                #expect(payload.channel?.entryId == awaitingEntry.id)
-                #expect(payload.activeChannelSessionId == sessionId)
-
-                var nextState = makeOnboardingStateResponse(step: .channel)
-                nextState.draft.channel = payload.channel
-                nextState.draft.activeChannelSessionId = payload.activeChannelSessionId
-                let body = try JSONEncoder.slackClaw.encode(nextState)
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -1576,7 +1604,7 @@ struct OnboardingTests {
         viewModel.updateSelectedChannel(.wechat)
 
         await viewModel.saveChannel()
-        await waitForRecordedURLCount(recorder, expectedCount: 3)
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         for _ in 0 ..< 50 {
             if viewModel.activeChannelSession?.logs.contains("QR code ready. Scan with WeChat to continue.") == true {
@@ -1988,19 +2016,33 @@ struct OnboardingTests {
                 let query = url.query ?? ""
                 let body = try JSONEncoder.slackClaw.encode(query.contains("fresh=1") ? refreshedTargets : initialTargets)
                 return (jsonResponse(url: url), body)
-            case ("POST", "/api/deploy/targets/standard/update"):
+            case ("POST", "/api/onboarding/runtime/update"):
+                var nextState = makeOnboardingStateResponse(step: .install)
+                nextState.draft.install = .init(
+                    installed: true,
+                    version: "2026.3.14",
+                    disposition: "reused-existing",
+                    updateAvailable: false,
+                    latestVersion: "2026.3.14",
+                    updateSummary: nil
+                )
                 let body = try JSONEncoder.slackClaw.encode(
-                    DeploymentTargetActionResponse(
-                        targetId: "standard",
+                    SetupRunResponse(
                         status: "completed",
                         message: "System OpenClaw updated from 2026.3.13 to 2026.3.14.",
-                        engineStatus: makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14").engine
+                        steps: [],
+                        overview: makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14"),
+                        install: .init(
+                            status: "completed",
+                            message: "System OpenClaw updated from 2026.3.13 to 2026.3.14.",
+                            engineStatus: makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14").engine,
+                            disposition: "reused-existing",
+                            pinnedVersion: "2026.3.14",
+                            existingVersion: "2026.3.13",
+                            actualVersion: "2026.3.14"
+                        ),
+                        onboarding: nextState
                     )
-                )
-                return (jsonResponse(url: url), body)
-            case ("GET", "/api/overview"):
-                let body = try JSONEncoder.slackClaw.encode(
-                    makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14")
                 )
                 return (jsonResponse(url: url), body)
             default:
@@ -2044,7 +2086,7 @@ struct OnboardingTests {
         await viewModel.updateExistingInstall()
 
         let urls = await recorder.recordedURLs()
-        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets/standard/update"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/update"))
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.updateAvailable == false)
         #expect(viewModel.pageError == nil)
@@ -2105,7 +2147,6 @@ struct OnboardingTests {
         #expect(onboardingRefreshResourceForEvent(.model, modelEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.channel, channelEvent) == .channel)
         #expect(onboardingRefreshResourceForEvent(.employee, employeeEvent) == nil)
-        #expect(onboardingRefreshResourceForEvent(.complete, employeeEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.employee, presetSyncEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.welcome, unrelatedEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.model, unrelatedEvent) == nil)
@@ -2455,6 +2496,7 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     label: "Research Analyst",
                     description: "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
                     theme: "analyst",
+                    avatarPresetId: "onboarding-analyst",
                     starterSkillLabels: ["Research Brief", "Status Writer"],
                     toolLabels: ["Company handbook", "Delivery playbook"],
                     presetSkillIds: ["research-brief", "status-writer"],
@@ -2467,6 +2509,7 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     label: "Support Captain",
                     description: "Handle customer-facing requests with calm tone, clear follow-ups, and fast status updates.",
                     theme: "support",
+                    avatarPresetId: "onboarding-guide",
                     starterSkillLabels: ["Status Writer"],
                     toolLabels: ["Customer voice", "Memory"],
                     presetSkillIds: ["status-writer"],
@@ -2479,6 +2522,7 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     label: "Delivery Operator",
                     description: "Turn briefs into checklists, track milestones, and keep execution moving without extra setup.",
                     theme: "operator",
+                    avatarPresetId: "onboarding-builder",
                     starterSkillLabels: ["Research Brief"],
                     toolLabels: ["Delivery playbook", "Company handbook"],
                     presetSkillIds: ["research-brief"],

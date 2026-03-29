@@ -724,6 +724,41 @@ test("onboarding response serializes preset skill sync summary", () => {
   assert.equal(parsed.presetSkillSync?.summary, "No preset skills selected.");
 });
 
+test("onboarding employee preset presentation carries daemon-owned avatar preset ids", () => {
+  const response: OnboardingStateResponse = {
+    firstRun: {
+      introCompleted: false,
+      setupCompleted: false
+    },
+    draft: {
+      currentStep: "employee"
+    },
+    config: {
+      modelProviders: [],
+      channels: [],
+      employeePresets: [
+        {
+          id: "research-analyst",
+          label: "Research Analyst",
+          description: "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
+          theme: "analyst",
+          avatarPresetId: "onboarding-analyst",
+          starterSkillLabels: ["Research Brief", "Status Writer"],
+          toolLabels: ["Company handbook", "Delivery playbook"],
+          presetSkillIds: ["research-brief", "status-writer"],
+          knowledgePackIds: ["company-handbook", "delivery-playbook"],
+          workStyles: ["Analytical", "Concise"],
+          defaultMemoryEnabled: true
+        }
+      ]
+    },
+    summary: {}
+  };
+
+  const parsed = JSON.parse(JSON.stringify(response)) as OnboardingStateResponse;
+  assert.equal(parsed.config.employeePresets[0]?.avatarPresetId, "onboarding-analyst");
+});
+
 test("mutation sync metadata serializes on action responses", () => {
   const sync: MutationSyncMeta = {
     epoch: "daemon-epoch-1",

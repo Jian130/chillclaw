@@ -12,7 +12,7 @@ import type {
   TeamDetail,
   SupportedChannelId
 } from "@slackclaw/contracts";
-import { normalizePresetSkillIds, presetSkillDefinitionById } from "../config/preset-skill-definitions.js";
+import { normalizePresetSkillIds, presetSkillDefinitionById } from "../config/ai-member-presets.js";
 import { FilesystemStateAdapter } from "../platform/filesystem-state-adapter.js";
 import { getDataDir } from "../runtime-paths.js";
 

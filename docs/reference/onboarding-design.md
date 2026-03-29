@@ -63,6 +63,8 @@ Preferred sizes:
 
 The current implementation is still a seven-step flow with a separate `Complete` step. It is useful as a reference for what the product does today, but it is not the target contract for future work.
 
+One part of the target contract is already implemented: curated onboarding employee preset presentation and managed preset-skill ownership now come from the daemon-owned AI member preset catalog, so web and native no longer carry separate onboarding preset definitions.
+
 ```mermaid
 sequenceDiagram
     actor User
@@ -196,6 +198,7 @@ sequenceDiagram
 
 - Keep the `UI -> daemon -> EngineAdapter -> OpenClaw` boundary intact for every onboarding step.
 - Keep curated model and channel metadata daemon-owned so web and native clients render the same choices.
+- Keep curated onboarding employee preset presentation daemon-owned too, including avatar preset ids, starter skill labels, and tool labels.
 - Keep staged config distinct from live applied state in both backend contracts and UI copy.
 - Do not start the gateway, run health checks, or trigger extra finalization work during steps 4 and 5.
 - Do not create the first real AI employee before the final step is submitted.

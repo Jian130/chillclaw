@@ -37,7 +37,6 @@ public enum OnboardingStep: String, Codable, Sendable {
     case model
     case channel
     case employee
-    case complete
 }
 
 public enum OnboardingDestination: String, Codable, Sendable {
@@ -72,11 +71,34 @@ public struct OnboardingInstallState: Codable, Sendable {
     public var installed: Bool
     public var version: String?
     public var disposition: String?
+    public var updateAvailable: Bool?
+    public var latestVersion: String?
+    public var updateSummary: String?
 
-    public init(installed: Bool, version: String? = nil, disposition: String? = nil) {
+    public init(
+        installed: Bool,
+        version: String? = nil,
+        disposition: String? = nil,
+        updateAvailable: Bool? = nil,
+        latestVersion: String? = nil,
+        updateSummary: String? = nil
+    ) {
         self.installed = installed
         self.version = version
         self.disposition = disposition
+        self.updateAvailable = updateAvailable
+        self.latestVersion = latestVersion
+        self.updateSummary = updateSummary
+    }
+}
+
+public struct OnboardingPermissionsState: Codable, Sendable {
+    public var confirmed: Bool
+    public var confirmedAt: String?
+
+    public init(confirmed: Bool, confirmedAt: String? = nil) {
+        self.confirmed = confirmed
+        self.confirmedAt = confirmedAt
     }
 }
 
@@ -101,6 +123,31 @@ public struct OnboardingChannelState: Codable, Sendable {
     public init(channelId: SupportedChannelId, entryId: String? = nil) {
         self.channelId = channelId
         self.entryId = entryId
+    }
+}
+
+public enum OnboardingChannelProgressStatus: String, Codable, Sendable {
+    case idle
+    case capturing
+    case staged
+}
+
+public struct OnboardingChannelProgressState: Codable, Sendable {
+    public var status: OnboardingChannelProgressStatus
+    public var sessionId: String?
+    public var message: String?
+    public var requiresGatewayApply: Bool?
+
+    public init(
+        status: OnboardingChannelProgressStatus,
+        sessionId: String? = nil,
+        message: String? = nil,
+        requiresGatewayApply: Bool? = nil
+    ) {
+        self.status = status
+        self.sessionId = sessionId
+        self.message = message
+        self.requiresGatewayApply = requiresGatewayApply
     }
 }
 
@@ -144,8 +191,10 @@ public struct OnboardingEmployeeState: Codable, Sendable {
 public struct OnboardingDraftState: Codable, Sendable {
     public var currentStep: OnboardingStep
     public var install: OnboardingInstallState?
+    public var permissions: OnboardingPermissionsState?
     public var model: OnboardingModelState?
     public var channel: OnboardingChannelState?
+    public var channelProgress: OnboardingChannelProgressState?
     public var employee: OnboardingEmployeeState?
     public var activeModelAuthSessionId: String?
     public var activeChannelSessionId: String?
@@ -153,16 +202,20 @@ public struct OnboardingDraftState: Codable, Sendable {
     public init(
         currentStep: OnboardingStep,
         install: OnboardingInstallState? = nil,
+        permissions: OnboardingPermissionsState? = nil,
         model: OnboardingModelState? = nil,
         channel: OnboardingChannelState? = nil,
+        channelProgress: OnboardingChannelProgressState? = nil,
         employee: OnboardingEmployeeState? = nil,
         activeModelAuthSessionId: String? = nil,
         activeChannelSessionId: String? = nil
     ) {
         self.currentStep = currentStep
         self.install = install
+        self.permissions = permissions
         self.model = model
         self.channel = channel
+        self.channelProgress = channelProgress
         self.employee = employee
         self.activeModelAuthSessionId = activeModelAuthSessionId
         self.activeChannelSessionId = activeChannelSessionId
@@ -258,6 +311,7 @@ public struct OnboardingEmployeePresetPresentation: Codable, Sendable, Identifia
     public var label: String
     public var description: String
     public var theme: String
+    public var avatarPresetId: String
     public var starterSkillLabels: [String]
     public var toolLabels: [String]
     public var presetSkillIds: [String]?
@@ -270,6 +324,7 @@ public struct OnboardingEmployeePresetPresentation: Codable, Sendable, Identifia
         label: String,
         description: String,
         theme: String,
+        avatarPresetId: String,
         starterSkillLabels: [String],
         toolLabels: [String],
         presetSkillIds: [String]? = nil,
@@ -281,6 +336,7 @@ public struct OnboardingEmployeePresetPresentation: Codable, Sendable, Identifia
         self.label = label
         self.description = description
         self.theme = theme
+        self.avatarPresetId = avatarPresetId
         self.starterSkillLabels = starterSkillLabels
         self.toolLabels = toolLabels
         self.presetSkillIds = presetSkillIds
@@ -330,13 +386,13 @@ public struct OnboardingStateResponse: Codable, Sendable {
 
 public struct CompleteOnboardingResponse: Codable, Sendable {
     public var status: String
-    public var destination: OnboardingDestination
+    public var destination: OnboardingDestination?
     public var summary: OnboardingCompletionSummary
     public var overview: ProductOverview
 
     public init(
         status: String,
-        destination: OnboardingDestination,
+        destination: OnboardingDestination? = nil,
         summary: OnboardingCompletionSummary,
         overview: ProductOverview
     ) {
@@ -539,19 +595,22 @@ public struct SetupRunResponse: Codable, Sendable {
     public var steps: [SetupStepResult]
     public var overview: ProductOverview
     public var install: InstallResponse?
+    public var onboarding: OnboardingStateResponse?
 
     public init(
         status: String,
         message: String,
         steps: [SetupStepResult],
         overview: ProductOverview,
-        install: InstallResponse? = nil
+        install: InstallResponse? = nil,
+        onboarding: OnboardingStateResponse? = nil
     ) {
         self.status = status
         self.message = message
         self.steps = steps
         self.overview = overview
         self.install = install
+        self.onboarding = onboarding
     }
 }
 
@@ -684,11 +743,13 @@ public struct ModelConfigActionResponse: Codable, Sendable {
     public var modelConfig: ModelConfigOverview
     public var authSession: ModelAuthSession?
     public var requiresGatewayApply: Bool?
+    public var onboarding: OnboardingStateResponse?
 }
 
 public struct ModelAuthSessionResponse: Codable, Sendable {
     public var session: ModelAuthSession
     public var modelConfig: ModelConfigOverview
+    public var onboarding: OnboardingStateResponse?
 }
 
 public struct ChannelFieldOption: Codable, Sendable {
@@ -795,11 +856,13 @@ public struct ChannelConfigActionResponse: Codable, Sendable {
     public var channelConfig: ChannelConfigOverview
     public var session: ChannelSession?
     public var requiresGatewayApply: Bool?
+    public var onboarding: OnboardingStateResponse?
 }
 
 public struct ChannelSessionResponse: Codable, Sendable {
     public var session: ChannelSession
     public var channelConfig: ChannelConfigOverview
+    public var onboarding: OnboardingStateResponse?
 }
 
 public struct PluginActionResponse: Codable, Sendable {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-03-29 14:32 CST
+
+- moved curated onboarding AI employee preset presentation and bundled preset-skill ownership into the daemon `ai-member-presets` catalog, made onboarding config selector-only, deleted the separate preset-skill definition file, and stopped first-run install from treating onboarding preset-skill sync as a blocking setup step
+- replaced the generic onboarding draft patch flow with dedicated daemon-owned onboarding runtime, navigation, permissions, model, channel, employee, and session endpoints, and expanded shared TypeScript and Swift contracts so web and native clients can render authoritative install status, channel progress, preset avatars, and completion state from one source of truth
+- simplified web and native onboarding around daemon-resolved preset and session data, including server-driven employee avatars, improved personal WeChat QR/session handling, duplicate WeChat installer suppression, native completion recovery after timeout, and refreshed shared loading-button polish with new regression coverage
+- clarified README and onboarding docs around daemon-owned preset presentation and the current uninstall state-reset matrix, including the rule that setup-facing state is cleared only after uninstall succeeds and no OpenClaw runtime remains installed
+
 ### 2026-03-29 02:04 CST
 
 - clarified ChillClaw onboarding docs and README around the current seven-step flow versus the target six-step contract, with updated design references and product naming cleanup

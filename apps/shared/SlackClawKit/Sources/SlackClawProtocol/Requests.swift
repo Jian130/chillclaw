@@ -25,8 +25,10 @@ public struct InstallRequest: Codable, Sendable {
 public struct UpdateOnboardingStateRequest: Codable, Sendable {
     public var currentStep: OnboardingStep?
     public var install: OnboardingInstallState?
+    public var permissions: OnboardingPermissionsState?
     public var model: OnboardingModelState?
     public var channel: OnboardingChannelState?
+    public var channelProgress: OnboardingChannelProgressState?
     public var employee: OnboardingEmployeeState?
     public var activeModelAuthSessionId: String?
     public var activeChannelSessionId: String?
@@ -34,16 +36,20 @@ public struct UpdateOnboardingStateRequest: Codable, Sendable {
     public init(
         currentStep: OnboardingStep? = nil,
         install: OnboardingInstallState? = nil,
+        permissions: OnboardingPermissionsState? = nil,
         model: OnboardingModelState? = nil,
         channel: OnboardingChannelState? = nil,
+        channelProgress: OnboardingChannelProgressState? = nil,
         employee: OnboardingEmployeeState? = nil,
         activeModelAuthSessionId: String? = nil,
         activeChannelSessionId: String? = nil
     ) {
         self.currentStep = currentStep
         self.install = install
+        self.permissions = permissions
         self.model = model
         self.channel = channel
+        self.channelProgress = channelProgress
         self.employee = employee
         self.activeModelAuthSessionId = activeModelAuthSessionId
         self.activeChannelSessionId = activeChannelSessionId
@@ -51,10 +57,18 @@ public struct UpdateOnboardingStateRequest: Codable, Sendable {
 }
 
 public struct CompleteOnboardingRequest: Codable, Sendable {
-    public var destination: OnboardingDestination
+    public var destination: OnboardingDestination?
 
-    public init(destination: OnboardingDestination) {
+    public init(destination: OnboardingDestination? = nil) {
         self.destination = destination
+    }
+}
+
+public struct OnboardingStepNavigationRequest: Codable, Sendable {
+    public var step: OnboardingStep
+
+    public init(step: OnboardingStep) {
+        self.step = step
     }
 }
 

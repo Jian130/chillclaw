@@ -9,7 +9,6 @@ import type {
 import type { EngineAdapter } from "../engine/adapter.js";
 import { EventPublisher } from "./event-publisher.js";
 import { OverviewService } from "./overview-service.js";
-import { PresetSkillService } from "./preset-skill-service.js";
 import { StateStore } from "./state-store.js";
 
 export class SetupService {
@@ -17,8 +16,7 @@ export class SetupService {
     private readonly adapter: EngineAdapter,
     private readonly store: StateStore,
     private readonly overviewService: OverviewService,
-    private readonly eventPublisher?: EventPublisher,
-    private readonly presetSkillService?: PresetSkillService
+    private readonly eventPublisher?: EventPublisher
   ) {}
 
   async markIntroCompleted() {
@@ -73,25 +71,6 @@ export class SetupService {
       status: installResult.status === "installed" || installResult.status === "already-installed" ? "completed" : "failed",
       detail: installResult.message
     });
-
-    const onboardingDraft = (await this.store.read()).onboarding?.draft;
-    const presetSkillIds = onboardingDraft?.employee?.presetSkillIds ?? [];
-    if (this.presetSkillService && presetSkillIds.length > 0) {
-      const targetMode =
-        onboardingDraft?.install?.disposition === "reused-existing" || onboardingDraft?.install?.disposition === "installed-system"
-          ? "reused-install"
-          : "managed-local";
-      const presetSkillSync = await this.presetSkillService.setDesiredPresetSkillIds("onboarding", presetSkillIds, {
-        targetMode
-      });
-      const failedPresetSync = presetSkillSync.entries.find((entry) => entry.status === "failed");
-      steps.push({
-        id: "install-preset-skills",
-        title: "Install preset skills into OpenClaw",
-        status: failedPresetSync ? "failed" : "completed",
-        detail: failedPresetSync?.lastError ?? presetSkillSync.summary
-      });
-    }
 
     const overview = await this.overviewService.getOverview();
     const failedStep = steps.find((step) => step.status === "failed");

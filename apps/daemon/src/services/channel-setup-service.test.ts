@@ -151,6 +151,31 @@ test("channel setup removes a configured entry through the generic path", async 
   assert.equal(state.channelOnboarding?.channels.telegram.status, "not-started");
 });
 
+test("channel setup removes live configured entries even when stored metadata is missing", async () => {
+  const adapter = new MockAdapter();
+  const mockChannels = adapter as unknown as {
+    channels: Record<string, { id: string; title: string; status: string; summary: string; detail: string; lastUpdatedAt?: string }>;
+  };
+  mockChannels.channels.telegram = {
+    ...mockChannels.channels.telegram,
+    status: "completed",
+    summary: "Telegram is configured in OpenClaw.",
+    detail: "OpenClaw detected an existing Telegram bot.",
+    lastUpdatedAt: new Date().toISOString()
+  };
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/channel-setup-remove-live-entry-${randomUUID()}.json`);
+  const store = new StateStore(filePath);
+  const service = new ChannelSetupService(adapter, store);
+
+  const result = await service.removeEntry({ entryId: "telegram:default" });
+  const state = await store.read();
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.channelConfig.entries.length, 0);
+  assert.equal(state.channelOnboarding?.entries?.["telegram:default"], undefined);
+  assert.equal(state.channelOnboarding?.channels.telegram.status, "not-started");
+});
+
 test("wechat work setup auto-installs the managed plugin without persisting a raw plugin package", async () => {
   const adapter = new MockAdapter();
   const filePath = resolve(process.cwd(), `apps/daemon/.data/channel-setup-wechat-managed-${randomUUID()}.json`);
@@ -223,6 +248,64 @@ test("channel setup routes WeChat Work through plugin prerequisites and personal
   assert.equal(sessionAfterInput?.session.channelId, "wechat");
   assert.equal(state.channelOnboarding?.channels.wechat.status, "awaiting-pairing");
   assert.ok(state.channelOnboarding?.entries?.["wechat:default"]);
+});
+
+test("interactive WeChat session responses reuse staged config without probing live runtime", async () => {
+  class CountingAdapter extends MockAdapter {
+    configuredEntryReads = 0;
+    channelStateReads = 0;
+    statusReads = 0;
+
+    override async getConfiguredChannelEntries() {
+      this.configuredEntryReads += 1;
+      return super.getConfiguredChannelEntries();
+    }
+
+    override async getChannelState(channelId: Parameters<MockAdapter["getChannelState"]>[0]) {
+      this.channelStateReads += 1;
+      return super.getChannelState(channelId);
+    }
+  }
+
+  const adapter = new CountingAdapter();
+  const originalStatus = adapter.instances.status.bind(adapter.instances);
+  adapter.instances.status = async () => {
+    adapter.statusReads += 1;
+    return originalStatus();
+  };
+
+  const { service } = createServices("channel-setup-wechat-session-config", { adapter });
+  const save = await service.saveEntry(undefined, {
+    channelId: "wechat",
+    action: "save",
+    values: {}
+  });
+
+  const sessionId = save.session?.id;
+  assert.ok(sessionId);
+  assert.equal(adapter.configuredEntryReads, 0);
+  assert.equal(adapter.channelStateReads, 0);
+  assert.equal(adapter.statusReads, 0);
+
+  adapter.configuredEntryReads = 0;
+  adapter.channelStateReads = 0;
+  adapter.statusReads = 0;
+
+  const sessionDetail = await service.getSession(sessionId!);
+
+  assert.equal(sessionDetail.session.channelId, "wechat");
+  assert.equal(sessionDetail.channelConfig.entries[0]?.id, "wechat:default");
+  assert.equal(adapter.configuredEntryReads, 0);
+  assert.equal(adapter.channelStateReads, 0);
+  assert.equal(adapter.statusReads, 0);
+
+  const afterInput = await service.submitSessionInput(sessionId!, { value: "confirm" });
+
+  assert.equal(afterInput.session.status, "completed");
+  assert.equal(afterInput.channelConfig.entries[0]?.status, "completed");
+  assert.equal(adapter.configuredEntryReads, 0);
+  assert.equal(adapter.channelStateReads, 0);
+  assert.equal(adapter.statusReads, 0);
 });
 
 test("channel approve pairing skips feature prerequisite preparation", async () => {

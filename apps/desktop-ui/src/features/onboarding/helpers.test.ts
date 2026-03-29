@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { OnboardingStep, SlackClawEvent } from "@slackclaw/contracts";
-import type { ChannelConfigOverview } from "@slackclaw/contracts";
+import type { ChannelConfigOverview, ChannelSession, OnboardingStep, SlackClawEvent } from "@slackclaw/contracts";
 
 import {
   applyPresetSkillSyncToOnboardingState,
+  applyOnboardingChannelSessionToConfig,
   buildExistingInstallAdvanceDraft,
   buildOnboardingMemberRequest,
   onboardingDestinationPath,
@@ -18,7 +18,10 @@ import {
   resolveOnboardingChannelPresentations,
   resolveOnboardingEmployeePresets,
   resolveOnboardingPresetSkillIds,
+  resolveOnboardingActiveChannelSession,
+  resolveOnboardingChannelSessionLogMode,
   resolveOnboardingChannelSetupVariant,
+  shouldRefreshOnboardingChannelConfig,
   buildOnboardingChannelSaveValues,
   nextOnboardingStepAfterModelSave,
   resolveCompletedOnboardingChannelEntry,
@@ -110,6 +113,97 @@ describe("onboarding helpers", () => {
     };
 
     expect(resolveCompletedOnboardingChannelEntry("wechat", "wechat:default", channelConfig)?.id).toBe("wechat:default");
+  });
+
+  it("overlays the latest onboarding channel session onto config snapshots", () => {
+    const channelConfig: ChannelConfigOverview = {
+      baseOnboardingCompleted: false,
+      capabilities: [],
+      entries: [],
+      gatewaySummary: "Ready",
+      activeSession: undefined
+    };
+    const session: ChannelSession = {
+      id: "wechat:default:login",
+      channelId: "wechat",
+      entryId: "wechat:default",
+      status: "running",
+      message: "WeChat login is waiting for QR confirmation.",
+      logs: [
+        "Starting the personal WeChat installer.",
+        "https://liteapp.weixin.qq.com/?qrcode=abc"
+      ]
+    };
+
+    expect(applyOnboardingChannelSessionToConfig(channelConfig, session)).toEqual({
+      ...channelConfig,
+      activeSession: session
+    });
+  });
+
+  it("uses the active WeChat session only while the onboarding draft still tracks it", () => {
+    const activeSession: ChannelSession = {
+      id: "wechat:default:login",
+      channelId: "wechat",
+      entryId: "wechat:default",
+      status: "running",
+      message: "WeChat login is waiting for QR confirmation.",
+      logs: ["Starting the personal WeChat installer."]
+    };
+    const channelConfig: ChannelConfigOverview = {
+      baseOnboardingCompleted: false,
+      capabilities: [],
+      entries: [],
+      gatewaySummary: "Ready",
+      activeSession
+    };
+
+    expect(
+      resolveOnboardingActiveChannelSession(channelConfig, "wechat", "wechat:default:login")
+    ).toEqual(activeSession);
+    expect(
+      resolveOnboardingActiveChannelSession(channelConfig, "wechat", undefined)
+    ).toBeUndefined();
+    expect(
+      resolveOnboardingActiveChannelSession(channelConfig, "telegram", "wechat:default:login")
+    ).toBeUndefined();
+  });
+
+  it("detects terminal QR blocks so the onboarding session log can render them scanably", () => {
+    expect(
+      resolveOnboardingChannelSessionLogMode([
+        "WeChat login is waiting for QR confirmation.",
+        "██  ██",
+        "█ ██ █",
+        "██  ██",
+        "█ ██ █",
+        "Scan with WeChat"
+      ])
+    ).toBe("qr");
+
+    expect(
+      resolveOnboardingChannelSessionLogMode([
+        "Installing WeChat runtime helper",
+        "Running installer",
+        "Waiting for QR confirmation."
+      ])
+    ).toBe("plain");
+  });
+
+  it("skips redundant live channel-config refreshes while an onboarding channel session is active", () => {
+    expect(
+      shouldRefreshOnboardingChannelConfig("channel", {
+        channelId: "wechat",
+        entryId: "wechat:default"
+      }, "wechat:default:login")
+    ).toBe(false);
+
+    expect(
+      shouldRefreshOnboardingChannelConfig("channel", {
+        channelId: "wechat",
+        entryId: "wechat:default"
+      }, undefined)
+    ).toBe(true);
   });
 
   it("does not auto-complete onboarding for unfinished or non-WeChat channel entries", () => {
@@ -283,7 +377,7 @@ describe("onboarding helpers", () => {
       message: "Working"
     };
 
-    const steps: OnboardingStep[] = ["welcome", "install", "model", "channel", "employee", "complete"];
+    const steps: OnboardingStep[] = ["welcome", "install", "model", "channel", "employee"];
     for (const step of steps) {
       expect(onboardingRefreshResourceForEvent(step, unrelatedEvent)).toBeUndefined();
     }
@@ -496,6 +590,7 @@ describe("onboarding helpers", () => {
             label: "Research Analyst",
             description: "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
             theme: "analyst",
+            avatarPresetId: "onboarding-analyst",
             starterSkillLabels: ["Research Brief", "Status Writer"],
             toolLabels: ["Company handbook", "Delivery playbook"],
             presetSkillIds: ["research-brief", "status-writer"],
@@ -508,6 +603,7 @@ describe("onboarding helpers", () => {
             label: "Support Captain",
             description: "Handle customer-facing requests with calm tone, clear follow-ups, and fast status updates.",
             theme: "support",
+            avatarPresetId: "onboarding-guide",
             starterSkillLabels: ["Status Writer"],
             toolLabels: ["Customer voice", "Memory"],
             presetSkillIds: ["status-writer"],
@@ -520,6 +616,7 @@ describe("onboarding helpers", () => {
             label: "Delivery Operator",
             description: "Turn briefs into checklists, track milestones, and keep execution moving without extra setup.",
             theme: "operator",
+            avatarPresetId: "onboarding-builder",
             starterSkillLabels: ["Research Brief"],
             toolLabels: ["Delivery playbook", "Company handbook"],
             presetSkillIds: ["research-brief"],
@@ -599,7 +696,7 @@ describe("onboarding helpers", () => {
       })
     ).toMatchObject({
       status: "syncing",
-      blocking: true
+      blocking: false
     });
 
     expect(
@@ -620,13 +717,14 @@ describe("onboarding helpers", () => {
       })
     ).toMatchObject({
       status: "repair",
-      blocking: true,
+      blocking: false,
       detail: "Missing skill install."
     });
 
     expect(resolveOnboardingEmployeePresetReadiness(preset, undefined)).toMatchObject({
       status: "install",
-      blocking: true
+      label: "Prepared on finish",
+      blocking: false
     });
   });
 

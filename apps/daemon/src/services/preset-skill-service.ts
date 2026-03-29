@@ -6,7 +6,7 @@ import type {
 } from "@slackclaw/contracts";
 
 import type { EngineAdapter } from "../engine/adapter.js";
-import { presetSkillDefinitionById, normalizePresetSkillIds } from "../config/preset-skill-definitions.js";
+import { normalizePresetSkillIds, presetSkillDefinitionById } from "../config/ai-member-presets.js";
 import { EventPublisher } from "./event-publisher.js";
 import { defaultPresetSkillState, type PresetSkillSelectionState, type PresetSkillState, StateStore } from "./state-store.js";
 

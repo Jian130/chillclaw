@@ -451,17 +451,57 @@ struct ActionButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if isBusy {
-                    ProgressView()
-                        .controlSize(.small)
+                    NativeBusyGlyph()
                 } else if let systemImage {
                     Image(systemName: systemImage)
                 }
                 Text(title)
+                    .opacity(isBusy ? 0.94 : 1)
+                    .offset(y: isBusy ? -0.5 : 0)
             }
             .frame(maxWidth: fullWidth ? .infinity : nil)
         }
         .buttonStyle(NativeActionButtonStyle(variant: variant))
         .disabled(isDisabled || isBusy)
+    }
+}
+
+private struct NativeBusyGlyph: View {
+    @State private var orbiting = false
+    @State private var breathing = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.94))
+                .scaleEffect(breathing ? 0.62 : 0.48)
+
+            Circle()
+                .stroke(Color.primary.opacity(0.14), lineWidth: 1.4)
+
+            Circle()
+                .trim(from: 0.10, to: 0.68)
+                .stroke(
+                    nativeBrandMarkGradient(),
+                    style: StrokeStyle(lineWidth: 1.8, lineCap: .round)
+                )
+                .rotationEffect(.degrees(orbiting ? 360 : 0))
+
+            Circle()
+                .fill(Color.white.opacity(0.96))
+                .frame(width: 4, height: 4)
+                .offset(x: 5.25)
+                .rotationEffect(.degrees(orbiting ? 360 : 0))
+                .shadow(color: Color.white.opacity(0.45), radius: 2, x: 0, y: 0)
+        }
+        .frame(width: 16, height: 16)
+        .onAppear {
+            guard !orbiting && !breathing else { return }
+            orbiting = true
+            breathing = true
+        }
+        .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: orbiting)
+        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: breathing)
     }
 }
 

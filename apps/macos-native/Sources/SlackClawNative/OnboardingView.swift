@@ -1,4 +1,6 @@
 import AppKit
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import SwiftUI
 import WebKit
 import SlackClawProtocol
@@ -356,21 +358,23 @@ struct NativeOnboardingView: View {
 
     private func mainCard(contentWidth: CGFloat, welcomeMinHeight: CGFloat, compactEmployeeLayout: Bool) -> some View {
         SurfaceCard(tone: .standard, padding: nativeOnboardingOuterPanelPadding, spacing: 24) {
-            switch viewModel.currentStep {
-            case .welcome:
-                welcomeStep
-            case .install:
-                installStep
-            case .permissions:
-                permissionsStep
-            case .model:
-                modelStep
-            case .channel:
-                channelStep
-            case .employee:
-                employeeStep(compactLayout: compactEmployeeLayout)
-            case .complete:
+            if viewModel.showingCompletion {
                 completeStep
+            } else {
+                switch viewModel.currentStep {
+                case .welcome:
+                    welcomeStep
+                case .install:
+                    installStep
+                case .permissions:
+                    permissionsStep
+                case .model:
+                    modelStep
+                case .channel:
+                    channelStep
+                case .employee:
+                    employeeStep(compactLayout: compactEmployeeLayout)
+                }
             }
         }
         .frame(maxWidth: contentWidth, alignment: .leading)
@@ -625,7 +629,7 @@ struct NativeOnboardingView: View {
                             }
 
                             NativeOnboardingActionButton(variant: .secondary) {
-                                Task { await viewModel.persistDraftSafely(.init(currentStep: .welcome)) }
+                                Task { await viewModel.goToStep(.welcome) }
                             } label: {
                                 Text(viewModel.copy.back)
                                     .font(.system(size: 15, weight: .semibold))
@@ -681,7 +685,7 @@ struct NativeOnboardingView: View {
                     }
 
                     NativeOnboardingActionButton(variant: .secondary) {
-                        Task { await viewModel.persistDraftSafely(.init(currentStep: .install)) }
+                        Task { await viewModel.goToStep(.install) }
                     } label: {
                         Text(viewModel.copy.back)
                             .font(.system(size: 15, weight: .semibold))
@@ -1042,7 +1046,7 @@ struct NativeOnboardingView: View {
 
             HStack(spacing: 16) {
                 NativeOnboardingActionButton(variant: .secondary, disabled: viewModel.permissionsNextBusy) {
-                    Task { await viewModel.persistDraftSafely(.init(currentStep: .install)) }
+                    Task { await viewModel.goToStep(.install) }
                 } label: {
                     Text(viewModel.copy.back)
                         .font(.system(size: 15, weight: .semibold))
@@ -1141,20 +1145,43 @@ struct NativeOnboardingView: View {
                                 body: "ChillClaw will run the QR-first WeChat installer and keep the session log here while you scan and confirm the login."
                             ) {
                                 if let activeSession = viewModel.activeChannelSession {
+                                    let sessionLogText = viewModel.displayedChannelSessionQRCodePayload == nil
+                                        ? viewModel.displayedChannelSessionLogText
+                                        : viewModel.displayedChannelSessionDetailLogText
                                     VStack(alignment: .leading, spacing: 12) {
                                         Text(activeSession.message)
                                             .font(.system(size: 14, weight: .medium))
                                             .foregroundStyle(nativeOnboardingTextSecondary)
 
-                                        ScrollView([.horizontal, .vertical]) {
-                                            Text(verbatim: viewModel.displayedChannelSessionLogText)
-                                                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                                .foregroundStyle(nativeOnboardingTextPrimary)
-                                                .fixedSize(horizontal: true, vertical: true)
-                                                .textSelection(.enabled)
-                                                .frame(alignment: .topLeading)
+                                        if let qrPayload = viewModel.displayedChannelSessionQRCodePayload,
+                                           let qrImage = nativeOnboardingQRCodeImage(payload: qrPayload) {
+                                            Image(nsImage: qrImage)
+                                                .interpolation(.none)
+                                                .antialiased(false)
+                                                .resizable()
+                                                .frame(width: qrImage.size.width, height: qrImage.size.height)
+                                                .padding(12)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                                        .fill(Color.white.opacity(0.96))
+                                                        .overlay(
+                                                            RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                                                .strokeBorder(Color.black.opacity(0.08), lineWidth: 1)
+                                                        )
+                                                )
                                         }
-                                        .frame(minHeight: 180, maxHeight: 360)
+
+                                        if !sessionLogText.isEmpty {
+                                            ScrollView([.horizontal, .vertical]) {
+                                                Text(verbatim: sessionLogText)
+                                                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                                    .foregroundStyle(nativeOnboardingTextPrimary)
+                                                    .fixedSize(horizontal: true, vertical: true)
+                                                    .textSelection(.enabled)
+                                                    .frame(alignment: .topLeading)
+                                            }
+                                            .frame(minHeight: 180, maxHeight: 360)
+                                        }
 
                                         if let prompt = activeSession.inputPrompt {
                                             nativeChannelField(title: prompt) {
@@ -1397,28 +1424,8 @@ struct NativeOnboardingView: View {
     }
 
     private func employeeEditorPanel(compactLayout: Bool) -> some View {
-        OnboardingGlassPanel(title: viewModel.copy.chooseAvatar, subtitle: nil) {
+        OnboardingGlassPanel(title: viewModel.copy.employeeTitle, subtitle: nil) {
             VStack(alignment: .leading, spacing: 18) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(nativeOnboardingAvatarPresets) { preset in
-                            Button {
-                                viewModel.employeeAvatarPresetId = preset.id
-                            } label: {
-                                AvatarPresetView(presetId: preset.id, size: 70)
-                                    .padding(6)
-                                    .contentShape(Circle())
-                                    .overlay(
-                                        Circle()
-                                            .strokeBorder(viewModel.employeeAvatarPresetId == preset.id ? Color(red: 0.24, green: 0.41, blue: 0.95) : Color.clear, lineWidth: 4)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-
                 VStack(alignment: .leading, spacing: 8) {
                     Text(viewModel.copy.employeeName)
                         .font(.headline)
@@ -1590,7 +1597,7 @@ struct NativeOnboardingView: View {
 
     private var backButtonToChannel: some View {
         NativeOnboardingActionButton(variant: .secondary) {
-            Task { await viewModel.persistDraftSafely(.init(currentStep: .channel)) }
+            Task { await viewModel.goToStep(.channel) }
         } label: {
             Text(viewModel.copy.back)
                 .font(.system(size: 15, weight: .semibold))
@@ -1638,10 +1645,10 @@ struct NativeOnboardingView: View {
             .frame(maxWidth: .infinity)
 
             HStack(spacing: 16) {
-                summaryCard(title: viewModel.copy.completionInstall, value: viewModel.onboardingState?.summary.install?.version ?? appState.overview?.engine.version ?? "Not installed")
-                summaryCard(title: viewModel.copy.completionModel, value: viewModel.selectedModelEntry?.label ?? viewModel.onboardingState?.summary.model?.modelKey ?? "Not configured")
-                summaryCard(title: viewModel.copy.completionChannel, value: viewModel.onboardingState?.summary.channel.map { nativeChannelDisplayLabel($0.channelId) } ?? "Not configured")
-                summaryCard(title: viewModel.copy.completionEmployee, value: viewModel.onboardingState?.summary.employee?.name ?? "Not created")
+                summaryCard(title: viewModel.copy.completionInstall, value: viewModel.completionSummary.install?.version ?? appState.overview?.engine.version ?? "Not installed")
+                summaryCard(title: viewModel.copy.completionModel, value: viewModel.selectedModelEntry?.label ?? viewModel.completionSummary.model?.modelKey ?? "Not configured")
+                summaryCard(title: viewModel.copy.completionChannel, value: viewModel.completionSummary.channel.map { nativeChannelDisplayLabel($0.channelId) } ?? "Not configured")
+                summaryCard(title: viewModel.copy.completionEmployee, value: viewModel.completionSummary.employee?.name ?? "Not created")
             }
 
             HStack(spacing: 16) {
@@ -1829,6 +1836,7 @@ private func nativeChannelInstructionCard(title: String, steps: [String], ctaLab
             }
         }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(22)
     .background(
         RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
@@ -1859,6 +1867,7 @@ private func nativeChannelCredentialCard<Content: View>(title: String?, body: St
 
         content()
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(22)
     .background(
         RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
@@ -1904,6 +1913,32 @@ private func nativeChannelSecretHelp(_ text: String) -> some View {
             .font(.system(size: 14, weight: .regular))
             .foregroundStyle(nativeOnboardingTextSecondary)
     }
+}
+
+private let nativeOnboardingQRCodeContext = CIContext()
+
+private func nativeOnboardingQRCodeImage(payload: String, sideLength: CGFloat = 280) -> NSImage? {
+    let filter = CIFilter.qrCodeGenerator()
+    filter.message = Data(payload.utf8)
+    filter.correctionLevel = "L"
+
+    guard let outputImage = filter.outputImage else {
+        return nil
+    }
+
+    let extent = outputImage.extent.integral
+    let baseSide = max(extent.width, extent.height)
+    let scale = max(1, floor(sideLength / baseSide))
+    let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    let scaledExtent = scaledImage.extent.integral
+
+    guard let cgImage = nativeOnboardingQRCodeContext.createCGImage(scaledImage, from: scaledExtent) else {
+        return nil
+    }
+
+    let image = NSImage(cgImage: cgImage, size: NSSize(width: scaledExtent.width, height: scaledExtent.height))
+    image.isTemplate = false
+    return image
 }
 
 private struct FlowLayout<Data: RandomAccessCollection, ID: Hashable, Content: View>: View {

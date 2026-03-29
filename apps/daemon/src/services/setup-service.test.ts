@@ -8,7 +8,6 @@ import { EventBusService } from "./event-bus-service.js";
 import { EventPublisher } from "./event-publisher.js";
 import { OverviewService } from "./overview-service.js";
 import { SetupService } from "./setup-service.js";
-import type { PresetSkillSyncOverview } from "@slackclaw/contracts";
 import { StateStore } from "./state-store.js";
 
 function createService(testName: string) {
@@ -34,6 +33,7 @@ test("first-run install no longer marks the whole onboarding flow complete", asy
   assert.equal(Boolean(state.introCompletedAt), true);
   assert.equal(state.setupCompletedAt, undefined);
   assert.equal(result.overview.firstRun.setupCompleted, false);
+  assert.equal(result.steps.some((step) => step.id === "install-preset-skills"), false);
 });
 
 test("first-run setup publishes deploy progress and completion events", async () => {
@@ -54,7 +54,7 @@ test("first-run setup publishes deploy progress and completion events", async ()
   assert.deepEqual(events, ["deploy.progress", "deploy.completed"]);
 });
 
-test("first-run setup fails when preset skill reconcile reports repair needed", async () => {
+test("first-run setup ignores onboarding preset skill reconcile work", async () => {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/setup-service-preset-sync-${randomUUID()}.json`);
   const adapter = new MockAdapter();
   const store = new StateStore(filePath);
@@ -79,33 +79,10 @@ test("first-run setup fails when preset skill reconcile reports repair needed", 
     }
   }));
 
-  const service = new SetupService(
-    adapter,
-    store,
-    overviewService,
-    undefined,
-    {
-      setDesiredPresetSkillIds: async () =>
-        ({
-          targetMode: "managed-local",
-          summary: "Repair needed",
-          repairRecommended: true,
-          entries: [
-            {
-              presetSkillId: "research-brief",
-              runtimeSlug: "research-brief",
-              targetMode: "managed-local",
-              status: "failed",
-              lastError: "Missing bundled asset",
-              updatedAt: new Date().toISOString()
-            }
-          ]
-        }) satisfies PresetSkillSyncOverview
-    } as never
-  );
+  const service = new SetupService(adapter, store, overviewService);
 
   const result = await service.runFirstRunSetup();
 
-  assert.equal(result.status, "failed");
-  assert.equal(result.steps.some((step) => step.id === "install-preset-skills" && step.status === "failed"), true);
+  assert.equal(result.status, "completed");
+  assert.equal(result.steps.some((step) => step.id === "install-preset-skills"), false);
 });

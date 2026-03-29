@@ -57,8 +57,32 @@ public final class SlackClawAPIClient: @unchecked Sendable {
         try await get(fresh ? "/api/onboarding/state?fresh=1" : "/api/onboarding/state")
     }
 
-    public func updateOnboardingState(_ request: UpdateOnboardingStateRequest) async throws -> OnboardingStateResponse {
-        try await patch("/api/onboarding/state", body: request)
+    public func navigateOnboarding(to step: OnboardingStep) async throws -> OnboardingStateResponse {
+        try await post("/api/onboarding/navigate", body: OnboardingStepNavigationRequest(step: step))
+    }
+
+    public func detectOnboardingRuntime() async throws -> OnboardingStateResponse {
+        try await post("/api/onboarding/runtime/detect", body: EmptyBody())
+    }
+
+    public func installOnboardingRuntime(forceLocal: Bool = false) async throws -> SetupRunResponse {
+        try await post(
+            "/api/onboarding/runtime/install",
+            body: InstallRequest(autoConfigure: true, forceLocal: forceLocal),
+            timeout: RequestTimeout.longRunning
+        )
+    }
+
+    public func reuseOnboardingRuntime() async throws -> OnboardingStateResponse {
+        try await post("/api/onboarding/runtime/reuse", body: EmptyBody())
+    }
+
+    public func updateOnboardingRuntime() async throws -> SetupRunResponse {
+        try await post("/api/onboarding/runtime/update", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func confirmOnboardingPermissions() async throws -> OnboardingStateResponse {
+        try await post("/api/onboarding/permissions/confirm", body: EmptyBody())
     }
 
     public func resetOnboarding() async throws -> OnboardingStateResponse {
@@ -87,6 +111,14 @@ public final class SlackClawAPIClient: @unchecked Sendable {
     public func fetchChatOverview() async throws -> ChatOverview { try await get("/api/chat/overview?fresh=1") }
     public func fetchChatThread(threadId: String) async throws -> ChatThreadDetail { try await get("/api/chat/threads/\(threadId)?fresh=1") }
     public func fetchInstalledSkillDetail(skillId: String) async throws -> InstalledSkillDetail { try await get("/api/skills/\(skillId)?fresh=1") }
+    public func fetchOnboardingModelAuthSession(sessionId: String) async throws -> ModelAuthSessionResponse {
+        try await get("/api/onboarding/model/auth/session/\(sessionId)?fresh=1")
+    }
+
+    public func fetchOnboardingChannelSession(sessionId: String) async throws -> ChannelSessionResponse {
+        try await get("/api/onboarding/channel/session/\(sessionId)?fresh=1")
+    }
+
     public func fetchModelAuthSession(sessionId: String) async throws -> ModelAuthSessionResponse { try await get("/api/models/auth/session/\(sessionId)?fresh=1") }
     public func fetchChannelSession(sessionId: String) async throws -> ChannelSessionResponse { try await get("/api/channels/session/\(sessionId)?fresh=1") }
 
@@ -108,6 +140,14 @@ public final class SlackClawAPIClient: @unchecked Sendable {
 
     public func createModelEntry(_ request: SaveModelEntryRequest) async throws -> ModelConfigActionResponse {
         try await post("/api/models/entries", body: request)
+    }
+
+    public func saveOnboardingModelEntry(_ request: SaveModelEntryRequest) async throws -> ModelConfigActionResponse {
+        try await post("/api/onboarding/model/entries", body: request)
+    }
+
+    public func resetOnboardingModelDraft() async throws -> OnboardingStateResponse {
+        try await post("/api/onboarding/model/reset", body: EmptyBody())
     }
 
     public func updateModelEntry(entryId: String, request: SaveModelEntryRequest) async throws -> ModelConfigActionResponse {
@@ -134,11 +174,26 @@ public final class SlackClawAPIClient: @unchecked Sendable {
         try await post("/api/models/auth/session/\(sessionId)/input", body: ModelAuthSessionInputRequest(value: value))
     }
 
+    public func submitOnboardingModelAuthInput(sessionId: String, value: String) async throws -> ModelAuthSessionResponse {
+        try await post("/api/onboarding/model/auth/session/\(sessionId)/input", body: ModelAuthSessionInputRequest(value: value))
+    }
+
     public func saveChannelEntry(entryId: String?, request: SaveChannelEntryRequest) async throws -> ChannelConfigActionResponse {
         if let entryId {
             return try await patch("/api/channels/entries/\(entryId)", body: request)
         }
         return try await post("/api/channels/entries", body: request)
+    }
+
+    public func saveOnboardingChannelEntry(entryId: String?, request: SaveChannelEntryRequest) async throws -> ChannelConfigActionResponse {
+        if let entryId {
+            return try await patch("/api/onboarding/channel/entries/\(entryId)", body: request)
+        }
+        return try await post("/api/onboarding/channel/entries", body: request)
+    }
+
+    public func resetOnboardingChannelDraft() async throws -> OnboardingStateResponse {
+        try await post("/api/onboarding/channel/reset", body: EmptyBody())
     }
 
     public func deleteChannelEntry(request: RemoveChannelEntryRequest) async throws -> ChannelConfigActionResponse {
@@ -159,6 +214,14 @@ public final class SlackClawAPIClient: @unchecked Sendable {
 
     public func submitChannelSessionInput(sessionId: String, value: String) async throws -> ChannelSessionResponse {
         try await post("/api/channels/session/\(sessionId)/input", body: ChannelSessionInputRequest(value: value))
+    }
+
+    public func submitOnboardingChannelSessionInput(sessionId: String, value: String) async throws -> ChannelSessionResponse {
+        try await post("/api/onboarding/channel/session/\(sessionId)/input", body: ChannelSessionInputRequest(value: value))
+    }
+
+    public func saveOnboardingEmployee(_ request: OnboardingEmployeeState) async throws -> OnboardingStateResponse {
+        try await post("/api/onboarding/employee", body: request)
     }
 
     public func installSkill(slug: String) async throws -> SkillCatalogActionResponse {

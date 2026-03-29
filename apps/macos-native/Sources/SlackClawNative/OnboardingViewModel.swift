@@ -12,6 +12,7 @@ struct SettledMutationResult<Mutation, State> {
 
 private let onboardingTerminalControlPattern = try! NSRegularExpression(pattern: #"\[[0-9;?]*[ -/]*[@-~]"#)
 private let onboardingQRCodeGlyphs = CharacterSet(charactersIn: "█▀▄▌▐▙▟▛▜■□▓▒")
+private let onboardingURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s]+"#)
 
 private func sanitizeOnboardingChannelSessionLogLines(_ lines: [String]) -> [String] {
     lines.compactMap { line in
@@ -42,6 +43,60 @@ private func displayedOnboardingChannelSessionLogText(_ session: ChannelSession?
     sanitizeOnboardingChannelSessionLogLines(session?.logs ?? []).joined(separator: "\n")
 }
 
+private func onboardingQRCodeGlyphCount(in line: String) -> Int {
+    line.unicodeScalars.reduce(into: 0) { count, scalar in
+        if onboardingQRCodeGlyphs.contains(scalar) {
+            count += 1
+        }
+    }
+}
+
+private func onboardingChannelSessionURL(in line: String) -> String? {
+    let range = NSRange(line.startIndex..<line.endIndex, in: line)
+    guard let match = onboardingURLPattern.firstMatch(in: line, options: [], range: range),
+          let matchRange = Range(match.range, in: line) else {
+        return nil
+    }
+
+    return String(line[matchRange])
+}
+
+private func displayedOnboardingChannelSessionQRCodePayload(_ session: ChannelSession?) -> String? {
+    guard let session, session.channelId == .wechat else { return nil }
+
+    if let launchUrl = session.launchUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !launchUrl.isEmpty {
+        return launchUrl
+    }
+
+    for line in sanitizeOnboardingChannelSessionLogLines(session.logs) {
+        guard let url = onboardingChannelSessionURL(in: line) else { continue }
+        let lowercaseURL = url.lowercased()
+        if lowercaseURL.contains("qrcode=") || lowercaseURL.contains("liteapp.weixin.qq.com") {
+            return url
+        }
+    }
+
+    return nil
+}
+
+private func displayedOnboardingChannelSessionDetailLogText(_ session: ChannelSession?) -> String {
+    let qrPayload = displayedOnboardingChannelSessionQRCodePayload(session)
+
+    return sanitizeOnboardingChannelSessionLogLines(session?.logs ?? [])
+        .filter { line in
+            if onboardingQRCodeGlyphCount(in: line) >= 8 {
+                return false
+            }
+
+            if let qrPayload, onboardingChannelSessionURL(in: line) == qrPayload {
+                return false
+            }
+
+            return true
+        }
+        .joined(separator: "\n")
+}
+
 private func onboardingWechatSessionHasVisibleQRCode(_ session: ChannelSession?) -> Bool {
     guard let session, session.channelId == .wechat else { return false }
 
@@ -51,12 +106,7 @@ private func onboardingWechatSessionHasVisibleQRCode(_ session: ChannelSession?)
             return true
         }
 
-        let qrGlyphCount = line.unicodeScalars.reduce(into: 0) { count, scalar in
-            if onboardingQRCodeGlyphs.contains(scalar) {
-                count += 1
-            }
-        }
-        return qrGlyphCount >= 8
+        return onboardingQRCodeGlyphCount(in: line) >= 8
     }
 }
 
@@ -66,6 +116,27 @@ private func onboardingWechatSessionIsAwaitingVisibleQRCode(_ session: ChannelSe
     }
 
     return !onboardingWechatSessionHasVisibleQRCode(session)
+}
+
+func isRecoverableOnboardingCompletionTimeout(_ error: Error) -> Bool {
+    if error is CancellationError {
+        return false
+    }
+
+    let nsError = error as NSError
+    if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut {
+        return true
+    }
+
+    if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+       underlying.domain == NSURLErrorDomain,
+       underlying.code == NSURLErrorTimedOut
+    {
+        return true
+    }
+
+    let message = error.localizedDescription.lowercased()
+    return message.contains("timed out") || message.contains("timeout")
 }
 
 @MainActor
@@ -106,6 +177,7 @@ final class NativeOnboardingViewModel {
     var channelBusy = false
     var employeeBusy = false
     var completionBusy: OnboardingDestination?
+    var completedOnboarding: CompleteOnboardingResponse?
     var channelMessage: String?
     var channelRequiresApply = false
     var channelSessionInput = ""
@@ -155,8 +227,16 @@ final class NativeOnboardingViewModel {
         currentDraft.currentStep
     }
 
+    var showingCompletion: Bool {
+        completedOnboarding != nil
+    }
+
+    var completionSummary: OnboardingCompletionSummary {
+        completedOnboarding?.summary ?? onboardingState?.summary ?? .init()
+    }
+
     var currentStepIndex: Int {
-        onboardingStepIndex(currentStep)
+        showingCompletion ? max(nativeOnboardingStepOrder.count - 1, 0) : onboardingStepIndex(currentStep)
     }
 
     var installTarget: DeploymentTargetStatus? {
@@ -228,6 +308,14 @@ final class NativeOnboardingViewModel {
         displayedOnboardingChannelSessionLogText(activeChannelSession)
     }
 
+    var displayedChannelSessionQRCodePayload: String? {
+        displayedOnboardingChannelSessionQRCodePayload(activeChannelSession)
+    }
+
+    var displayedChannelSessionDetailLogText: String {
+        displayedOnboardingChannelSessionDetailLogText(activeChannelSession)
+    }
+
     var channelPrimaryActionBusy: Bool {
         channelBusy || (selectedChannelSetupVariant == .wechatGuided && onboardingWechatSessionIsAwaitingVisibleQRCode(activeChannelSession))
     }
@@ -273,7 +361,7 @@ final class NativeOnboardingViewModel {
     }
 
     var previewAvatarPreset: NativeOnboardingAvatarPreset {
-        resolveOnboardingAvatarPreset(employeeAvatarPresetId)
+        resolveOnboardingAvatarPreset(selectedEmployeePreset?.avatarPresetId ?? employeeAvatarPresetId)
     }
 
     var employeePresets: [OnboardingEmployeePresetPresentation] {
@@ -294,6 +382,34 @@ final class NativeOnboardingViewModel {
         }
 
         return resolveOnboardingEmployeePresetReadiness(preset: selectedEmployeePreset, onboardingState: onboardingState)
+    }
+
+    private func applyOnboardingState(_ state: OnboardingStateResponse) {
+        onboardingState = state
+        applyDraft(state.draft)
+    }
+
+    private func stageExistingInstall() async throws {
+        let state = try await appState.client.reuseOnboardingRuntime()
+        applyOnboardingState(state)
+    }
+
+    private func confirmPermissionsStep() async throws {
+        let state = try await appState.client.confirmOnboardingPermissions()
+        applyOnboardingState(state)
+    }
+
+    private func saveEmployeeDraftToDaemon(_ employee: OnboardingEmployeeState) async throws {
+        let state = try await appState.client.saveOnboardingEmployee(employee)
+        applyOnboardingState(state)
+    }
+
+    private func enterDestination(_ destination: OnboardingDestination) async {
+        appState.selectedSection = onboardingDestinationSection(destination)
+        await appState.refreshAll()
+        if destination == .chat {
+            await appState.chatViewModel.start()
+        }
     }
 
     func selectProvider(_ provider: OnboardingModelProviderPresentation) {
@@ -324,6 +440,7 @@ final class NativeOnboardingViewModel {
     func bootstrap() async {
         pageLoading = true
         pageError = nil
+        completedOnboarding = nil
 
         do {
             if appState.overview == nil {
@@ -331,8 +448,7 @@ final class NativeOnboardingViewModel {
             }
 
             let state = try await appState.client.fetchOnboardingState()
-            onboardingState = state
-            applyDraft(state.draft)
+            applyOnboardingState(state)
 
             if shouldLoadInstallDeploymentTargets(
                 step: state.draft.currentStep,
@@ -355,24 +471,21 @@ final class NativeOnboardingViewModel {
             }
 
             if let sessionId = state.draft.activeModelAuthSessionId, !sessionId.isEmpty {
-                let next = try await appState.client.fetchModelAuthSession(sessionId: sessionId)
+                let next = try await appState.client.fetchOnboardingModelAuthSession(sessionId: sessionId)
                 appState.modelConfig = next.modelConfig
-                modelSession = next.session
+                modelSession = next.session.status == "completed" || next.session.status == "failed" ? nil : next.session
+                if let onboarding = next.onboarding {
+                    applyOnboardingState(onboarding)
+                }
                 startModelSessionPolling(sessionId: sessionId)
             }
 
             if currentStep == .model && modelPickerProviders.isEmpty {
-                onboardingState = try await appState.client.fetchOnboardingState(fresh: true)
-                if let onboardingState {
-                    applyDraft(onboardingState.draft)
-                }
+                applyOnboardingState(try await appState.client.fetchOnboardingState(fresh: true))
             }
 
             if currentStep == .channel && curatedChannels.isEmpty {
-                onboardingState = try await appState.client.fetchOnboardingState(fresh: true)
-                if let onboardingState {
-                    applyDraft(onboardingState.draft)
-                }
+                applyOnboardingState(try await appState.client.fetchOnboardingState(fresh: true))
             }
 
             if currentStep == .channel {
@@ -399,18 +512,28 @@ final class NativeOnboardingViewModel {
     }
 
     func markWelcomeStarted() async {
-        await persistDraftSafely(.init(currentStep: .install))
+        pageError = nil
+        await goToStep(.install)
+        do {
+            applyOnboardingState(try await appState.client.detectOnboardingRuntime())
+        } catch {
+            presentErrorUnlessCancelled(error)
+        }
     }
 
     func goToStep(_ step: OnboardingStep) async {
-        await persistDraftSafely(.init(currentStep: step))
+        do {
+            applyOnboardingState(try await appState.client.navigateOnboarding(to: step))
+        } catch {
+            presentErrorUnlessCancelled(error)
+        }
     }
 
     func useExistingInstall() async {
         pageError = nil
 
         do {
-            onboardingState = try await persistDraft(buildExistingInstallAdvanceRequest(overview: appState.overview))
+            try await stageExistingInstall()
         } catch {
             presentErrorUnlessCancelled(error)
         }
@@ -425,11 +548,12 @@ final class NativeOnboardingViewModel {
         defer { installBusy = false }
 
         do {
-            let result = try await appState.client.updateTarget(target.id)
-            async let overview = readFreshOverview()
-            async let deploymentTargets = readFreshDeploymentTargets()
-            _ = try await overview
-            _ = try await deploymentTargets
+            let result = try await appState.client.updateOnboardingRuntime()
+            appState.overview = result.overview
+            if let onboarding = result.onboarding {
+                applyOnboardingState(onboarding)
+            }
+            _ = try await readFreshDeploymentTargets()
 
             guard result.status == "completed" else {
                 throw NativeClientError.runtime(result.message)
@@ -442,7 +566,7 @@ final class NativeOnboardingViewModel {
     }
 
     func advancePastInstall() async {
-        await persistDraftSafely(.init(currentStep: .permissions))
+        await goToStep(.permissions)
     }
 
     func advancePastPermissions() async {
@@ -450,43 +574,43 @@ final class NativeOnboardingViewModel {
         permissionsNextBusy = true
         defer { permissionsNextBusy = false }
 
-        await persistDraftSafely(.init(currentStep: .model))
+        do {
+            try await confirmPermissionsStep()
+        } catch {
+            presentErrorUnlessCancelled(error)
+        }
     }
 
     func advancePastModel() async {
-        await persistDraftSafely(.init(currentStep: .channel))
+        await goToStep(.channel)
     }
 
     func returnToModelPicker() async {
         pageError = nil
         clearProviderSelection()
-        await persistDraftSafely(
-            .init(
-                currentStep: .model,
-                model: .init(providerId: "", modelKey: "", methodId: ""),
-                activeModelAuthSessionId: ""
-            )
-        )
+        do {
+            applyOnboardingState(try await appState.client.resetOnboardingModelDraft())
+        } catch {
+            presentErrorUnlessCancelled(error)
+        }
     }
 
     func persistEmployeeDraft() {
         guard currentStep == .employee else { return }
-        scheduleDraftPersistence { [employeeName, employeeJobTitle, employeeAvatarPresetId, selectedEmployeePreset, memoryEnabled] in
+        scheduleEmployeeDraftPersistence { [employeeName, employeeJobTitle, selectedEmployeePreset, memoryEnabled] in
             .init(
-                employee: .init(
-                    memberId: self.currentDraft.employee?.memberId,
-                    name: employeeName,
-                    jobTitle: employeeJobTitle,
-                    avatarPresetId: employeeAvatarPresetId,
-                    presetId: selectedEmployeePreset?.id,
-                    personalityTraits: [],
-                    presetSkillIds: selectedEmployeePreset.map { preset in
-                        resolveOnboardingPresetSkillIDs(presetSkillIDs: preset.presetSkillIds)
-                    },
-                    knowledgePackIds: selectedEmployeePreset?.knowledgePackIds ?? [],
-                    workStyles: selectedEmployeePreset?.workStyles ?? [],
-                    memoryEnabled: memoryEnabled
-                )
+                memberId: self.currentDraft.employee?.memberId,
+                name: employeeName,
+                jobTitle: employeeJobTitle,
+                avatarPresetId: selectedEmployeePreset?.avatarPresetId ?? self.currentDraft.employee?.avatarPresetId ?? "",
+                presetId: selectedEmployeePreset?.id,
+                personalityTraits: [],
+                presetSkillIds: selectedEmployeePreset.map { preset in
+                    resolveOnboardingPresetSkillIDs(presetSkillIDs: preset.presetSkillIds)
+                },
+                knowledgePackIds: selectedEmployeePreset?.knowledgePackIds ?? [],
+                workStyles: selectedEmployeePreset?.workStyles ?? [],
+                memoryEnabled: memoryEnabled
             )
         }
     }
@@ -498,21 +622,12 @@ final class NativeOnboardingViewModel {
         defer { installBusy = false }
 
         do {
-            let result = try await settleAfterMutation(
-                mutate: { try await self.appState.client.runFirstRunSetup() },
-                getProvisionalState: { $0.overview },
-                applyState: { self.appState.overview = $0 },
-                readFresh: { try await self.readFreshOverview() },
-                isSettled: { overview, _ in overview.engine.installed }
-            )
-
-            let installState = OnboardingInstallState(
-                installed: result.state.engine.installed,
-                version: result.state.engine.version ?? result.mutation.install?.actualVersion ?? result.mutation.install?.existingVersion,
-                disposition: installDisposition(overview: result.state, setup: result.mutation)
-            )
-
-            onboardingState = try await persistDraft(.init(currentStep: .install, install: installState))
+            let result = try await appState.client.installOnboardingRuntime()
+            appState.overview = result.overview
+            _ = try await readFreshDeploymentTargets()
+            if let onboarding = result.onboarding {
+                applyOnboardingState(onboarding)
+            }
         } catch {
             presentErrorUnlessCancelled(error)
         }
@@ -541,55 +656,16 @@ final class NativeOnboardingViewModel {
         )
 
         do {
-            let previousEntries = appState.modelConfig?.savedEntries ?? []
-            let result = try await settleAfterMutation(
-                mutate: { try await self.appState.client.createModelEntry(request) },
-                getProvisionalState: { $0.modelConfig },
-                applyState: { self.appState.modelConfig = $0 },
-                readFresh: { try await self.readFreshModelConfig() },
-                isSettled: { state, mutation in
-                    if mutation.authSession != nil {
-                        return false
-                    }
-
-                    guard let createdEntry = findCreatedSavedEntry(previousEntries: previousEntries, nextEntries: mutation.modelConfig.savedEntries) else {
-                        return false
-                    }
-
-                    let actualEntry = state.savedEntries.first(where: { $0.id == createdEntry.id })
-                    return saveEntrySignature(actualEntry) == saveEntrySignature(createdEntry)
-                }
-            )
-
-            if let authSession = result.mutation.authSession {
-                modelSession = authSession
-                onboardingState = try await persistDraft(
-                    .init(
-                        currentStep: nativeOnboardingNextStepAfterModelSave(requiresInteraction: true),
-                        model: .init(providerId: providerId, modelKey: modelKey.trimmingCharacters(in: .whitespacesAndNewlines), methodId: methodId),
-                        activeModelAuthSessionId: authSession.id
-                    )
-                )
-                startModelSessionPolling(sessionId: authSession.id)
-                return
+            let result = try await appState.client.saveOnboardingModelEntry(request)
+            appState.modelConfig = result.modelConfig
+            modelSession = result.authSession
+            if let onboarding = result.onboarding {
+                applyOnboardingState(onboarding)
             }
 
-            let savedEntry =
-                findCreatedSavedEntry(previousEntries: previousEntries, nextEntries: result.state.savedEntries)
-                ?? result.state.savedEntries.first(where: { $0.providerId == providerId && $0.modelKey == modelKey.trimmingCharacters(in: .whitespacesAndNewlines) })
-
-            onboardingState = try await persistDraft(
-                .init(
-                    currentStep: nativeOnboardingNextStepAfterModelSave(requiresInteraction: false),
-                    model: .init(
-                        providerId: providerId,
-                        modelKey: modelKey.trimmingCharacters(in: .whitespacesAndNewlines),
-                        methodId: methodId,
-                        entryId: savedEntry?.id
-                    ),
-                    activeModelAuthSessionId: ""
-                )
-            )
+            if let authSession = result.authSession {
+                startModelSessionPolling(sessionId: authSession.id)
+            }
         } catch {
             presentErrorUnlessCancelled(error)
         }
@@ -604,11 +680,16 @@ final class NativeOnboardingViewModel {
         defer { modelBusy = "" }
 
         do {
-            let next = try await appState.client.submitModelAuthInput(sessionId: sessionId, value: modelSessionInput.trimmingCharacters(in: .whitespacesAndNewlines))
-            modelSession = next.session
+            let next = try await appState.client.submitOnboardingModelAuthInput(
+                sessionId: sessionId,
+                value: modelSessionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            modelSession = next.session.status == "completed" || next.session.status == "failed" ? nil : next.session
             appState.modelConfig = next.modelConfig
             modelSessionInput = ""
-            onboardingState = try await appState.client.fetchOnboardingState()
+            if let onboarding = next.onboarding {
+                applyOnboardingState(onboarding)
+            }
         } catch {
             presentErrorUnlessCancelled(error)
         }
@@ -632,8 +713,7 @@ final class NativeOnboardingViewModel {
         )
 
         do {
-            let previousEntries = appState.channelConfig?.entries ?? []
-            let result = try await self.appState.client.saveChannelEntry(entryId: selectedChannelEntry?.id, request: request)
+            let result = try await self.appState.client.saveOnboardingChannelEntry(entryId: selectedChannelEntry?.id, request: request)
             applyChannelConfig(result.channelConfig, activeSession: result.session)
 
             channelMessage = result.message
@@ -641,32 +721,21 @@ final class NativeOnboardingViewModel {
             if result.session != nil {
                 channelSessionInput = ""
             }
-            let savedEntry =
-                (selectedChannelEntry.flatMap { selected in result.channelConfig.entries.first(where: { $0.id == selected.id }) }) ??
-                findCreatedChannelEntry(previousEntries: previousEntries, nextEntries: result.channelConfig.entries) ??
-                result.channelConfig.entries.first(where: { $0.channelId == selectedChannelPresentation.id })
+            if let onboarding = result.onboarding {
+                applyOnboardingState(onboarding)
+            }
 
             if let session = result.session {
-                onboardingState = try await persistDraft(.init(
-                    currentStep: .channel,
-                    channel: .init(channelId: selectedChannelPresentation.id, entryId: savedEntry?.id),
-                    activeChannelSessionId: session.id
-                ))
                 startChannelSessionPolling(
                     sessionId: session.id,
                     channelId: selectedChannelPresentation.id,
-                    preferredEntryId: savedEntry?.id ?? session.entryId
+                    preferredEntryId: currentDraft.channel?.entryId ?? session.entryId
                 )
                 return
             }
 
             channelSessionTask?.cancel()
             channelSessionTask = nil
-            onboardingState = try await persistDraft(.init(
-                currentStep: .employee,
-                channel: .init(channelId: selectedChannelPresentation.id, entryId: savedEntry?.id),
-                activeChannelSessionId: ""
-            ))
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 _ = try? await self.readFreshChannelConfig()
@@ -685,12 +754,15 @@ final class NativeOnboardingViewModel {
         defer { channelBusy = false }
 
         do {
-            let next = try await appState.client.submitChannelSessionInput(
+            let next = try await appState.client.submitOnboardingChannelSessionInput(
                 sessionId: sessionID,
                 value: channelSessionInput.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             applyChannelConfig(next.channelConfig, activeSession: next.session)
             channelSessionInput = ""
+            if let onboarding = next.onboarding {
+                applyOnboardingState(onboarding)
+            }
             if try await maybeAdvanceCompletedChannelSetupIfNeeded(
                 channelId: next.session.channelId,
                 preferredEntryId: next.session.entryId
@@ -700,10 +772,6 @@ final class NativeOnboardingViewModel {
             }
             if next.session.status == "failed" {
                 pageError = next.session.message
-                onboardingState = try await persistDraft(.init(
-                    channel: .init(channelId: next.session.channelId, entryId: next.session.entryId),
-                    activeChannelSessionId: ""
-                ))
                 channelSessionTask?.cancel()
                 channelSessionTask = nil
                 return
@@ -714,14 +782,20 @@ final class NativeOnboardingViewModel {
                 preferredEntryId: next.session.entryId
             )
         } catch {
+            if await handleMissingOnboardingChannelSession(error) {
+                return
+            }
             presentErrorUnlessCancelled(error)
         }
     }
 
     func selectEmployeePreset(_ presetID: String) {
         selectedEmployeePresetId = presetID
-        if let preset = employeePresets.first(where: { $0.id == presetID }), let defaultMemoryEnabled = preset.defaultMemoryEnabled {
-            memoryEnabled = defaultMemoryEnabled
+        if let preset = employeePresets.first(where: { $0.id == presetID }) {
+            employeeAvatarPresetId = preset.avatarPresetId
+            if let defaultMemoryEnabled = preset.defaultMemoryEnabled {
+                memoryEnabled = defaultMemoryEnabled
+            }
         }
         persistEmployeeDraft()
     }
@@ -737,65 +811,33 @@ final class NativeOnboardingViewModel {
             return
         }
 
-        if let selectedEmployeePresetReadiness, selectedEmployeePresetReadiness.blocking {
-            pageError = selectedEmployeePresetReadiness.detail
-                ?? "ChillClaw is still preparing this preset's managed skills in the active OpenClaw runtime."
-            return
-        }
-
         pageError = nil
         employeeBusy = true
         defer { employeeBusy = false }
 
-        let draft = NativeOnboardingEmployeeDraft(
+        let employeeState = OnboardingEmployeeState(
+            memberId: currentDraft.employee?.memberId,
             name: employeeName,
             jobTitle: employeeJobTitle,
-            avatarPresetId: employeeAvatarPresetId,
+            avatarPresetId: selectedEmployeePreset.avatarPresetId,
             presetId: selectedEmployeePreset.id,
             personalityTraits: [],
             presetSkillIds: resolveOnboardingPresetSkillIDs(presetSkillIDs: selectedEmployeePreset.presetSkillIds),
             knowledgePackIds: selectedEmployeePreset.knowledgePackIds,
             workStyles: selectedEmployeePreset.workStyles,
-            memoryEnabled: memoryEnabled,
-            brainEntryId: selectedBrainEntryId
+            memoryEnabled: memoryEnabled
         )
 
         do {
-            let previousMembers = appState.aiTeamOverview?.members ?? []
-            let result = try await settleAfterMutation(
-                mutate: { try await self.appState.client.saveMember(memberId: nil, request: buildOnboardingMemberRequest(draft)) },
-                getProvisionalState: { $0.overview },
-                applyState: { self.appState.aiTeamOverview = $0 },
-                readFresh: { try await self.readFreshAITeamOverview() },
-                isSettled: { state, mutation in
-                    guard let createdMember = findCreatedMember(previousMembers: previousMembers, nextMembers: mutation.overview.members) else {
-                        return false
-                    }
-                    return state.members.contains(where: { $0.id == createdMember.id })
-                }
-            )
-
-            let createdMemberFromMutation = findCreatedMember(previousMembers: previousMembers, nextMembers: result.state.members)
-            let createdMember = createdMemberFromMutation ?? result.state.members.first(where: { $0.name == draft.name && $0.jobTitle == draft.jobTitle })
-
-            onboardingState = try await persistDraft(
-                .init(
-                    currentStep: .complete,
-                    employee: .init(
-                        memberId: createdMember?.id,
-                        name: createdMember?.name ?? draft.name,
-                        jobTitle: createdMember?.jobTitle ?? draft.jobTitle,
-                        avatarPresetId: createdMember?.avatar.presetId ?? draft.avatarPresetId,
-                        presetId: draft.presetId,
-                        personalityTraits: [],
-                        presetSkillIds: draft.presetSkillIds,
-                        knowledgePackIds: draft.knowledgePackIds,
-                        workStyles: draft.workStyles,
-                        memoryEnabled: memoryEnabled
-                    )
-                )
-            )
+            try await saveEmployeeDraftToDaemon(employeeState)
+            let result = try await appState.client.completeOnboarding(.init())
+            appState.overview = result.overview
+            completedOnboarding = result
+            refreshAITeamOverviewInBackground()
         } catch {
+            if await recoverOnboardingCompletionAfterTimeout(error, destination: nil) {
+                return
+            }
             presentErrorUnlessCancelled(error)
         }
     }
@@ -806,12 +848,18 @@ final class NativeOnboardingViewModel {
         defer { completionBusy = nil }
 
         do {
+            if showingCompletion {
+                await enterDestination(destination)
+                return
+            }
+
             let result = try await appState.client.completeOnboarding(.init(destination: destination))
             appState.overview = result.overview
-            appState.selectedSection = onboardingDestinationSection(destination)
-            await appState.refreshAll()
-            await appState.chatViewModel.start()
+            await enterDestination(destination)
         } catch {
+            if await recoverOnboardingCompletionAfterTimeout(error, destination: destination) {
+                return
+            }
             presentErrorUnlessCancelled(error)
         }
     }
@@ -865,13 +913,17 @@ final class NativeOnboardingViewModel {
         channelMessage = nil
         channelRequiresApply = false
         channelSessionInput = ""
-        await persistDraftSafely(.init(currentStep: .channel))
+        do {
+            applyOnboardingState(try await appState.client.resetOnboardingChannelDraft())
+        } catch {
+            presentErrorUnlessCancelled(error)
+        }
     }
 
     func goBackFromChannelPicker() async {
         channelSessionTask?.cancel()
         channelSessionTask = nil
-        await persistDraftSafely(.init(currentStep: .model))
+        await goToStep(.model)
     }
 
     func saveAndContinueChannel() async {
@@ -917,20 +969,28 @@ final class NativeOnboardingViewModel {
         }
 
         channelSessionInput = ""
-        onboardingState = try await persistDraft(.init(
-            currentStep: .employee,
-            channel: .init(channelId: resolvedChannelId, entryId: entry.id),
-            activeChannelSessionId: ""
-        ))
-        return true
+        let next = try await appState.client.fetchOnboardingState(fresh: true)
+        applyOnboardingState(next)
+        return next.draft.currentStep == .employee
     }
 
     private func resumeChannelSession(
         sessionId: String,
         draftChannel: OnboardingChannelState?
     ) async throws {
-        let next = try await appState.client.fetchChannelSession(sessionId: sessionId)
+        let next: ChannelSessionResponse
+        do {
+            next = try await appState.client.fetchOnboardingChannelSession(sessionId: sessionId)
+        } catch {
+            if await handleMissingOnboardingChannelSession(error) {
+                return
+            }
+            throw error
+        }
         applyChannelConfig(next.channelConfig, activeSession: next.session)
+        if let onboarding = next.onboarding {
+            applyOnboardingState(onboarding)
+        }
         let channelId = draftChannel?.channelId ?? next.session.channelId
         let preferredEntryId = draftChannel?.entryId ?? next.session.entryId
 
@@ -943,10 +1003,6 @@ final class NativeOnboardingViewModel {
 
         if next.session.status == "failed" {
             pageError = next.session.message
-            onboardingState = try await persistDraft(.init(
-                channel: .init(channelId: channelId, entryId: preferredEntryId),
-                activeChannelSessionId: ""
-            ))
             return
         }
 
@@ -968,8 +1024,11 @@ final class NativeOnboardingViewModel {
 
             while !Task.isCancelled {
                 do {
-                    let next = try await self.appState.client.fetchChannelSession(sessionId: sessionId)
+                    let next = try await self.appState.client.fetchOnboardingChannelSession(sessionId: sessionId)
                     self.applyChannelConfig(next.channelConfig, activeSession: next.session)
+                    if let onboarding = next.onboarding {
+                        self.applyOnboardingState(onboarding)
+                    }
 
                     if try await self.maybeAdvanceCompletedChannelSetupIfNeeded(
                         channelId: channelId,
@@ -981,10 +1040,6 @@ final class NativeOnboardingViewModel {
 
                     if next.session.status == "failed" {
                         self.pageError = next.session.message
-                        self.onboardingState = try await self.persistDraft(.init(
-                            channel: .init(channelId: channelId, entryId: preferredEntryId ?? next.session.entryId),
-                            activeChannelSessionId: ""
-                        ))
                         self.channelSessionTask = nil
                         return
                     }
@@ -1000,6 +1055,11 @@ final class NativeOnboardingViewModel {
                         }
                     } catch let refreshError {
                         self.presentErrorUnlessCancelled(refreshError)
+                        self.channelSessionTask = nil
+                        return
+                    }
+
+                    if await self.handleMissingOnboardingChannelSession(sessionError) {
                         self.channelSessionTask = nil
                         return
                     }
@@ -1099,39 +1159,18 @@ final class NativeOnboardingViewModel {
         channelValues[fieldId] = value
     }
 
-    private func scheduleDraftPersistence(_ patch: @escaping @MainActor () -> UpdateOnboardingStateRequest) {
+    private func scheduleEmployeeDraftPersistence(_ employee: @escaping @MainActor () -> OnboardingEmployeeState) {
         guard !isApplyingDraft else { return }
         persistTask?.cancel()
         persistTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard let self, !Task.isCancelled else { return }
-            await self.persistDraftSafely(patch())
+            do {
+                try await self.saveEmployeeDraftToDaemon(employee())
+            } catch {
+                self.presentErrorUnlessCancelled(error)
+            }
         }
-    }
-
-    func persistDraftSafely(_ patch: UpdateOnboardingStateRequest) async {
-        do {
-            onboardingState = try await persistDraft(patch)
-        } catch {
-            presentErrorUnlessCancelled(error)
-        }
-    }
-
-    private func persistDraft(_ patch: UpdateOnboardingStateRequest) async throws -> OnboardingStateResponse {
-        let current = currentDraft
-        let request = UpdateOnboardingStateRequest(
-            currentStep: patch.currentStep ?? current.currentStep,
-            install: patch.install ?? current.install,
-            model: patch.model ?? current.model,
-            channel: patch.channel ?? current.channel,
-            employee: patch.employee ?? current.employee,
-            activeModelAuthSessionId: patch.activeModelAuthSessionId ?? current.activeModelAuthSessionId,
-            activeChannelSessionId: patch.activeChannelSessionId ?? current.activeChannelSessionId
-        )
-
-        let next = try await appState.client.updateOnboardingState(request)
-        onboardingState = next
-        return next
     }
 
     private func applyDraft(_ draft: OnboardingDraftState) {
@@ -1181,6 +1220,7 @@ final class NativeOnboardingViewModel {
             memoryEnabled = employee.memoryEnabled ?? memoryEnabled
         } else if selectedEmployeePresetId.isEmpty, let firstPreset = employeePresets.first {
             selectedEmployeePresetId = firstPreset.id
+            employeeAvatarPresetId = firstPreset.avatarPresetId
             if let defaultMemoryEnabled = firstPreset.defaultMemoryEnabled {
                 memoryEnabled = defaultMemoryEnabled
             }
@@ -1193,48 +1233,23 @@ final class NativeOnboardingViewModel {
             guard let self else { return }
             while !Task.isCancelled {
                 do {
-                    let nextSession = try await self.appState.client.fetchModelAuthSession(sessionId: sessionId)
-                    self.modelSession = nextSession.session
+                    let nextSession = try await self.appState.client.fetchOnboardingModelAuthSession(sessionId: sessionId)
+                    self.modelSession =
+                        nextSession.session.status == "completed" || nextSession.session.status == "failed"
+                        ? nil
+                        : nextSession.session
                     self.appState.modelConfig = nextSession.modelConfig
+                    if let onboarding = nextSession.onboarding {
+                        self.applyOnboardingState(onboarding)
+                    }
 
                     if nextSession.session.status == "completed" {
-                        let result = try await self.settleAfterMutation(
-                            mutate: { nextSession },
-                            getProvisionalState: { $0.modelConfig },
-                            applyState: { self.appState.modelConfig = $0 },
-                            readFresh: { try await self.readFreshModelConfig() },
-                            isSettled: { state, mutation in
-                                let entryId = mutation.session.entryId ?? self.currentDraft.model?.entryId
-                                guard let entryId else { return false }
-                                let expectedEntry = mutation.modelConfig.savedEntries.first(where: { $0.id == entryId })
-                                let actualEntry = state.savedEntries.first(where: { $0.id == entryId })
-                                return saveEntrySignature(actualEntry) == saveEntrySignature(expectedEntry)
-                            }
-                        )
-
-                        let nextEntry =
-                            result.state.savedEntries.first(where: { $0.id == nextSession.session.entryId }) ??
-                            result.state.savedEntries.first(where: { $0.providerId == nextSession.session.providerId && $0.authMethodId == nextSession.session.methodId })
-
-                        self.onboardingState = try await self.persistDraft(
-                            .init(
-                                currentStep: nativeOnboardingNextStepAfterModelSave(requiresInteraction: false),
-                                model: .init(
-                                    providerId: nextEntry?.providerId ?? self.providerId,
-                                    modelKey: nextEntry?.modelKey ?? self.modelKey,
-                                    methodId: nextEntry?.authMethodId ?? self.methodId,
-                                    entryId: nextEntry?.id ?? self.currentDraft.model?.entryId
-                                ),
-                                activeModelAuthSessionId: ""
-                            )
-                        )
                         self.modelSession = nil
                         return
                     }
 
                     if nextSession.session.status == "failed" {
                         self.pageError = nextSession.session.message
-                        self.onboardingState = try await self.persistDraft(.init(activeModelAuthSessionId: ""))
                         return
                     }
                 } catch {
@@ -1251,6 +1266,26 @@ final class NativeOnboardingViewModel {
         var nextConfig = channelConfig
         nextConfig.activeSession = activeSession
         appState.channelConfig = nextConfig
+    }
+
+    private func handleMissingOnboardingChannelSession(_ error: Error) async -> Bool {
+        let message = error.localizedDescription
+        guard message.localizedCaseInsensitiveContains("channel session not found")
+            || message.localizedCaseInsensitiveContains("channel login session ended")
+        else {
+            return false
+        }
+
+        if var channelConfig = appState.channelConfig {
+            channelConfig.activeSession = nil
+            appState.channelConfig = channelConfig
+        }
+
+        channelMessage = message
+        if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+            applyOnboardingState(next)
+        }
+        return true
     }
 
     private func readFreshOverview() async throws -> ProductOverview {
@@ -1281,6 +1316,54 @@ final class NativeOnboardingViewModel {
         let overview = try await appState.client.fetchAITeamOverview()
         appState.aiTeamOverview = overview
         return overview
+    }
+
+    private func refreshAITeamOverviewInBackground() {
+        Task { [weak self] in
+            guard let self else { return }
+            _ = try? await self.readFreshAITeamOverview()
+        }
+    }
+
+    private func recoverOnboardingCompletionAfterTimeout(
+        _ error: Error,
+        destination: OnboardingDestination?
+    ) async -> Bool {
+        guard isRecoverableOnboardingCompletionTimeout(error) else {
+            return false
+        }
+
+        for attempt in 0..<12 {
+            if let overview = try? await readFreshOverview(), overview.firstRun.setupCompleted {
+                pageError = nil
+                let recovered = CompleteOnboardingResponse(
+                    status: "completed",
+                    destination: destination,
+                    summary: completionSummary,
+                    overview: overview
+                )
+                appState.overview = overview
+
+                if let destination {
+                    await enterDestination(destination)
+                } else {
+                    completedOnboarding = recovered
+                    refreshAITeamOverviewInBackground()
+                }
+
+                return true
+            }
+
+            if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+                applyOnboardingState(next)
+            }
+
+            if attempt < 11 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+
+        return false
     }
 
     private func startDaemonEventsIfNeeded() {

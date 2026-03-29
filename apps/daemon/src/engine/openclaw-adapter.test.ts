@@ -304,6 +304,7 @@ async function withFakeOpenClaw(
     canonicalWecomRuntime?: boolean;
     legacyWechatRuntime?: boolean;
     openclawWeixinRuntime?: boolean;
+    longRunningWechatInstaller?: boolean;
     pluginInstalled?: boolean;
     pluginEnabled?: boolean;
     pluginUpdateAvailable?: boolean;
@@ -351,6 +352,7 @@ async function withFakeOpenClaw(
   const canonicalWecomRuntime = options?.canonicalWecomRuntime === true;
   const legacyWechatRuntime = options?.legacyWechatRuntime === true;
   const openclawWeixinRuntime = options?.openclawWeixinRuntime === true;
+  const longRunningWechatInstaller = options?.longRunningWechatInstaller === true;
   const pluginInstalled = options?.pluginInstalled === true;
   const pluginEnabled = options?.pluginEnabled === true;
   const pluginUpdateAvailable = options?.pluginUpdateAvailable === true;
@@ -400,6 +402,9 @@ if [ "$1" = "install" ]; then
   echo 'Scan the QR code from WeChat on your phone to continue.'
   if [ -t 1 ]; then
     echo 'Interactive QR ready from TTY.'
+  fi
+  if [ "${longRunningWechatInstaller ? "1" : "0"}" = "1" ]; then
+    sleep 2
   fi
   exit 0
 fi
@@ -1092,6 +1097,40 @@ test("personal WeChat captures installer output that only appears on an interact
       true,
       session.logs.join("\n")
     );
+  });
+});
+
+test("personal WeChat does not start a second installer while the QR session is still active", async () => {
+  await withFakeOpenClaw(async ({ adapter }) => {
+    const firstPromise = adapter.config.saveChannelEntry({
+      channelId: "wechat",
+      action: "save",
+      values: {}
+    });
+    let firstSession = await adapter.gateway.getActiveChannelSession();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (firstSession?.channelId === "wechat" && firstSession.status === "running") {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      firstSession = await adapter.gateway.getActiveChannelSession();
+    }
+
+    const second = await adapter.config.saveChannelEntry({
+      channelId: "wechat",
+      action: "save",
+      values: {}
+    });
+    const first = await firstPromise;
+
+    assert.ok(first.session);
+    assert.equal(firstSession?.channelId, "wechat");
+    assert.equal(firstSession?.status, "running");
+    assert.equal(second.message, "WeChat login is already running.");
+    assert.equal(second.session?.id, first.session?.id);
+  }, {
+    longRunningWechatInstaller: true
   });
 });
 

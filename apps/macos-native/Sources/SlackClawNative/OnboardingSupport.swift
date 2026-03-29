@@ -23,7 +23,7 @@ let nativeOnboardingAvatarPresets: [NativeOnboardingAvatarPreset] = [
 ]
 
 let nativeOnboardingChannelIDs: Set<SupportedChannelId> = [.wechatWork, .wechat, .feishu, .telegram]
-let nativeOnboardingStepOrder: [OnboardingStep] = [.welcome, .install, .permissions, .model, .channel, .employee, .complete]
+let nativeOnboardingStepOrder: [OnboardingStep] = [.welcome, .install, .permissions, .model, .channel, .employee]
 let nativeOnboardingPreferredColorScheme: ColorScheme = .light
 let nativeOnboardingTextPrimary = Color(red: 0.09, green: 0.12, blue: 0.18)
 let nativeOnboardingTextSecondary = Color(red: 0.41, green: 0.45, blue: 0.54)
@@ -384,7 +384,7 @@ func resolveOnboardingEmployeePresetReadiness(
             status: .repair,
             label: "Repair needed",
             detail: failedEntry.lastError ?? onboardingState?.presetSkillSync?.summary ?? "ChillClaw could not verify every preset skill.",
-            blocking: true
+            blocking: false
         )
     }
 
@@ -393,15 +393,15 @@ func resolveOnboardingEmployeePresetReadiness(
             status: .syncing,
             label: "Syncing",
             detail: onboardingState?.presetSkillSync?.summary ?? "ChillClaw is syncing preset skills for this employee.",
-            blocking: true
+            blocking: false
         )
     }
 
     return .init(
         status: .install,
-        label: "Install on select",
-        detail: "Choose this preset and ChillClaw will install its guided skills.",
-        blocking: true
+        label: "Prepared on finish",
+        detail: "Choose this preset and ChillClaw will prepare its guided skills during final setup.",
+        blocking: false
     )
 }
 
@@ -684,7 +684,7 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: SlackCla
              .chatStream, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
         }
-    case .employee, .complete:
+    case .employee:
         switch event {
         case .presetSkillSyncUpdated:
             return nil
@@ -1103,7 +1103,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "跳过引导",
             progressStep: "第 {current} / {total} 步",
             progressComplete: "已完成",
-            stepLabels: ["欢迎", "安装", "权限", "模型", "渠道", "AI 员工", "完成"],
+            stepLabels: ["欢迎", "安装", "权限", "模型", "渠道", "AI 员工"],
             welcomeEyebrow: "开始使用",
             welcomeTitle: "欢迎来到 ChillClaw",
             welcomeBody: "几分钟内搭建你的 OpenClaw 数字员工工作区",
@@ -1251,7 +1251,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "オンボーディングをスキップ",
             progressStep: "ステップ {current} / {total}",
             progressComplete: "完了",
-            stepLabels: ["開始", "インストール", "権限", "モデル", "チャネル", "AI 社員", "完了"],
+            stepLabels: ["開始", "インストール", "権限", "モデル", "チャネル", "AI 社員"],
             welcomeEyebrow: "スタート",
             welcomeTitle: "ChillClaw へようこそ",
             welcomeBody: "数分で OpenClaw ベースのデジタル従業員ワークスペースを構築します",
@@ -1399,7 +1399,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "온보딩 건너뛰기",
             progressStep: "{current}/{total}단계",
             progressComplete: "완료",
-            stepLabels: ["시작", "설치", "권한", "모델", "채널", "AI 직원", "완료"],
+            stepLabels: ["시작", "설치", "권한", "모델", "채널", "AI 직원"],
             welcomeEyebrow: "시작하기",
             welcomeTitle: "ChillClaw에 오신 것을 환영합니다",
             welcomeBody: "몇 분 안에 OpenClaw 기반 디지털 직원 작업 공간을 만드세요",
@@ -1547,7 +1547,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "Omitir onboarding",
             progressStep: "Paso {current} de {total}",
             progressComplete: "Completado",
-            stepLabels: ["Inicio", "Instalar", "Permisos", "Modelo", "Canal", "Empleado IA", "Completo"],
+            stepLabels: ["Inicio", "Instalar", "Permisos", "Modelo", "Canal", "Empleado IA"],
             welcomeEyebrow: "Comenzar",
             welcomeTitle: "Bienvenido a ChillClaw",
             welcomeBody: "Construye en minutos tu espacio de trabajo de empleados digitales impulsado por OpenClaw",
@@ -1695,7 +1695,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skip: "Skip onboarding",
             progressStep: "Step {current} of {total}",
             progressComplete: "Complete",
-            stepLabels: ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee", "Complete"],
+            stepLabels: ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee"],
             welcomeEyebrow: "Get started",
             welcomeTitle: "Welcome to ChillClaw",
             welcomeBody: "Build your OpenClaw-powered digital employee workspace in minutes",

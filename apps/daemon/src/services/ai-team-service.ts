@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   AITeamActionResponse,
   AITeamActivityItem,
+  AIMemberDetail,
   AITeamOverview,
   AIMemberPreset,
   BindAIMemberChannelRequest,
@@ -16,9 +17,8 @@ import type {
   TeamDetail
 } from "@slackclaw/contracts";
 import type { EngineAdapter } from "../engine/adapter.js";
-import type { AIMemberRuntimeCandidate } from "../engine/adapter.js";
-import { aiMemberPresets, defaultAIMemberSkillOptions } from "../config/ai-member-presets.js";
-import { normalizePresetSkillIds } from "../config/preset-skill-definitions.js";
+import type { AIMemberRuntimeCandidate, SkillRuntimeCatalog } from "../engine/adapter.js";
+import { aiMemberPresets, defaultAIMemberSkillOptions, normalizePresetSkillIds } from "../config/ai-member-presets.js";
 import { EventPublisher } from "./event-publisher.js";
 import { fallbackMutationSyncMeta } from "./mutation-sync.js";
 import { PresetSkillService } from "./preset-skill-service.js";
@@ -206,6 +206,19 @@ function mergeSkillOptions(runtimeSkillOptions: SkillOption[]): SkillOption[] {
   return Array.from(byId.values()).sort((left, right) => left.label.localeCompare(right.label));
 }
 
+function buildRuntimeSkillOptions(runtimeSkills: SkillRuntimeCatalog): SkillOption[] {
+  return runtimeSkills.skills
+    .filter((skill) => skill.eligible && !skill.disabled && !skill.blockedByAllowlist)
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(
+      (skill): SkillOption => ({
+        id: skill.id,
+        label: skill.name,
+        description: skill.description
+      })
+    );
+}
+
 export class AITeamService {
   constructor(
     private readonly adapter: EngineAdapter,
@@ -220,16 +233,7 @@ export class AITeamService {
     const modelConfig = await this.adapter.config.getModelConfig();
     const runtimeSkills = await this.adapter.config.getSkillRuntimeCatalog();
     const teams = Object.values(aiTeam.teams).sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0) || left.name.localeCompare(right.name));
-    const runtimeSkillOptions = runtimeSkills.skills
-      .filter((skill) => skill.eligible && !skill.disabled && !skill.blockedByAllowlist)
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .map(
-        (skill): SkillOption => ({
-          id: skill.id,
-          label: skill.name,
-          description: skill.description
-        })
-      );
+    const runtimeSkillOptions = buildRuntimeSkillOptions(runtimeSkills);
     const baseOverview = {
       teamVision: aiTeam.teamVision,
       members: [],
@@ -294,6 +298,34 @@ export class AITeamService {
   }
 
   async saveMember(memberId: string | undefined, request: SaveAIMemberRequest): Promise<AITeamActionResponse> {
+    const { current, requiresGatewayApply } = await this.persistMember(memberId, request);
+    const nextOverview = await this.getOverview();
+    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
+
+    return {
+      ...sync,
+      status: "completed",
+      message: current ? `${request.name.trim()} was updated.` : `${request.name.trim()} was created.`,
+      overview: nextOverview,
+      requiresGatewayApply
+    };
+  }
+
+  async saveMemberForOnboarding(
+    memberId: string | undefined,
+    request: SaveAIMemberRequest
+  ): Promise<{ member: AIMemberDetail; requiresGatewayApply?: boolean }> {
+    const { member, requiresGatewayApply } = await this.persistMember(memberId, request);
+    return {
+      member,
+      requiresGatewayApply
+    };
+  }
+
+  private async persistMember(
+    memberId: string | undefined,
+    request: SaveAIMemberRequest
+  ): Promise<{ current: AIMemberDetail | undefined; member: AIMemberDetail; requiresGatewayApply?: boolean }> {
     if (!request.name.trim()) {
       throw new Error("AI member name is required.");
     }
@@ -302,16 +334,19 @@ export class AITeamService {
       throw new Error("Job title is required.");
     }
 
-    const overview = await this.getOverview();
+    const state = await this.store.read();
+    const aiTeam = state.aiTeam ?? defaultAITeamState();
     const id = memberId ?? randomUUID();
-    const current = overview.members.find((member) => member.id === id);
+    const current = aiTeam.members[id];
+    const modelConfig = await this.adapter.config.getModelConfig();
+    const runtimeSkills = await this.adapter.config.getSkillRuntimeCatalog();
     const normalizedPresetSkillIds = normalizePresetSkillIds(request.presetSkillIds);
-    const brain = buildBrainAssignment(overview.availableBrains, request.brainEntryId);
+    const brain = buildBrainAssignment(modelConfig.savedEntries, request.brainEntryId);
     const knowledgePacks = DEFAULT_KNOWLEDGE_PACKS.filter((pack) => request.knowledgePackIds.includes(pack.id));
     const requestedSkillIds = normalizedPresetSkillIds.length
       ? await this.resolvePresetSkillRequest(normalizedPresetSkillIds)
       : [...new Set(request.skillIds)];
-    const selectedSkills = overview.skillOptions.filter((skill) => requestedSkillIds.includes(skill.id));
+    const selectedSkills = mergeSkillOptions(buildRuntimeSkillOptions(runtimeSkills)).filter((skill) => requestedSkillIds.includes(skill.id));
     const selectedSkillIds = selectedSkills.map((skill) => skill.id);
     const missingSkillIds = requestedSkillIds.filter((skillId) => !selectedSkillIds.includes(skillId));
     if (missingSkillIds.length > 0) {
@@ -334,36 +369,35 @@ export class AITeamService {
       knowledgePacks,
       brain
     });
+    const nextMember: AIMemberDetail = {
+      id,
+      agentId: runtime.agentId,
+      source: "slackclaw" as const,
+      hasManagedMetadata: true,
+      name: request.name.trim(),
+      jobTitle: request.jobTitle.trim(),
+      status: "ready" as const,
+      currentStatus: "Ready for new assignments.",
+      activeTaskCount: current?.activeTaskCount ?? 0,
+      avatar: request.avatar,
+      brain,
+      teamIds: withTeamIds(id, Object.values(aiTeam.teams)),
+      bindingCount: runtime.bindings.length,
+      bindings: runtime.bindings,
+      lastUpdatedAt: new Date().toISOString(),
+      personality: request.personality.trim(),
+      soul: request.soul.trim(),
+      workStyles: request.workStyles,
+      presetSkillIds: normalizedPresetSkillIds.length > 0 ? normalizedPresetSkillIds : undefined,
+      skillIds: selectedSkillIds,
+      knowledgePackIds: request.knowledgePackIds,
+      capabilitySettings: request.capabilitySettings,
+      agentDir: runtime.agentDir,
+      workspaceDir: runtime.workspaceDir
+    };
 
     await this.store.update((state) => {
       const currentState = state.aiTeam ?? defaultAITeamState();
-      const nextMember = {
-        id,
-        agentId: runtime.agentId,
-        source: "slackclaw" as const,
-        hasManagedMetadata: true,
-        name: request.name.trim(),
-        jobTitle: request.jobTitle.trim(),
-        status: "ready" as const,
-        currentStatus: "Ready for new assignments.",
-        activeTaskCount: current?.activeTaskCount ?? 0,
-        avatar: request.avatar,
-        brain,
-        teamIds: withTeamIds(id, Object.values(currentState.teams)),
-        bindingCount: runtime.bindings.length,
-        bindings: runtime.bindings,
-        lastUpdatedAt: new Date().toISOString(),
-        personality: request.personality.trim(),
-        soul: request.soul.trim(),
-        workStyles: request.workStyles,
-        presetSkillIds: normalizedPresetSkillIds.length > 0 ? normalizedPresetSkillIds : undefined,
-        skillIds: selectedSkillIds,
-        knowledgePackIds: request.knowledgePackIds,
-        capabilitySettings: request.capabilitySettings,
-        agentDir: runtime.agentDir,
-        workspaceDir: runtime.workspaceDir
-      };
-
       return {
         ...state,
         aiTeam: {
@@ -388,14 +422,9 @@ export class AITeamService {
       };
     });
 
-    const nextOverview = await this.getOverview();
-    const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
-
     return {
-      ...sync,
-      status: "completed",
-      message: current ? `${request.name.trim()} was updated.` : `${request.name.trim()} was created.`,
-      overview: nextOverview,
+      current,
+      member: nextMember,
       requiresGatewayApply: runtime.requiresGatewayApply
     };
   }

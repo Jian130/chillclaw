@@ -1,5 +1,6 @@
 import type {
   ChannelConfigOverview,
+  ChannelSession,
   ConfiguredChannelEntry,
   ModelConfigOverview,
   ModelAuthMethod,
@@ -68,6 +69,54 @@ export function applyPresetSkillSyncToOnboardingState(
   };
 }
 
+export function applyOnboardingChannelSessionToConfig(
+  channelConfig: ChannelConfigOverview,
+  activeSession: ChannelSession | undefined
+): ChannelConfigOverview {
+  if (!activeSession) {
+    return channelConfig;
+  }
+
+  return {
+    ...channelConfig,
+    activeSession
+  };
+}
+
+export function resolveOnboardingChannelSessionLogMode(logs: string[]): "plain" | "qr" {
+  const qrLikeLines = logs.filter((line) => /[█▀▄▌▐]/u.test(line)).length;
+  return qrLikeLines >= 4 ? "qr" : "plain";
+}
+
+export function resolveOnboardingActiveChannelSession(
+  channelConfig: Pick<ChannelConfigOverview, "activeSession"> | undefined,
+  selectedChannelId: string,
+  activeChannelSessionId: string | undefined
+): ChannelSession | undefined {
+  const activeSession = channelConfig?.activeSession;
+  if (!activeSession || !activeChannelSessionId) {
+    return undefined;
+  }
+
+  if (activeSession.channelId !== selectedChannelId) {
+    return undefined;
+  }
+
+  return activeSession.id === activeChannelSessionId ? activeSession : undefined;
+}
+
+export function shouldRefreshOnboardingChannelConfig(
+  currentStep: OnboardingStep,
+  draftChannel: OnboardingStateResponse["draft"]["channel"] | undefined,
+  activeChannelSessionId: string | undefined
+): boolean {
+  if (activeChannelSessionId) {
+    return false;
+  }
+
+  return currentStep === "channel" || Boolean(draftChannel);
+}
+
 export type OnboardingEmployeePresetReadinessStatus = "ready" | "syncing" | "repair" | "install";
 
 export interface OnboardingEmployeePresetReadiness {
@@ -123,7 +172,7 @@ export function resolveOnboardingEmployeePresetReadiness(
       status: "repair",
       label: "Repair needed",
       detail: failedEntry.lastError ?? presetSkillSync?.summary ?? "ChillClaw could not verify every preset skill.",
-      blocking: true
+      blocking: false
     };
   }
 
@@ -133,15 +182,15 @@ export function resolveOnboardingEmployeePresetReadiness(
       status: "syncing",
       label: "Syncing",
       detail: presetSkillSync?.summary ?? "ChillClaw is syncing preset skills for this employee.",
-      blocking: true
+      blocking: false
     };
   }
 
   return {
     status: "install",
-    label: "Install on select",
-    detail: "Choose this preset and ChillClaw will install its guided skills.",
-    blocking: true
+    label: "Prepared on finish",
+    detail: "Choose this preset and ChillClaw will prepare its guided skills during final setup.",
+    blocking: false
   };
 }
 
@@ -482,7 +531,6 @@ export function onboardingRefreshResourceForEvent(
     case "channel":
       return event.type === "channel.session.updated" ? "channel" : undefined;
     case "employee":
-    case "complete":
       return undefined;
     case "welcome":
     default:

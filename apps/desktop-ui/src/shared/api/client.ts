@@ -31,11 +31,13 @@ import type {
   ModelConfigActionResponse,
   ModelConfigOverview,
   MemberBindingsResponse,
+  OnboardingEmployeeState,
   PairingApprovalRequest,
   PluginActionResponse,
   PluginConfigOverview,
   ProductOverview,
   OnboardingStateResponse,
+  OnboardingStepNavigationRequest,
   RemoveSkillRequest,
   RemoveChannelEntryRequest,
   ReplaceFallbackModelEntriesRequest,
@@ -234,9 +236,108 @@ export function fetchOnboardingState(options?: { fresh?: boolean }): Promise<Onb
   return readJson<OnboardingStateResponse>("/onboarding/state", options);
 }
 
-export function updateOnboardingState(request: Partial<OnboardingStateResponse["draft"]>): Promise<OnboardingStateResponse> {
-  return readJson<OnboardingStateResponse>("/onboarding/state", {
+export function navigateOnboardingStep(request: OnboardingStepNavigationRequest): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/navigate", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function detectOnboardingRuntime(): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/runtime/detect", {
+    method: "POST"
+  });
+}
+
+export function installOnboardingRuntime(forceLocal = false): Promise<SetupRunResponse> {
+  return readJson<SetupRunResponse>("/onboarding/runtime/install", {
+    method: "POST",
+    body: JSON.stringify({ autoConfigure: true, forceLocal })
+  });
+}
+
+export function reuseOnboardingRuntime(): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/runtime/reuse", {
+    method: "POST"
+  });
+}
+
+export function updateOnboardingRuntime(): Promise<SetupRunResponse> {
+  return readJson<SetupRunResponse>("/onboarding/runtime/update", {
+    method: "POST"
+  });
+}
+
+export function confirmOnboardingPermissions(): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/permissions/confirm", {
+    method: "POST"
+  });
+}
+
+export function saveOnboardingModelEntry(request: SaveModelEntryRequest): Promise<ModelConfigActionResponse> {
+  return readJson<ModelConfigActionResponse>("/onboarding/model/entries", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function fetchOnboardingModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
+  return readJson<ModelAuthSessionResponse>(`/onboarding/model/auth/session/${sessionId}`);
+}
+
+export function submitOnboardingModelAuthSessionInput(
+  sessionId: string,
+  request: ModelAuthSessionInputRequest
+): Promise<ModelAuthSessionResponse> {
+  return readJson<ModelAuthSessionResponse>(`/onboarding/model/auth/session/${sessionId}/input`, {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function resetOnboardingModelDraft(): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/model/reset", {
+    method: "POST"
+  });
+}
+
+export function saveOnboardingChannelEntry(request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
+  return readJson<ChannelConfigActionResponse>("/onboarding/channel/entries", {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function updateOnboardingChannelEntry(entryId: string, request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
+  return readJson<ChannelConfigActionResponse>(`/onboarding/channel/entries/${entryId}`, {
     method: "PATCH",
+    body: JSON.stringify(request)
+  });
+}
+
+export function fetchOnboardingChannelSession(sessionId: string): Promise<ChannelSessionResponse> {
+  return readJson<ChannelSessionResponse>(`/onboarding/channel/session/${sessionId}`);
+}
+
+export function submitOnboardingChannelSessionInput(
+  sessionId: string,
+  request: ChannelSessionInputRequest
+): Promise<ChannelSessionResponse> {
+  return readJson<ChannelSessionResponse>(`/onboarding/channel/session/${sessionId}/input`, {
+    method: "POST",
+    body: JSON.stringify(request)
+  });
+}
+
+export function resetOnboardingChannelDraft(): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/channel/reset", {
+    method: "POST"
+  });
+}
+
+export function saveOnboardingEmployeeDraft(request: OnboardingEmployeeState): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/employee", {
+    method: "POST",
     body: JSON.stringify(request)
   });
 }

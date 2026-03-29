@@ -162,6 +162,7 @@ struct SlackClawProtocolTests {
                 "label": "Research Analyst",
                 "description": "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
                 "theme": "analyst",
+                "avatarPresetId": "onboarding-analyst",
                 "starterSkillLabels": ["Research Brief", "Status Writer"],
                 "toolLabels": ["Company handbook", "Delivery playbook"],
                 "presetSkillIds": ["research-brief", "status-writer"],
@@ -213,6 +214,7 @@ struct SlackClawProtocolTests {
         #expect(response.config.channels.map(\.id) == [.wechatWork, .wechat, .feishu, .telegram])
         #expect(response.config.channels.map(\.setupKind) == [.wechatWorkGuided, .wechatGuided, .feishuGuided, .telegramGuided])
         #expect(response.config.channels[2].platformUrl == "https://open.feishu.cn/app")
+        #expect(response.config.employeePresets.first?.avatarPresetId == "onboarding-analyst")
         #expect(response.config.employeePresets.first?.presetSkillIds == ["research-brief", "status-writer"])
         #expect(response.draft.install?.disposition == "reused-existing")
         #expect(response.draft.activeModelAuthSessionId == "session-1")

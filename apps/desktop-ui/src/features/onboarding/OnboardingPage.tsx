@@ -23,13 +23,11 @@ import { useNavigate } from "react-router-dom";
 import type {
   AITeamOverview,
   ChannelConfigOverview,
-  ConfiguredChannelEntry,
+  CompleteOnboardingResponse,
   ModelAuthMethod,
   ModelAuthSessionResponse,
-  ModelConfigActionResponse,
   ModelConfigOverview,
   OnboardingStateResponse,
-  ProductOverview,
   SaveChannelEntryRequest,
   SaveModelEntryRequest
 } from "@slackclaw/contracts";
@@ -38,29 +36,33 @@ import { useLocale } from "../../app/providers/LocaleProvider.js";
 import { useOverview } from "../../app/providers/OverviewProvider.js";
 import {
   completeOnboarding,
-  createAIMember,
-  createChannelEntry,
-  createSavedModelEntry,
+  confirmOnboardingPermissions,
+  detectOnboardingRuntime,
   fetchAITeamOverview,
-  fetchChannelSession,
+  fetchOnboardingChannelSession,
   fetchChannelConfig,
-  fetchModelAuthSession,
+  fetchOnboardingModelAuthSession,
   fetchModelConfig,
   fetchOnboardingState,
-  runFirstRunSetup,
-  submitChannelSessionInput,
-  submitModelAuthSessionInput,
-  updateChannelEntry,
-  updateOnboardingState
+  installOnboardingRuntime,
+  navigateOnboardingStep,
+  resetOnboardingChannelDraft,
+  resetOnboardingModelDraft,
+  reuseOnboardingRuntime,
+  saveOnboardingChannelEntry,
+  saveOnboardingEmployeeDraft,
+  saveOnboardingModelEntry,
+  submitOnboardingChannelSessionInput,
+  submitOnboardingModelAuthSessionInput,
+  updateOnboardingChannelEntry
 } from "../../shared/api/client.js";
-import { memberAvatarImageSrc, memberAvatarPresets, resolveMemberAvatarPreset } from "../../shared/avatar-presets.js";
-import { settleAfterMutation } from "../../shared/data/settle.js";
+import { memberAvatarImageSrc, resolveMemberAvatarPreset } from "../../shared/avatar-presets.js";
 import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 import { t } from "../../shared/i18n/messages.js";
 import { Badge, TagBadge } from "../../shared/ui/Badge.js";
 import { Button } from "../../shared/ui/Button.js";
 import { Card, CardContent } from "../../shared/ui/Card.js";
-import { FieldLabel, Input, Textarea } from "../../shared/ui/Field.js";
+import { FieldLabel, Input } from "../../shared/ui/Field.js";
 import { Dialog } from "../../shared/ui/Dialog.js";
 import { ErrorState } from "../../shared/ui/ErrorState.js";
 import { LanguageSelector } from "../../shared/ui/LanguageSelector.js";
@@ -71,16 +73,17 @@ import { GuidedFlowScaffold } from "../../shared/ui/Scaffold.js";
 import { StatusBadge } from "../../shared/ui/StatusBadge.js";
 import { onboardingCopy } from "./copy.js";
 import {
+  applyOnboardingChannelSessionToConfig,
   applyPresetSkillSyncToOnboardingState,
-  buildExistingInstallAdvanceDraft,
   buildOnboardingChannelSaveValues,
-  buildOnboardingMemberRequest,
   onboardingDestinationPath,
   resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingEmployeePresets,
   onboardingRefreshResourceForEvent,
   resolveCompletedOnboardingChannelEntry,
+  resolveOnboardingActiveChannelSession,
   resolveOnboardingChannelPresentations,
+  resolveOnboardingChannelSessionLogMode,
   resolveOnboardingChannelSetupVariant,
   resolveOnboardingInstallViewState,
   resolveOnboardingModelPickerProviders,
@@ -88,15 +91,13 @@ import {
   resolveOnboardingModelViewState,
   resolveOnboardingProviderId,
   resolveOnboardingModelProviders,
-  nextOnboardingStepAfterModelSave,
   resolveOnboardingPresetSkillIds,
+  shouldRefreshOnboardingChannelConfig,
   shouldShowOnboardingAuthMethodChooser,
-  type OnboardingEmployeeDraft,
   type OnboardingInstallProgressSnapshot
 } from "./helpers.js";
 
-const ONBOARDING_STEP_ORDER = ["welcome", "install", "permissions", "model", "channel", "employee", "complete"] as const;
-const ONBOARDING_AVATAR_PRESETS = memberAvatarPresets.filter((preset) => preset.id.startsWith("onboarding-"));
+const ONBOARDING_STEP_ORDER = ["welcome", "install", "permissions", "model", "channel", "employee"] as const;
 
 function isCurrentOrLaterStep(step: OnboardingStateResponse["draft"]["currentStep"], target: typeof ONBOARDING_STEP_ORDER[number]) {
   return ONBOARDING_STEP_ORDER.indexOf(step) >= ONBOARDING_STEP_ORDER.indexOf(target);
@@ -144,53 +145,6 @@ function onboardingAuthMethodBody(copy: ReturnType<typeof onboardingCopy>, metho
 
 function formatOnboardingProgressLabel(template: string, current: number, total: number) {
   return template.replace("{current}", String(current)).replace("{total}", String(total));
-}
-
-function installDisposition(overview: ProductOverview | undefined, setup: Awaited<ReturnType<typeof runFirstRunSetup>>) {
-  if (setup.install?.disposition === "reused-existing") {
-    return "reused-existing" as const;
-  }
-
-  if (overview?.engine.installed) {
-    return "installed-managed" as const;
-  }
-
-  return "not-installed" as const;
-}
-
-function saveEntrySignature(entry: ModelConfigOverview["savedEntries"][number] | undefined) {
-  if (!entry) {
-    return "";
-  }
-
-  return JSON.stringify({
-    id: entry.id,
-    providerId: entry.providerId,
-    modelKey: entry.modelKey,
-    authMethodId: entry.authMethodId,
-    isDefault: entry.isDefault,
-    isFallback: entry.isFallback,
-    updatedAt: entry.updatedAt
-  });
-}
-
-function findCreatedSavedEntry(
-  previousEntries: ModelConfigOverview["savedEntries"],
-  nextEntries: ModelConfigOverview["savedEntries"]
-) {
-  return nextEntries.find((entry) => !previousEntries.some((previous) => previous.id === entry.id));
-}
-
-function findCreatedChannelEntry(previousEntries: ConfiguredChannelEntry[], nextEntries: ConfiguredChannelEntry[]) {
-  return nextEntries.find((entry) => !previousEntries.some((previous) => previous.id === entry.id));
-}
-
-function findCreatedMember(previousMembers: AITeamOverview["members"], nextMembers: AITeamOverview["members"]) {
-  return nextMembers.find((member) => !previousMembers.some((previous) => previous.id === member.id));
-}
-
-function hasOwn(input: object, key: string) {
-  return Object.prototype.hasOwnProperty.call(input, key);
 }
 
 function onboardingFieldValue(
@@ -268,16 +222,20 @@ export default function OnboardingPage() {
 
   const [employeeName, setEmployeeName] = useState("");
   const [employeeJobTitle, setEmployeeJobTitle] = useState("");
-  const [employeeAvatarPresetId, setEmployeeAvatarPresetId] = useState(ONBOARDING_AVATAR_PRESETS[0]?.id ?? memberAvatarPresets[0].id);
   const [selectedEmployeePresetId, setSelectedEmployeePresetId] = useState("");
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [employeeBusy, setEmployeeBusy] = useState(false);
   const [completionBusy, setCompletionBusy] = useState<"" | "team" | "dashboard" | "chat">("");
+  const [completedOnboarding, setCompletedOnboarding] = useState<CompleteOnboardingResponse>();
 
   const currentDraft = onboardingState?.draft ?? { currentStep: "welcome" as const };
   const currentStep = currentDraft.currentStep;
+  const showingCompletion = Boolean(completedOnboarding);
+  const completionSummary = completedOnboarding?.summary ?? onboardingState?.summary;
   const currentStepIndex = ONBOARDING_STEP_ORDER.indexOf(currentStep);
-  const progressPercent = Math.round(((currentStepIndex + 1) / ONBOARDING_STEP_ORDER.length) * 100);
+  const progressPercent = showingCompletion
+    ? 100
+    : Math.round(((currentStepIndex + 1) / ONBOARDING_STEP_ORDER.length) * 100);
   const installViewState = resolveOnboardingInstallViewState(
     {
       overview,
@@ -326,8 +284,19 @@ export default function OnboardingPage() {
       channelConfig.entries.find((entry) => entry.channelId === selectedChannelId)
     );
   }, [channelConfig, currentDraft.channel?.entryId, selectedChannelId]);
-  const activeChannelSession =
-    channelConfig?.activeSession?.channelId === selectedChannelId ? channelConfig.activeSession : undefined;
+  const activeChannelSession = useMemo(
+    () =>
+      resolveOnboardingActiveChannelSession(
+        channelConfig,
+        selectedChannelId,
+        currentDraft.activeChannelSessionId
+      ),
+    [channelConfig, currentDraft.activeChannelSessionId, selectedChannelId]
+  );
+  const activeChannelSessionLogMode = useMemo(
+    () => resolveOnboardingChannelSessionLogMode(activeChannelSession?.logs ?? []),
+    [activeChannelSession?.logs]
+  );
 
   const selectedModelEntry = useMemo(() => {
     if (!modelConfig) {
@@ -369,7 +338,6 @@ export default function OnboardingPage() {
   );
 
   const selectedBrainEntryId = selectedModelEntry?.id;
-  const selectedEmployeeAvatar = resolveMemberAvatarPreset(employeeAvatarPresetId);
   const employeePresets = useMemo(() => resolveOnboardingEmployeePresets(onboardingState), [onboardingState]);
   const selectedEmployeePreset = useMemo(() => {
     if (employeePresets.length === 0) {
@@ -391,6 +359,9 @@ export default function OnboardingPage() {
   const selectedEmployeePresetReadiness = selectedEmployeePreset
     ? employeePresetReadinessById.get(selectedEmployeePreset.id)
     : undefined;
+  const selectedEmployeeAvatar = resolveMemberAvatarPreset(
+    selectedEmployeePreset?.avatarPresetId || currentDraft.employee?.avatarPresetId
+  );
 
   async function readFreshOverview() {
     const next = await refresh({ fresh: true });
@@ -424,23 +395,42 @@ export default function OnboardingPage() {
     return next;
   }
 
-  async function persistDraft(patch: Partial<OnboardingStateResponse["draft"]>) {
-    const nextDraft = {
-      currentStep: patch.currentStep ?? currentDraft.currentStep,
-      install: hasOwn(patch, "install") ? patch.install : currentDraft.install,
-      model: hasOwn(patch, "model") ? patch.model : currentDraft.model,
-      channel: hasOwn(patch, "channel") ? patch.channel : currentDraft.channel,
-      employee: hasOwn(patch, "employee") ? patch.employee : currentDraft.employee,
-      activeModelAuthSessionId: hasOwn(patch, "activeModelAuthSessionId")
-        ? patch.activeModelAuthSessionId
-        : currentDraft.activeModelAuthSessionId,
-      activeChannelSessionId: hasOwn(patch, "activeChannelSessionId")
-        ? patch.activeChannelSessionId
-        : currentDraft.activeChannelSessionId
-    };
-    const next = await updateOnboardingState(nextDraft);
+  async function applyOnboardingState(next: OnboardingStateResponse) {
     setOnboardingState(next);
     return next;
+  }
+
+  async function goToStep(step: OnboardingStateResponse["draft"]["currentStep"]) {
+    setCompletedOnboarding(undefined);
+    return applyOnboardingState(await navigateOnboardingStep({ step }));
+  }
+
+  async function stageExistingInstall() {
+    setCompletedOnboarding(undefined);
+    return applyOnboardingState(await reuseOnboardingRuntime());
+  }
+
+  async function confirmPermissionsStep() {
+    setCompletedOnboarding(undefined);
+    return applyOnboardingState(await confirmOnboardingPermissions());
+  }
+
+  async function saveEmployeeDraftToDaemon(employee: NonNullable<OnboardingStateResponse["draft"]["employee"]>) {
+    setCompletedOnboarding(undefined);
+    return applyOnboardingState(await saveOnboardingEmployeeDraft(employee));
+  }
+
+  async function recoverMissingOnboardingChannelSession(error: unknown) {
+    const message =
+      error instanceof Error ? error.message : "The channel login session ended. Start the login again.";
+    if (!/channel session not found|channel login session ended/i.test(message)) {
+      return false;
+    }
+
+    setChannelConfig((current) => (current ? { ...current, activeSession: undefined } : current));
+    setChannelMessage(message);
+    await refreshOnboardingState();
+    return true;
   }
 
   async function maybeAdvanceCompletedChannelSetupIfNeeded(
@@ -458,15 +448,8 @@ export default function OnboardingPage() {
     }
 
     setChannelSessionInput("");
-    await persistDraft({
-      currentStep: "employee",
-      channel: {
-        channelId: completedEntry.channelId,
-        entryId: completedEntry.id
-      },
-      activeChannelSessionId: ""
-    });
-    return true;
+    const next = await refreshOnboardingState();
+    return next.draft.currentStep === "employee";
   }
 
   useEffect(() => {
@@ -515,14 +498,22 @@ export default function OnboardingPage() {
       void readFreshModelConfig().catch(() => undefined);
     }
 
-    if (isCurrentOrLaterStep(currentStep, "channel") || Boolean(currentDraft.channel)) {
+    if (shouldRefreshOnboardingChannelConfig(currentStep, currentDraft.channel, currentDraft.activeChannelSessionId)) {
       void readFreshChannelConfig().catch(() => undefined);
     }
 
     if (isCurrentOrLaterStep(currentStep, "employee") || Boolean(currentDraft.employee)) {
       void readFreshAITeamOverview().catch(() => undefined);
     }
-  }, [currentDraft.activeModelAuthSessionId, currentDraft.channel, currentDraft.employee, currentDraft.model, currentStep, onboardingState]);
+  }, [
+    currentDraft.activeChannelSessionId,
+    currentDraft.activeModelAuthSessionId,
+    currentDraft.channel,
+    currentDraft.employee,
+    currentDraft.model,
+    currentStep,
+    onboardingState
+  ]);
 
   useEffect(() => {
     if (currentStep !== "model" || !onboardingState || modelPickerProviders.length > 0) {
@@ -580,16 +571,7 @@ export default function OnboardingPage() {
       } else if (event.type === "channel-config.updated") {
         setChannelConfig(event.snapshot.data);
       } else if (event.type === "channel.session.updated") {
-        setChannelConfig((current) => {
-          if (!current || current.activeSession?.channelId !== event.channelId) {
-            return current;
-          }
-
-          return {
-            ...current,
-            activeSession: event.session
-          };
-        });
+        setChannelConfig((current) => (current ? applyOnboardingChannelSessionToConfig(current, event.session) : current));
       } else if (event.type === "ai-team.updated") {
         setTeamOverview(event.snapshot.data);
       } else if (event.type === "preset-skill-sync.updated") {
@@ -666,18 +648,17 @@ export default function OnboardingPage() {
   }, [selectedChannelEntry?.id, selectedChannelId]);
 
   useEffect(() => {
-    if (currentStep !== "employee" && currentStep !== "complete") {
+    if (currentStep !== "employee" && !showingCompletion) {
       return;
     }
 
     if (currentDraft.employee) {
       setEmployeeName((current) => current || currentDraft.employee?.name || "");
       setEmployeeJobTitle((current) => current || currentDraft.employee?.jobTitle || "");
-      setEmployeeAvatarPresetId((current) => current || currentDraft.employee?.avatarPresetId || ONBOARDING_AVATAR_PRESETS[0]?.id || memberAvatarPresets[0].id);
       setSelectedEmployeePresetId((current) => current || currentDraft.employee?.presetId || employeePresets[0]?.id || "");
       setMemoryEnabled(currentDraft.employee.memoryEnabled ?? selectedEmployeePreset?.defaultMemoryEnabled ?? true);
     }
-  }, [currentDraft.employee, currentStep, employeePresets, selectedEmployeePreset?.defaultMemoryEnabled]);
+  }, [currentDraft.employee, currentStep, employeePresets, selectedEmployeePreset?.defaultMemoryEnabled, showingCompletion]);
 
   useEffect(() => {
     if (currentStep !== "employee") {
@@ -702,12 +683,15 @@ export default function OnboardingPage() {
 
     async function restoreSession() {
       try {
-        const next = await fetchModelAuthSession(currentDraft.activeModelAuthSessionId!);
+        const next = await fetchOnboardingModelAuthSession(currentDraft.activeModelAuthSessionId!);
         if (cancelled) {
           return;
         }
         setModelConfig(next.modelConfig);
-        setModelSession(next.session);
+        setModelSession(next.session.status === "completed" || next.session.status === "failed" ? undefined : next.session);
+        if (next.onboarding) {
+          await applyOnboardingState(next.onboarding);
+        }
       } catch {
         if (!cancelled) {
           setModelSession(undefined);
@@ -743,12 +727,15 @@ export default function OnboardingPage() {
 
     async function poll() {
       try {
-        const next = await fetchChannelSession(currentDraft.activeChannelSessionId!);
+        const next = await fetchOnboardingChannelSession(currentDraft.activeChannelSessionId!);
         if (cancelled) {
           return;
         }
 
-        setChannelConfig(next.channelConfig);
+        setChannelConfig(applyOnboardingChannelSessionToConfig(next.channelConfig, next.session));
+        if (next.onboarding) {
+          await applyOnboardingState(next.onboarding);
+        }
         const channelId = currentDraft.channel?.channelId ?? next.session.channelId;
         const preferredEntryId = currentDraft.channel?.entryId ?? next.session.entryId;
 
@@ -758,15 +745,6 @@ export default function OnboardingPage() {
 
         if (next.session.status === "failed") {
           setPageError(next.session.message);
-          await persistDraft({
-            channel: channelId
-              ? {
-                  channelId,
-                  entryId: preferredEntryId
-                }
-              : currentDraft.channel,
-            activeChannelSessionId: ""
-          });
           return;
         }
       } catch (sessionError) {
@@ -787,6 +765,10 @@ export default function OnboardingPage() {
           }
         } catch {
           // Keep the original polling error below.
+        }
+
+        if (await recoverMissingOnboardingChannelSession(sessionError)) {
+          return;
         }
 
         if (!cancelled) {
@@ -822,7 +804,7 @@ export default function OnboardingPage() {
   ]);
 
   useEffect(() => {
-    if (currentStep !== "employee") {
+    if (currentStep !== "employee" || showingCompletion) {
       return;
     }
 
@@ -830,7 +812,7 @@ export default function OnboardingPage() {
       memberId: currentDraft.employee?.memberId,
       name: employeeName,
       jobTitle: employeeJobTitle,
-      avatarPresetId: employeeAvatarPresetId,
+      avatarPresetId: selectedEmployeePreset?.avatarPresetId ?? currentDraft.employee?.avatarPresetId ?? "",
       presetId: selectedEmployeePreset?.id,
       personalityTraits: [],
       presetSkillIds: resolveOnboardingPresetSkillIds(selectedEmployeePreset),
@@ -844,11 +826,11 @@ export default function OnboardingPage() {
     }
 
     const timer = window.setTimeout(() => {
-      void persistDraft({ employee: nextEmployeeState });
+      void saveEmployeeDraftToDaemon(nextEmployeeState);
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [currentDraft.employee, currentStep, employeeAvatarPresetId, employeeJobTitle, employeeName, memoryEnabled, selectedEmployeePreset]);
+  }, [currentDraft.employee, currentStep, employeeJobTitle, employeeName, memoryEnabled, selectedEmployeePreset, showingCompletion]);
 
   useEffect(() => {
     if (!modelSession?.id) {
@@ -856,81 +838,49 @@ export default function OnboardingPage() {
     }
 
     const timer = window.setInterval(async () => {
-      const nextSession = await fetchModelAuthSession(modelSession.id);
-      setModelSession(nextSession.session);
+      const nextSession = await fetchOnboardingModelAuthSession(modelSession.id);
+      setModelSession(
+        nextSession.session.status === "completed" || nextSession.session.status === "failed"
+          ? undefined
+          : nextSession.session
+      );
       setModelConfig(nextSession.modelConfig);
-
-      if (nextSession.session.status === "completed") {
-        const result = await settleAfterMutation({
-          mutate: async () => nextSession,
-          getProvisionalState: (mutation) => mutation.modelConfig,
-          applyState: setModelConfig,
-          readFresh: readFreshModelConfig,
-          isSettled: (state, mutation) => {
-            const entryId = mutation.session.entryId ?? currentDraft.model?.entryId;
-            if (!entryId) {
-              return false;
-            }
-
-            const expectedEntry = mutation.modelConfig.savedEntries.find((entry) => entry.id === entryId);
-            const actualEntry = state.savedEntries.find((entry) => entry.id === entryId);
-            return saveEntrySignature(actualEntry) === saveEntrySignature(expectedEntry);
-          },
-          attempts: 8,
-          delayMs: 700
-        });
-
-        const nextEntry =
-          result.state.savedEntries.find((entry) => entry.id === nextSession.session.entryId) ??
-          result.state.savedEntries.find(
-            (entry) => entry.providerId === nextSession.session.providerId && entry.authMethodId === nextSession.session.methodId
-          );
-
-        await persistDraft({
-          currentStep: nextOnboardingStepAfterModelSave(true),
-          model: {
-            providerId: nextEntry?.providerId ?? providerId,
-            modelKey: nextEntry?.modelKey ?? modelKey,
-            methodId: nextEntry?.authMethodId ?? methodId,
-            entryId: nextEntry?.id ?? currentDraft.model?.entryId
-          },
-          activeModelAuthSessionId: ""
-        });
-        setModelSession(undefined);
-        return;
+      if (nextSession.onboarding) {
+        await applyOnboardingState(nextSession.onboarding);
       }
 
-      if (nextSession.session.status === "failed") {
-        await persistDraft({ activeModelAuthSessionId: "" });
+      if (nextSession.session.status === "completed" || nextSession.session.status === "failed") {
+        return;
       }
     }, 1600);
 
     return () => window.clearInterval(timer);
-  }, [currentDraft.model?.entryId, methodId, modelKey, modelSession?.id, providerId]);
+  }, [modelSession?.id]);
 
   async function handleAdvanceToInstall() {
     setPageError(undefined);
-    await persistDraft({ currentStep: "install" });
+    await goToStep("install");
+    void detectOnboardingRuntime().then(applyOnboardingState).catch(() => undefined);
   }
 
   async function handleUseExistingInstall() {
     setPageError(undefined);
-    await persistDraft(buildExistingInstallAdvanceDraft(overview));
+    await stageExistingInstall();
   }
 
   async function handleAdvanceToPermissions() {
     setPageError(undefined);
-    await persistDraft({ currentStep: "permissions" });
+    await goToStep("permissions");
   }
 
   async function handleAdvanceToModel() {
     setPageError(undefined);
-    await persistDraft({ currentStep: "model" });
+    await confirmPermissionsStep();
   }
 
   async function handleAdvanceToChannel() {
     setPageError(undefined);
-    await persistDraft({ currentStep: "channel" });
+    await goToStep("channel");
   }
 
   async function handleReturnToModelPicker() {
@@ -943,15 +893,7 @@ export default function OnboardingPage() {
     setModelSession(undefined);
     setModelSessionInput("");
 
-    await persistDraft({
-      currentStep: "model",
-      model: {
-        providerId: "",
-        modelKey: "",
-        methodId: ""
-      },
-      activeModelAuthSessionId: ""
-    });
+    await applyOnboardingState(await resetOnboardingModelDraft());
   }
 
   async function handleInstall() {
@@ -963,26 +905,11 @@ export default function OnboardingPage() {
       message: copy.installStageDetecting
     });
     try {
-      const result = await settleAfterMutation({
-        mutate: () => runFirstRunSetup(),
-        getProvisionalState: (mutation) => mutation.overview,
-        applyState: setOverview,
-        readFresh: readFreshOverview,
-        isSettled: (state) => state.engine.installed,
-        attempts: 10,
-        delayMs: 750
-      });
-
-      const installState = {
-        installed: result.state.engine.installed,
-        version: result.state.engine.version ?? result.mutation.install?.actualVersion ?? result.mutation.install?.existingVersion,
-        disposition: installDisposition(result.state, result.mutation)
-      };
-
-      await persistDraft({
-        currentStep: "install",
-        install: installState
-      });
+      const result = await installOnboardingRuntime();
+      setOverview(result.overview);
+      if (result.onboarding) {
+        await applyOnboardingState(result.onboarding);
+      }
     } catch (actionError) {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not finish installation.");
     } finally {
@@ -1008,58 +935,12 @@ export default function OnboardingPage() {
         makeDefault: true,
         useAsFallback: false
       };
-      const previousEntries = modelConfig?.savedEntries ?? [];
-      const result = await settleAfterMutation<ModelConfigActionResponse, ModelConfigOverview>({
-        mutate: () => createSavedModelEntry(request),
-        getProvisionalState: (mutation) => mutation.modelConfig,
-        applyState: setModelConfig,
-        readFresh: readFreshModelConfig,
-        isSettled: (state, mutation) => {
-          if (mutation.authSession) {
-            return false;
-          }
-
-          const createdEntry = findCreatedSavedEntry(previousEntries, mutation.modelConfig.savedEntries);
-          if (!createdEntry) {
-            return false;
-          }
-
-          const actualEntry = state.savedEntries.find((entry) => entry.id === createdEntry.id);
-          return saveEntrySignature(actualEntry) === saveEntrySignature(createdEntry);
-        },
-        attempts: 8,
-        delayMs: 700
-      });
-
-      setModelConfig(result.state);
-      if (result.mutation.authSession) {
-        setModelSession(result.mutation.authSession);
-        await persistDraft({
-          currentStep: nextOnboardingStepAfterModelSave(true),
-          model: {
-            providerId,
-            modelKey: modelKey.trim(),
-            methodId
-          },
-          activeModelAuthSessionId: result.mutation.authSession.id
-        });
-        return;
+      const result = await saveOnboardingModelEntry(request);
+      setModelConfig(result.modelConfig);
+      setModelSession(result.authSession);
+      if (result.onboarding) {
+        await applyOnboardingState(result.onboarding);
       }
-
-      const savedEntry =
-        findCreatedSavedEntry(previousEntries, result.state.savedEntries) ??
-        result.state.savedEntries.find((entry) => entry.providerId === providerId && entry.modelKey === modelKey.trim());
-
-      await persistDraft({
-        currentStep: nextOnboardingStepAfterModelSave(false),
-        model: {
-          providerId,
-          modelKey: modelKey.trim(),
-          methodId,
-          entryId: savedEntry?.id
-        },
-        activeModelAuthSessionId: ""
-      });
     } catch (actionError) {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not save this model.");
     } finally {
@@ -1074,11 +955,13 @@ export default function OnboardingPage() {
 
     setModelBusy("input");
     try {
-      const next = await submitModelAuthSessionInput(modelSession.id, { value: modelSessionInput.trim() });
-      setModelSession(next.session);
+      const next = await submitOnboardingModelAuthSessionInput(modelSession.id, { value: modelSessionInput.trim() });
+      setModelSession(next.session.status === "completed" || next.session.status === "failed" ? undefined : next.session);
       setModelConfig(next.modelConfig);
       setModelSessionInput("");
-      await refreshOnboardingState();
+      if (next.onboarding) {
+        await applyOnboardingState(next.onboarding);
+      }
     } catch (actionError) {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not finish model authentication.");
     } finally {
@@ -1100,43 +983,19 @@ export default function OnboardingPage() {
         values: buildOnboardingChannelSaveValues(selectedChannelPresentation.id, channelValues),
         action: "save"
       };
-      const previousEntries = channelConfig?.entries ?? [];
       const result = selectedChannelEntry
-        ? await updateChannelEntry(selectedChannelEntry.id, request)
-        : await createChannelEntry(request);
+        ? await updateOnboardingChannelEntry(selectedChannelEntry.id, request)
+        : await saveOnboardingChannelEntry(request);
 
-      setChannelConfig(result.channelConfig);
+      setChannelConfig(applyOnboardingChannelSessionToConfig(result.channelConfig, result.session));
       setChannelMessage(result.message);
       setChannelRequiresApply(Boolean(result.requiresGatewayApply));
       if (result.session) {
         setChannelSessionInput("");
       }
-      const savedEntry =
-        (selectedChannelEntry ? result.channelConfig.entries.find((entry) => entry.id === selectedChannelEntry.id) : undefined) ??
-        findCreatedChannelEntry(previousEntries, result.channelConfig.entries) ??
-        result.channelConfig.entries.find((entry) => entry.channelId === selectedChannelPresentation.id);
-
-      if (result.session) {
-        await persistDraft({
-          currentStep: "channel",
-          channel: {
-            channelId: selectedChannelPresentation.id,
-            entryId: savedEntry?.id
-          },
-          activeChannelSessionId: result.session.id
-        });
-        return;
+      if (result.onboarding) {
+        await applyOnboardingState(result.onboarding);
       }
-
-      await persistDraft({
-        currentStep: "employee",
-        channel: {
-          channelId: selectedChannelPresentation.id,
-          entryId: savedEntry?.id
-        },
-        activeChannelSessionId: ""
-      });
-      void readFreshChannelConfig().then(setChannelConfig).catch(() => undefined);
     } catch (actionError) {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not save this channel.");
     } finally {
@@ -1151,24 +1010,23 @@ export default function OnboardingPage() {
 
     setChannelBusy(true);
     try {
-      const next = await submitChannelSessionInput(activeChannelSession.id, { value: channelSessionInput.trim() });
-      setChannelConfig(next.channelConfig);
+      const next = await submitOnboardingChannelSessionInput(activeChannelSession.id, { value: channelSessionInput.trim() });
+      setChannelConfig(applyOnboardingChannelSessionToConfig(next.channelConfig, next.session));
       setChannelSessionInput("");
+      if (next.onboarding) {
+        await applyOnboardingState(next.onboarding);
+      }
       if (await maybeAdvanceCompletedChannelSetupIfNeeded(next.session.channelId, next.session.entryId, next.channelConfig)) {
         return;
       }
 
       if (next.session.status === "failed") {
         setPageError(next.session.message);
-        await persistDraft({
-          channel: {
-            channelId: next.session.channelId,
-            entryId: next.session.entryId
-          },
-          activeChannelSessionId: ""
-        });
       }
     } catch (actionError) {
+      if (await recoverMissingOnboardingChannelSession(actionError)) {
+        return;
+      }
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not continue this channel session.");
     } finally {
       setChannelBusy(false);
@@ -1176,17 +1034,19 @@ export default function OnboardingPage() {
   }
 
   async function handleReturnToChannelPicker() {
+    setPageError(undefined);
     setSelectedChannelId("");
     setChannelValues({});
     setChannelMessage("");
     setChannelRequiresApply(false);
     setChannelSessionInput("");
     setChannelTutorialOpen(false);
-    await persistDraft({ currentStep: "channel" });
+    setChannelConfig((current) => (current ? { ...current, activeSession: undefined } : current));
+    await applyOnboardingState(await resetOnboardingChannelDraft());
   }
 
   async function handleBackFromChannelPicker() {
-    await persistDraft({ currentStep: "model" });
+    await goToStep("model");
   }
 
   function selectEmployeePreset(presetId: string) {
@@ -1203,73 +1063,39 @@ export default function OnboardingPage() {
       return;
     }
 
-    if (selectedEmployeePresetReadiness?.blocking) {
-      setPageError(
-        selectedEmployeePresetReadiness.detail ??
-          "ChillClaw is still preparing this preset's managed skills in the active OpenClaw runtime."
-      );
-      return;
-    }
-
     setPageError(undefined);
     setEmployeeBusy(true);
     try {
-      const draft: OnboardingEmployeeDraft = {
+      const draft = {
+        memberId: currentDraft.employee?.memberId,
         name: employeeName,
         jobTitle: employeeJobTitle,
-        avatarPresetId: employeeAvatarPresetId,
+        avatarPresetId: selectedEmployeePreset.avatarPresetId,
         presetId: selectedEmployeePreset.id,
         personalityTraits: [],
         presetSkillIds: resolveOnboardingPresetSkillIds(selectedEmployeePreset),
         knowledgePackIds: selectedEmployeePreset.knowledgePackIds,
         workStyles: selectedEmployeePreset.workStyles,
-        memoryEnabled,
-        brainEntryId: selectedBrainEntryId
+        memoryEnabled
       };
-      const previousMembers = teamOverview?.members ?? [];
-      const result = await settleAfterMutation({
-        mutate: () => createAIMember(buildOnboardingMemberRequest(draft)),
-        getProvisionalState: (mutation) => mutation.overview,
-        applyState: setTeamOverview,
-        readFresh: readFreshAITeamOverview,
-        isSettled: (state, mutation) => {
-          const createdMember = findCreatedMember(previousMembers, mutation.overview.members);
-          if (!createdMember) {
-            return false;
-          }
-          return Boolean(state.members.find((member) => member.id === createdMember.id));
-        },
-        attempts: 8,
-        delayMs: 700
-      });
-
-      const createdMember =
-        findCreatedMember(previousMembers, result.state.members) ??
-        result.state.members.find((member) => member.name === draft.name && member.jobTitle === draft.jobTitle);
-
-      await persistDraft({
-        currentStep: "complete",
-        employee: {
-          memberId: createdMember?.id,
-          name: createdMember?.name ?? draft.name,
-          jobTitle: createdMember?.jobTitle ?? draft.jobTitle,
-          avatarPresetId: createdMember?.avatar.presetId ?? draft.avatarPresetId,
-          presetId: draft.presetId,
-          personalityTraits: [],
-          presetSkillIds: draft.presetSkillIds,
-          knowledgePackIds: draft.knowledgePackIds,
-          workStyles: draft.workStyles,
-          memoryEnabled
-        }
-      });
+      await saveEmployeeDraftToDaemon(draft);
+      const result = await completeOnboarding({});
+      setOverview(result.overview);
+      setCompletedOnboarding(result);
+      void readFreshAITeamOverview().catch(() => undefined);
     } catch (actionError) {
-      setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not create this AI employee.");
+      setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not finish onboarding.");
     } finally {
       setEmployeeBusy(false);
     }
   }
 
   async function handleComplete(destination: "team" | "dashboard" | "chat") {
+    if (showingCompletion) {
+      navigate(onboardingDestinationPath(destination), { replace: true });
+      return;
+    }
+
     setCompletionBusy(destination);
     setPageError(undefined);
     try {
@@ -1458,7 +1284,7 @@ export default function OnboardingPage() {
                         <Button className="onboarding-install-cta" fullWidth size="lg" onClick={() => void handleUseExistingInstall()}>
                           {copy.installContinue}
                         </Button>
-                        <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "welcome" })} type="button">
+                        <button className="onboarding-install-back" onClick={() => void goToStep("welcome")} type="button">
                           {common.back}
                         </button>
                       </div>
@@ -1469,7 +1295,7 @@ export default function OnboardingPage() {
                         <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToPermissions()}>
                           {copy.installContinue}
                         </Button>
-                        <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "welcome" })} type="button">
+                        <button className="onboarding-install-back" onClick={() => void goToStep("welcome")} type="button">
                           {common.back}
                         </button>
                       </div>
@@ -1500,7 +1326,7 @@ export default function OnboardingPage() {
                   <Button className="onboarding-install-next" fullWidth size="lg" onClick={() => void handleAdvanceToModel()}>
                     {copy.installContinue}
                   </Button>
-                  <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "install" })} type="button">
+                  <button className="onboarding-install-back" onClick={() => void goToStep("install")} type="button">
                     {common.back}
                   </button>
                 </div>
@@ -1551,7 +1377,7 @@ export default function OnboardingPage() {
                         ))}
                       </div>
                       <div className="onboarding-model-actions onboarding-model-actions--picker">
-                        <button className="onboarding-install-back" onClick={() => void persistDraft({ currentStep: "permissions" })} type="button">
+                        <button className="onboarding-install-back" onClick={() => void goToStep("permissions")} type="button">
                           {common.back}
                         </button>
                       </div>
@@ -2019,11 +1845,16 @@ export default function OnboardingPage() {
                           <div className="onboarding-channel-docs-card__header">
                             <div className="onboarding-channel-docs-card__icon">
                               <MessageSquare size={22} />
-                            </div>
-                            <strong>Active channel session</strong>
+                          </div>
+                          <strong>Active channel session</strong>
                           </div>
                           <p className="card__description">{activeChannelSession.message}</p>
-                          <Textarea readOnly value={activeChannelSession.logs.join("\n")} />
+                          <pre
+                            aria-label="Channel session log"
+                            className={`onboarding-channel-session-log onboarding-channel-session-log--${activeChannelSessionLogMode}`}
+                          >
+                            {activeChannelSession.logs.join("\n")}
+                          </pre>
                           {activeChannelSession.inputPrompt ? (
                             <div className="field-grid">
                               <div>
@@ -2094,30 +1925,7 @@ export default function OnboardingPage() {
 
                   <div className="onboarding-employee-grid">
                     <div className="onboarding-panel onboarding-panel--soft">
-                      <strong>{copy.chooseAvatar}</strong>
-                      <div className="onboarding-avatar-grid">
-                        {ONBOARDING_AVATAR_PRESETS.map((preset) => {
-                          const imageSrc = memberAvatarImageSrc({ presetId: preset.id });
-
-                          return (
-                            <button
-                              className={`onboarding-avatar-card${employeeAvatarPresetId === preset.id ? " onboarding-avatar-card--active" : ""}`}
-                              key={preset.id}
-                              onClick={() => setEmployeeAvatarPresetId(preset.id)}
-                              type="button"
-                            >
-                              <div className="onboarding-avatar-card__avatar" aria-label={preset.label}>
-                                {imageSrc ? (
-                                  <img alt={preset.label} className="member-avatar-image" src={imageSrc} />
-                                ) : (
-                                  <span className="member-avatar-fallback">{preset.emoji}</span>
-                                )}
-                              </div>
-                              <span>{preset.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <strong>{copy.employeeTitle}</strong>
 
                       <div className="field-grid">
                         <div>
@@ -2252,7 +2060,7 @@ export default function OnboardingPage() {
                       </div>
 
                       <div className="onboarding-actions">
-                        <Button variant="outline" onClick={() => void persistDraft({ currentStep: "channel" })}>
+                        <Button variant="outline" onClick={() => void goToStep("channel")}>
                           {common.back}
                         </Button>
                         <Button
@@ -2275,7 +2083,7 @@ export default function OnboardingPage() {
               </LoadingBlocker>
             ) : null}
 
-            {currentStep === "complete" ? (
+            {showingCompletion ? (
               <div className="onboarding-step onboarding-step--complete">
                 <div className="onboarding-step__intro onboarding-step__intro--center">
                   <Badge tone="success">{copy.completeEyebrow}</Badge>
@@ -2286,19 +2094,19 @@ export default function OnboardingPage() {
                 <div className="onboarding-complete-summary">
                   <div className="onboarding-summary-card">
                     <strong>{copy.completionInstall}</strong>
-                    <span>{onboardingState?.summary.install?.version ?? overview?.engine.version ?? "Not installed"}</span>
+                    <span>{completionSummary?.install?.version ?? overview?.engine.version ?? "Not installed"}</span>
                   </div>
                   <div className="onboarding-summary-card">
                     <strong>{copy.completionModel}</strong>
-                    <span>{selectedModelEntry?.label ?? onboardingState?.summary.model?.modelKey ?? "Not configured"}</span>
+                    <span>{selectedModelEntry?.label ?? completionSummary?.model?.modelKey ?? "Not configured"}</span>
                   </div>
                   <div className="onboarding-summary-card">
                     <strong>{copy.completionChannel}</strong>
-                    <span>{onboardingState?.summary.channel?.channelId ?? "Not configured"}</span>
+                    <span>{completionSummary?.channel?.channelId ?? "Not configured"}</span>
                   </div>
                   <div className="onboarding-summary-card">
                     <strong>{copy.completionEmployee}</strong>
-                    <span>{onboardingState?.summary.employee?.name ?? "Not created"}</span>
+                    <span>{completionSummary?.employee?.name ?? "Not created"}</span>
                   </div>
                 </div>
 

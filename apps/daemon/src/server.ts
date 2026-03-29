@@ -8,6 +8,8 @@ import type {
   AbortChatRequest,
   BindAIMemberChannelRequest,
   CompleteOnboardingRequest,
+  OnboardingEmployeeState,
+  OnboardingStepNavigationRequest,
   CreateChatThreadRequest,
   DeleteAIMemberRequest,
   DeploymentTargetActionResponse,
@@ -28,7 +30,6 @@ import type {
   SaveModelEntryRequest,
   SetDefaultModelRequest,
   SetDefaultModelEntryRequest,
-  UpdateOnboardingStateRequest,
   UpdateSkillRequest
 } from "@slackclaw/contracts";
 
@@ -201,8 +202,16 @@ export function startServer(port = 4545) {
   const aiTeamService = new AITeamService(adapter, store, eventPublisher, presetSkillService);
   const chatService = new ChatService(adapter, store, aiTeamService, eventPublisher);
   const skillService = new SkillService(adapter, store, eventPublisher, presetSkillService);
-  const setupService = new SetupService(adapter, store, overviewService, eventPublisher, presetSkillService);
-  const onboardingService = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService);
+  const setupService = new SetupService(adapter, store, overviewService, eventPublisher);
+  const onboardingService = new OnboardingService(
+    adapter,
+    store,
+    overviewService,
+    channelSetupService,
+    aiTeamService,
+    presetSkillService,
+    eventPublisher
+  );
   const taskService = new TaskService(adapter, store, eventPublisher);
   const eventSocketServer = new WebSocketServer({ noServer: true });
   let server: ReturnType<typeof createServer>;
@@ -497,9 +506,104 @@ export function startServer(port = 4545) {
         return;
       }
 
-      if (request.method === "PATCH" && pathname === "/api/onboarding/state") {
-        const body = await readJson<UpdateOnboardingStateRequest>(request);
-        sendJson(response, 200, await onboardingService.updateState(body));
+      if (request.method === "POST" && pathname === "/api/onboarding/navigate") {
+        const body = await readJson<OnboardingStepNavigationRequest>(request);
+        sendJson(response, 200, await onboardingService.navigateStep(body));
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/runtime/detect") {
+        sendJson(response, 200, await onboardingService.detectRuntime());
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/runtime/install") {
+        const body = await readJson<InstallRequest>(request);
+        sendJson(response, 200, await onboardingService.installRuntime({ forceLocal: body.forceLocal ?? false }));
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/runtime/reuse") {
+        sendJson(response, 200, await onboardingService.reuseDetectedRuntime());
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/runtime/update") {
+        sendJson(response, 200, await onboardingService.updateRuntime());
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/permissions/confirm") {
+        sendJson(response, 200, await onboardingService.confirmPermissions());
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/model/entries") {
+        const body = await readJson<SaveModelEntryRequest>(request);
+        sendJson(response, 200, await onboardingService.saveModelEntry(body));
+        return;
+      }
+
+      if (request.method === "GET" && pathname.startsWith("/api/onboarding/model/auth/session/")) {
+        const sessionId = pathname.slice("/api/onboarding/model/auth/session/".length);
+        sendJson(response, 200, await onboardingService.getModelAuthSession(sessionId));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        pathname.startsWith("/api/onboarding/model/auth/session/") &&
+        pathname.endsWith("/input")
+      ) {
+        const sessionId = pathname.slice("/api/onboarding/model/auth/session/".length, -"/input".length);
+        const body = await readJson<ModelAuthSessionInputRequest>(request);
+        sendJson(response, 200, await onboardingService.submitModelAuthSessionInput(sessionId, body));
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/channel/entries") {
+        const body = await readJson<SaveChannelEntryRequest>(request);
+        sendJson(response, 200, await onboardingService.saveChannelEntry(undefined, body));
+        return;
+      }
+
+      if (request.method === "PATCH" && pathname.startsWith("/api/onboarding/channel/entries/")) {
+        const entryId = pathname.slice("/api/onboarding/channel/entries/".length);
+        const body = await readJson<SaveChannelEntryRequest>(request);
+        sendJson(response, 200, await onboardingService.saveChannelEntry(entryId, body));
+        return;
+      }
+
+      if (request.method === "GET" && pathname.startsWith("/api/onboarding/channel/session/")) {
+        const sessionId = pathname.slice("/api/onboarding/channel/session/".length);
+        sendJson(response, 200, await onboardingService.getChannelSession(sessionId));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        pathname.startsWith("/api/onboarding/channel/session/") &&
+        pathname.endsWith("/input")
+      ) {
+        const sessionId = pathname.slice("/api/onboarding/channel/session/".length, -"/input".length);
+        const body = await readJson<ChannelSessionInputRequest>(request);
+        sendJson(response, 200, await onboardingService.submitChannelSessionInput(sessionId, body));
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/employee") {
+        const body = await readJson<OnboardingEmployeeState>(request);
+        sendJson(response, 200, await onboardingService.saveEmployeeDraft(body));
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/model/reset") {
+        sendJson(response, 200, await onboardingService.resetModelDraft());
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/onboarding/channel/reset") {
+        sendJson(response, 200, await onboardingService.resetChannelDraft());
         return;
       }
 

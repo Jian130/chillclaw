@@ -153,6 +153,7 @@ struct OnboardingClientTests {
                     "label": "Research Analyst",
                     "description": "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
                     "theme": "analyst",
+                    "avatarPresetId": "onboarding-analyst",
                     "starterSkillLabels": ["Research Brief", "Status Writer"],
                     "toolLabels": ["Company handbook", "Delivery playbook"],
                     "presetSkillIds": ["research-brief", "status-writer"],
@@ -182,13 +183,14 @@ struct OnboardingClientTests {
         #expect(response.config.modelProviders.map(\.id) == ["minimax", "modelstudio", "openai"])
         #expect(response.config.channels.map(\.id) == [.wechatWork, .wechat, .feishu, .telegram])
         #expect(response.config.channels.map(\.setupKind) == [.wechatWorkGuided, .wechatGuided, .feishuGuided, .telegramGuided])
+        #expect(response.config.employeePresets.first?.avatarPresetId == "onboarding-analyst")
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "GET")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/state?fresh=1")
     }
 
     @Test
-    func updateOnboardingStateUsesPatchBody() async throws {
+    func navigateOnboardingUsesStepScopedPostBody() async throws {
         let recorder = RequestRecorder()
         let session = await recorder.session(
             statusCode: 200,
@@ -339,6 +341,7 @@ struct OnboardingClientTests {
                     "label": "Research Analyst",
                     "description": "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
                     "theme": "analyst",
+                    "avatarPresetId": "onboarding-analyst",
                     "starterSkillLabels": ["Research Brief", "Status Writer"],
                     "toolLabels": ["Company handbook", "Delivery playbook"],
                     "presetSkillIds": ["research-brief", "status-writer"],
@@ -362,18 +365,15 @@ struct OnboardingClientTests {
             }
         )
 
-        let response = try await client.updateOnboardingState(
-            .init(currentStep: .model, model: .init(providerId: "anthropic", modelKey: "anthropic/claude-opus-4-6"))
-        )
+        let response = try await client.navigateOnboarding(to: .model)
 
         #expect(response.draft.currentStep == .model)
         let request = try #require(await recorder.lastRequest())
-        #expect(request.httpMethod == "PATCH")
-        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/state")
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/navigate")
         let body = try #require(readRequestBody(request))
-        let payload = try JSONDecoder.slackClaw.decode(UpdateOnboardingStateRequest.self, from: body)
-        #expect(payload.currentStep == .model)
-        #expect(payload.model?.providerId == "anthropic")
+        let payload = try JSONDecoder.slackClaw.decode(OnboardingStepNavigationRequest.self, from: body)
+        #expect(payload.step == .model)
     }
 
     @Test

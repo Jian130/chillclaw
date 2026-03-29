@@ -43,6 +43,7 @@ The desktop shell is implemented as a web UI + local daemon boundary so a Tauri 
   - persists draft onboarding progress through the daemon so refreshes resume the current step
   - wires install, permissions, model setup, channel setup, and AI employee creation to the real ChillClaw daemon flows instead of mock state
   - uses daemon-owned onboarding UI config so the curated model and channel choices stay aligned across clients
+  - resolves curated onboarding AI employee presets, managed preset skills, and onboarding avatar presentation from the daemon-owned preset catalog instead of client-local preset definitions
   - documents both the current seven-step implementation and the target six-step onboarding contract in [docs/reference/onboarding-design.md](/Users/home/Ryo/Projects/slackclaw/docs/reference/onboarding-design.md)
 - Chat page:
   - supports real multi-thread chat with AI members backed by OpenClaw agents
@@ -118,6 +119,7 @@ SlackClaw now includes a daemon-backed native macOS client with:
 - `apps/shared/SlackClawKit`: native protocol models, daemon HTTP/WebSocket client layers, and reusable chat UI/view models
 - the same seven-step daemon-backed onboarding gate as the React client, shown before the main native shell until first-run setup is fully completed
 - the same daemon-owned onboarding config for curated provider and channel selection, so React and native steps 4 and 5 stay aligned to one source of truth
+- the same daemon-owned onboarding employee preset presentation, so React and native render the same preset names, avatar ids, skills, and tool labels without client-local onboarding preset catalogs
   - onboarding curated provider/channel metadata uses `platformUrl` for platform destinations, `docsUrl` for documentation links, and `tutorialVideoUrl` for optional in-app tutorial video modals
 
 The native client is the packaged default. The React UI remains in the repo and in the app bundle as:
@@ -375,3 +377,28 @@ Packaged app logs live under:
 - `Stop SlackClaw` stops the local daemon and leaves the native app ready to reconnect or reopen the fallback web UI if needed.
 - `Uninstall SlackClaw` stops the daemon, removes the LaunchAgent, removes SlackClaw-managed local data, and removes the packaged app bundle when running from the packaged macOS app.
 - `Remove service` only uninstalls the LaunchAgent. It does not uninstall the app or delete SlackClaw data.
+
+### Current uninstall state-reset matrix
+
+For a **full OpenClaw uninstall**, ChillClaw now clears runtime-facing setup state only after uninstall succeeds **and** no OpenClaw runtime remains installed. If a second compatible runtime is still present, ChillClaw keeps the existing setup state instead of pretending the system is fully reset.
+
+| Data or state | Full OpenClaw uninstall with no runtime left | Remove service | Uninstall ChillClaw |
+| --- | --- | --- | --- |
+| SlackClaw-managed `openclaw-runtime` files | Removed | Kept | Removed with app data |
+| Adapter runtime state such as `openclaw-state.json` | Cleared | Kept | Removed with app data |
+| Setup completion flag | Cleared | Kept | Removed with app data |
+| Selected onboarding profile | Cleared | Kept | Removed with app data |
+| Onboarding draft state | Cleared | Kept | Removed with app data |
+| Channel onboarding records and saved staged channel entries | Cleared | Kept | Removed with app data |
+| Visible model config in the app | Reset to empty because the runtime is gone | Kept | Removed with app data |
+| Intro-complete flag | Kept | Kept | Removed with app data |
+| Recent tasks | Kept | Kept | Removed with app data |
+| Custom skills and other unrelated app state | Kept | Kept | Removed with app data |
+| LaunchAgent / background service | Kept unless the app itself is being removed | Removed | Removed |
+| OS secure-store secrets mirrored by SlackClaw | Currently kept; uninstall does not explicitly clear them | Kept | Currently kept unless cleared separately |
+
+This split is intentional today:
+
+- OpenClaw uninstall resets setup-facing state so Models and Channels return to a clean post-uninstall surface.
+- ChillClaw still preserves unrelated product history such as intro completion, task history, and custom skill state.
+- Secrets are currently outside that reset surface. We may tighten or expand that cleanup later, so treat this matrix as the current behavior rather than a permanent contract.

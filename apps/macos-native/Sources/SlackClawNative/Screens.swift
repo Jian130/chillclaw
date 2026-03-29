@@ -657,18 +657,21 @@ struct DeployScreen: View {
     }
 }
 
+@MainActor
 struct ConfigurationScreen: View {
     @Bindable var appState: SlackClawAppState
     @State private var selectedTab = 0
     @State private var showModelSheet = false
+    @State private var selectedModelEntry: SavedModelEntry?
     @State private var showChannelSheet = false
     @State private var selectedChannelEntry: ConfiguredChannelEntry?
     @State private var channelSheetAction: NativeConfigurationChannelSheetAction = .save
+    @State private var pendingConfigurationAction: NativeConfigurationPendingAction?
 
     var body: some View {
         WorkspaceScaffold(title: "Configuration", subtitle: "Manage models, channels, and pairing flows.") {
             if selectedTab == 0 {
-                ActionButton("Add Model", systemImage: "plus", variant: .primary) { showModelSheet = true }
+                ActionButton("Add Model", systemImage: "plus", variant: .primary) { presentAddModelSheet() }
             } else {
                 ActionButton("Add Channel", systemImage: "plus", variant: .primary) { presentAddChannelSheet() }
             }
@@ -688,7 +691,7 @@ struct ConfigurationScreen: View {
             }
         }
         .sheet(isPresented: $showModelSheet) {
-            ModelEntrySheet(appState: appState, existingEntry: nil)
+            ModelEntrySheet(appState: appState, existingEntry: selectedModelEntry)
         }
         .sheet(isPresented: $showChannelSheet) {
             ChannelEntrySheet(
@@ -711,14 +714,23 @@ struct ConfigurationScreen: View {
                             TagBadge("Default", tone: .success)
                         }
                         ActionButton("Edit", variant: .outline) {
-                            showModelSheet = true
+                            presentModelSheet(for: entry)
                         }
-                        .disabled(true)
-                        ActionButton("Set Default", variant: .secondary) {
+                        .disabled(hasPendingConfigurationAction)
+                        ActionButton(
+                            "Set Default",
+                            variant: .secondary,
+                            isBusy: pendingConfigurationAction == .setDefaultModel(entry.id),
+                            isDisabled: entry.isDefault || blocksConfigurationAction(.setDefaultModel(entry.id))
+                        ) {
                             Task { await setDefaultModel(entry.id) }
                         }
-                        .disabled(entry.isDefault)
-                        ActionButton("Remove", variant: .destructive) {
+                        ActionButton(
+                            "Remove",
+                            variant: .destructive,
+                            isBusy: pendingConfigurationAction == .removeModel(entry.id),
+                            isDisabled: blocksConfigurationAction(.removeModel(entry.id))
+                        ) {
                             Task { await removeModel(entry.id) }
                         }
                     }
@@ -748,11 +760,18 @@ struct ConfigurationScreen: View {
                             ActionButton("Approve Pairing", variant: .secondary) {
                                 presentChannelSheet(for: entry, action: .approvePairing)
                             }
+                            .disabled(hasPendingConfigurationAction)
                         }
                         ActionButton(actionState.primaryAction == .continueSetup ? "Continue Setup" : "Edit", variant: .outline) {
                             presentChannelSheet(for: entry, action: .save)
                         }
-                        ActionButton("Remove", variant: .destructive) {
+                        .disabled(hasPendingConfigurationAction)
+                        ActionButton(
+                            "Remove",
+                            variant: .destructive,
+                            isBusy: pendingConfigurationAction == .removeChannel(entry.id),
+                            isDisabled: blocksConfigurationAction(.removeChannel(entry.id))
+                        ) {
                             Task {
                                 await removeChannel(entry)
                             }
@@ -779,36 +798,43 @@ struct ConfigurationScreen: View {
     }
 
     private func setDefaultModel(_ entryId: String) async {
-        do {
+        let didMutate = await runConfigurationAction(.setDefaultModel(entryId)) {
             let response = try await appState.client.setDefaultModelEntry(entryId: entryId)
             appState.modelConfig = response.modelConfig
             appState.applyBanner(response.message)
-            await appState.refreshAll()
-        } catch {
-            appState.presentErrorUnlessCancelled(error)
         }
+        guard didMutate else { return }
+        refreshConfigurationStateInBackground()
     }
 
     private func removeModel(_ entryId: String) async {
-        do {
+        let didMutate = await runConfigurationAction(.removeModel(entryId)) {
             let response = try await appState.client.deleteModelEntry(entryId: entryId)
             appState.modelConfig = response.modelConfig
             appState.applyBanner(response.message)
-            await appState.refreshAll()
-        } catch {
-            appState.presentErrorUnlessCancelled(error)
         }
+        guard didMutate else { return }
+        refreshConfigurationStateInBackground()
     }
 
     private func removeChannel(_ entry: ConfiguredChannelEntry) async {
-        do {
+        let didMutate = await runConfigurationAction(.removeChannel(entry.id)) {
             let response = try await appState.client.deleteChannelEntry(request: RemoveChannelEntryRequest(entryId: entry.id, channelId: entry.channelId.rawValue, values: nil))
             appState.channelConfig = response.channelConfig
             appState.applyBanner(response.message)
-            await appState.refreshAll()
-        } catch {
-            appState.presentErrorUnlessCancelled(error)
         }
+        guard didMutate else { return }
+        refreshConfigurationStateInBackground()
+    }
+
+    private func presentAddModelSheet() {
+        selectedModelEntry = nil
+        showModelSheet = true
+    }
+
+    private func presentModelSheet(for entry: SavedModelEntry) {
+        selectedModelEntry = entry
+        showModelSheet = true
     }
 
     private func presentAddChannelSheet() {
@@ -822,12 +848,53 @@ struct ConfigurationScreen: View {
         channelSheetAction = action
         showChannelSheet = true
     }
+
+    private var hasPendingConfigurationAction: Bool {
+        pendingConfigurationAction != nil
+    }
+
+    private func blocksConfigurationAction(_ action: NativeConfigurationPendingAction) -> Bool {
+        guard let pendingConfigurationAction else {
+            return false
+        }
+
+        return pendingConfigurationAction != action
+    }
+
+    private func runConfigurationAction(
+        _ action: NativeConfigurationPendingAction,
+        operation: @escaping () async throws -> Void
+    ) async -> Bool {
+        guard pendingConfigurationAction == nil else { return false }
+
+        pendingConfigurationAction = action
+
+        do {
+            try await operation()
+            pendingConfigurationAction = nil
+            return true
+        } catch {
+            pendingConfigurationAction = nil
+            appState.presentErrorUnlessCancelled(error)
+            return false
+        }
+    }
+
+    private func refreshConfigurationStateInBackground() {
+        Task { await appState.refreshAll() }
+    }
 }
 
 private enum NativeManagedPluginAction {
     case install
     case update
     case remove
+}
+
+private enum NativeConfigurationPendingAction: Equatable {
+    case setDefaultModel(String)
+    case removeModel(String)
+    case removeChannel(String)
 }
 
 private func nativeManagedPluginStatusTone(_ status: String) -> NativeStatusTone {
@@ -1774,9 +1841,22 @@ private struct ModelEntrySheet: View {
         .padding(24)
         .frame(width: 520)
         .onAppear {
-            if let firstProvider = appState.modelConfig?.providers.first {
+            if let existingEntry {
+                providerId = existingEntry.providerId
+                label = existingEntry.label
+                modelKey = existingEntry.modelKey
+                secretValue = ""
+                if let authMethodId = existingEntry.authMethodId, !authMethodId.isEmpty {
+                    methodId = authMethodId
+                } else {
+                    methodId = appState.modelConfig?.providers.first(where: { $0.id == existingEntry.providerId })?.authMethods.first?.id ?? ""
+                }
+            } else if let firstProvider = appState.modelConfig?.providers.first {
                 providerId = firstProvider.id
                 methodId = firstProvider.authMethods.first?.id ?? ""
+                label = ""
+                modelKey = ""
+                secretValue = ""
             }
         }
     }

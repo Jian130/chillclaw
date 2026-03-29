@@ -107,4 +107,38 @@ struct UIContractTests {
             "Deploy screen should avoid the unsupported 'rocket' SF Symbol"
         )
     }
+
+    @Test
+    func sharedActionButtonsUseBusyGlyphInsteadOfPlainProgressView() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/UI/NativeUIPrimitives.swift"),
+            encoding: .utf8
+        )
+
+        #expect(
+            source.contains("NativeBusyGlyph()"),
+            "Shared native action buttons should render the branded busy glyph for slow actions"
+        )
+    }
+
+    @Test
+    func configurationScreenTracksPendingBusyActions() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(
+            source.contains("pendingConfigurationAction"),
+            "Configuration screen should keep explicit pending action state for slow buttons"
+        )
+    }
 }

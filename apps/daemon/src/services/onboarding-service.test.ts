@@ -2,11 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 
 import type { OnboardingStateResponse } from "@slackclaw/contracts";
 
-import type { SkillRuntimeEntry } from "../engine/adapter.js";
 import { MockAdapter } from "../engine/mock-adapter.js";
 import { AITeamService } from "./ai-team-service.js";
 import { ChannelSetupService } from "./channel-setup-service.js";
@@ -15,42 +13,20 @@ import { OverviewService } from "./overview-service.js";
 import { PresetSkillService } from "./preset-skill-service.js";
 import { StateStore } from "./state-store.js";
 
-function createRuntimeSkill(slug: string, version = "1.0.0"): SkillRuntimeEntry {
-  return {
-    id: `${slug}-runtime`,
-    slug,
-    name: slug,
-    description: `${slug} skill.`,
-    source: "openclaw-workspace",
-    bundled: false,
-    eligible: true,
-    disabled: false,
-    blockedByAllowlist: false,
-    missing: {
-      bins: [],
-      anyBins: [],
-      env: [],
-      config: [],
-      os: []
-    },
-    version,
-    filePath: `/mock/skills/${slug}/SKILL.md`,
-    baseDir: `/mock/skills/${slug}`
-  };
-}
-
 function createService(testName: string) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
   const adapter = new MockAdapter();
   const store = new StateStore(filePath);
   const overviewService = new OverviewService(adapter, store);
   const channelSetupService = new ChannelSetupService(adapter, store);
-  const aiTeamService = new AITeamService(adapter, store);
+  const presetSkillService = new PresetSkillService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store, undefined, presetSkillService);
 
   return {
     adapter,
     store,
-    service: new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService)
+    presetSkillService,
+    service: new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService)
   };
 }
 
@@ -88,20 +64,28 @@ test("onboarding completion clears the draft, marks setup completed, and returns
   const { service, store } = createService("onboarding-service-complete");
 
   await service.updateState({
-    currentStep: "complete",
+    currentStep: "employee",
     install: {
       installed: true,
       version: "2026.3.13",
       disposition: "reused-existing"
     },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
     model: {
       providerId: "openai",
-      modelKey: "openai/gpt-5",
-      entryId: "entry-openai"
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
     },
     channel: {
       channelId: "telegram",
       entryId: "telegram:default"
+    },
+    channelProgress: {
+      status: "staged",
+      requiresGatewayApply: true
     },
     employee: {
       memberId: "member-1",
@@ -123,6 +107,58 @@ test("onboarding completion clears the draft, marks setup completed, and returns
   assert.equal(result.summary.employee?.name, "Alex Morgan");
 });
 
+test("missing onboarding channel sessions clear the stale session id before surfacing an error", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-missing-session-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  Object.assign(channelSetupService, {
+    async getSession() {
+      throw new Error("Channel session not found.");
+    }
+  });
+  const presetSkillService = new PresetSkillService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store, undefined, presetSkillService);
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService);
+
+  await service.updateState({
+    currentStep: "channel",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "capturing",
+      sessionId: "wechat:default:login",
+      message: "Started WeChat login",
+      requiresGatewayApply: false
+    },
+    activeChannelSessionId: "wechat:default:login"
+  });
+
+  await assert.rejects(() => service.getChannelSession("wechat:default:login"), /start the login again/i);
+
+  const persisted = await store.read();
+  assert.equal(persisted.onboarding?.draft.activeChannelSessionId, undefined);
+  assert.equal(persisted.onboarding?.draft.channel?.channelId, "wechat");
+  assert.equal(persisted.onboarding?.draft.channelProgress?.status, "idle");
+});
+
 test("onboarding completion runs the dedicated runtime finalization step before marking setup complete", async () => {
   class FinalizingAdapter extends MockAdapter {
     gatewayFinalizeCalls = 0;
@@ -142,11 +178,32 @@ test("onboarding completion runs the dedicated runtime finalization step before 
   const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
 
   await service.updateState({
-    currentStep: "complete",
+    currentStep: "employee",
     install: {
       installed: true,
       version: "2026.3.13",
       disposition: "installed-managed"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "staged"
+    },
+    employee: {
+      name: "Alex Morgan",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst"
     }
   });
 
@@ -173,11 +230,32 @@ test("onboarding completion leaves the draft intact when runtime finalization fa
   const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
 
   await service.updateState({
-    currentStep: "complete",
+    currentStep: "employee",
     install: {
       installed: true,
       version: "2026.3.13",
       disposition: "installed-managed"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "staged"
+    },
+    employee: {
+      name: "Alex Morgan",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst"
     }
   });
 
@@ -185,7 +263,220 @@ test("onboarding completion leaves the draft intact when runtime finalization fa
 
   const state = await store.read();
   assert.equal(state.setupCompletedAt, undefined);
-  assert.equal(state.onboarding?.draft.currentStep, "complete");
+  assert.equal(state.onboarding?.draft.currentStep, "employee");
+});
+
+test("onboarding completion creates the staged AI employee before clearing onboarding", async () => {
+  const { service, store } = createService("onboarding-service-finalize-member");
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "installed-managed"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "staged"
+    },
+    employee: {
+      name: "Alex Morgan",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: ["research-brief", "status-writer"],
+      knowledgePackIds: ["company-handbook", "delivery-playbook"],
+      workStyles: ["Analytical", "Concise"],
+      memoryEnabled: true
+    }
+  });
+
+  const result = await service.complete({ destination: "team" });
+  const persisted = await store.read();
+  const storedMembers = Object.values(persisted.aiTeam?.members ?? {});
+  const createdMember = storedMembers.find((member) => member.name === "Alex Morgan");
+
+  assert.equal(result.status, "completed");
+  assert.ok(createdMember);
+  assert.equal(createdMember?.jobTitle, "Research Analyst");
+  assert.equal(createdMember?.brain?.entryId, "mock-openai-gpt-4o-mini");
+  assert.deepEqual(createdMember?.presetSkillIds, ["research-brief", "status-writer"]);
+  assert.equal(persisted.onboarding, undefined);
+});
+
+test("onboarding completion repairs legacy employee-step drafts that lost earlier prerequisite fields", async () => {
+  const { service } = createService("onboarding-service-repair-legacy-draft");
+
+  await service.updateState({
+    currentStep: "employee",
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "staged"
+    },
+    employee: {
+      name: "Ai Ryo",
+      jobTitle: "AI Assistant",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: ["research-brief", "status-writer"],
+      knowledgePackIds: ["company-handbook", "delivery-playbook"],
+      workStyles: ["Analytical", "Concise"],
+      memoryEnabled: true
+    }
+  });
+
+  const result = await service.complete({ destination: "chat" });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.destination, "chat");
+  assert.equal(result.summary.install?.installed, true);
+  assert.equal(result.summary.model?.entryId, "mock-openai-gpt-4o-mini");
+  assert.equal(result.summary.employee?.name, "Ai Ryo");
+});
+
+test("onboarding completion repairs employee-step drafts that lost staged channel state", async () => {
+  const { adapter, service, store } = createService("onboarding-service-repair-missing-channel");
+  const mockChannels = adapter as unknown as {
+    channels: Record<string, { status: string; summary: string; detail: string; lastUpdatedAt?: string }>;
+  };
+  const lastUpdatedAt = "2026-03-29T03:59:00.000Z";
+  mockChannels.channels.wechat = {
+    ...mockChannels.channels.wechat,
+    status: "completed",
+    summary: "Recovered WeChat runtime channel.",
+    detail: "Mock OpenClaw still has the WeChat channel configured.",
+    lastUpdatedAt
+  };
+
+  await store.update((state) => ({
+    ...state,
+    onboarding: {
+      draft: {
+        currentStep: "employee",
+        install: {
+          installed: true,
+          version: "2026.3.13",
+          disposition: "reused-existing"
+        },
+        permissions: {
+          confirmed: true,
+          confirmedAt: "2026-03-24T00:01:00.000Z"
+        },
+        model: {
+          providerId: "openai",
+          modelKey: "openai/gpt-4o-mini",
+          entryId: "mock-openai-gpt-4o-mini"
+        },
+        employee: {
+          name: "Ai Ryo",
+          jobTitle: "AI Assistant",
+          avatarPresetId: "onboarding-analyst",
+          presetId: "research-analyst",
+          presetSkillIds: ["research-brief", "status-writer"],
+          knowledgePackIds: ["company-handbook", "delivery-playbook"],
+          workStyles: ["Analytical", "Concise"],
+          memoryEnabled: true
+        }
+      }
+    }
+  }));
+
+  const result = await service.complete({ destination: "chat" });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.summary.channel?.channelId, "wechat");
+  assert.equal(result.summary.channel?.entryId, "wechat:default");
+});
+
+test("onboarding completion avoids rebuilding expensive live summaries during finalize", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-fast-finalize-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  let modelConfigCalls = 0;
+  let skillCatalogCalls = 0;
+  let runtimeCandidateCalls = 0;
+  const originalGetModelConfig = adapter.config.getModelConfig.bind(adapter.config);
+  const originalGetSkillRuntimeCatalog = adapter.config.getSkillRuntimeCatalog.bind(adapter.config);
+  const originalListAIMemberRuntimeCandidates =
+    adapter.aiEmployees.listAIMemberRuntimeCandidates.bind(adapter.aiEmployees);
+  adapter.config.getModelConfig = async () => {
+    modelConfigCalls += 1;
+    return originalGetModelConfig();
+  };
+  adapter.config.getSkillRuntimeCatalog = async () => {
+    skillCatalogCalls += 1;
+    return originalGetSkillRuntimeCatalog();
+  };
+  adapter.aiEmployees.listAIMemberRuntimeCandidates = async () => {
+    runtimeCandidateCalls += 1;
+    return originalListAIMemberRuntimeCandidates();
+  };
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  const presetSkillService = new PresetSkillService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store, undefined, presetSkillService);
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService);
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "staged"
+    },
+    employee: {
+      name: "Ai Ryo",
+      jobTitle: "AI Assistant",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: ["research-brief", "status-writer"],
+      knowledgePackIds: ["company-handbook", "delivery-playbook"],
+      workStyles: ["Analytical", "Concise"],
+      memoryEnabled: true
+    }
+  });
+
+  modelConfigCalls = 0;
+  skillCatalogCalls = 0;
+  runtimeCandidateCalls = 0;
+
+  await service.complete({ destination: "chat" });
+
+  assert.equal(modelConfigCalls, 1);
+  assert.equal(skillCatalogCalls, 1);
+  assert.equal(runtimeCandidateCalls, 0);
 });
 
 test("onboarding service reuses install summary for step-only updates instead of rechecking engine status", async () => {
@@ -369,9 +660,25 @@ test("onboarding state exposes the curated model providers for step 3", async ()
     state.config?.employeePresets?.map((preset) => preset.id),
     ["research-analyst", "support-captain", "delivery-operator"]
   );
+  assert.deepEqual(
+    state.config?.employeePresets?.map((preset) => preset.avatarPresetId),
+    ["onboarding-analyst", "onboarding-guide", "onboarding-builder"]
+  );
   assert.deepEqual(state.config?.employeePresets?.[0]?.presetSkillIds, ["research-brief", "status-writer"]);
   assert.deepEqual(state.config?.employeePresets?.[1]?.knowledgePackIds, ["customer-voice"]);
   assert.equal(state.config?.employeePresets?.[2]?.theme, "operator");
+});
+
+test("onboarding service fails fast when onboarding config references a missing employee preset id", async () => {
+  const onboardingConfigModule = await import("../config/onboarding-config.js");
+  assert.throws(
+    () =>
+      onboardingConfigModule.buildOnboardingUiConfig({
+        ...onboardingConfigModule.onboardingUiConfigSelection,
+        employeePresetIds: ["research-analyst", "missing-preset-id"]
+      }),
+    /Unknown onboarding employee preset: missing-preset-id/i
+  );
 });
 
 test("onboarding service migrates legacy preset skill ids out of the live draft shape", async () => {
@@ -399,7 +706,7 @@ test("onboarding service migrates legacy preset skill ids out of the live draft 
   assert.equal("skillIds" in (state.draft.employee ?? {}), false);
 });
 
-test("onboarding service does not re-run preset skill reconciliation when only employee profile fields change", async () => {
+test("onboarding service does not reconcile preset skills while editing the employee draft", async () => {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-preset-skill-reuse-${randomUUID()}.json`);
   const adapter = new MockAdapter();
   const store = new StateStore(filePath);
@@ -432,7 +739,7 @@ test("onboarding service does not re-run preset skill reconciliation when only e
     }
   });
 
-  assert.equal(reconcileCalls, 1);
+  assert.equal(reconcileCalls, 0);
 
   const updated = await service.updateState({
     currentStep: "employee",
@@ -450,53 +757,53 @@ test("onboarding service does not re-run preset skill reconciliation when only e
     }
   });
 
-  assert.equal(reconcileCalls, 1);
-  assert.equal(updated.presetSkillSync?.targetMode, "reused-install");
-  assert.equal(updated.presetSkillSync?.summary.includes("reused-install runtime"), true);
+  assert.equal(reconcileCalls, 0);
+  assert.equal(updated.presetSkillSync?.summary, "No preset skills selected.");
 });
 
-test("onboarding service returns pending preset skill sync immediately while reconciliation continues in the background", async () => {
-  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-background-preset-sync-${randomUUID()}.json`);
-  const adapter = new MockAdapter();
-  const store = new StateStore(filePath);
-  const overviewService = new OverviewService(adapter, store);
-  const channelSetupService = new ChannelSetupService(adapter, store);
-  const presetSkillService = new PresetSkillService(adapter, store);
-  const aiTeamService = new AITeamService(adapter, store, undefined, presetSkillService);
-  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService);
-  const installed = new Map<string, SkillRuntimeEntry>();
-  let waitForFirstVerify = true;
-  let releaseFirstVerify: (() => void) | undefined;
-  const firstVerifyGate = new Promise<void>((resolve) => {
-    releaseFirstVerify = resolve;
-  });
+test("onboarding completion reconciles staged preset skills during finalize", async () => {
+  const { presetSkillService, service } = createService("onboarding-service-finalize-preset-sync");
 
-  Object.assign(adapter.config, {
-    installManagedSkill: async (request: { slug: string; version?: string }) => {
-      const runtimeSkill = createRuntimeSkill(request.slug, request.version ?? "1.0.0");
-      installed.set(request.slug, runtimeSkill);
-      return {
-        runtimeSkillId: runtimeSkill.id,
-        version: runtimeSkill.version,
-        requiresGatewayApply: true
-      };
-    },
-    verifyManagedSkill: async (slug: string) => {
-      if (!installed.has(slug) && waitForFirstVerify) {
-        waitForFirstVerify = false;
-        await firstVerifyGate;
-      }
+  const reconcileCalls: Array<{
+    scope: string;
+    presetSkillIds: string[];
+    waitForReconcile: boolean | undefined;
+    targetMode: string | undefined;
+  }> = [];
+  const originalSetDesiredPresetSkillIds = presetSkillService.setDesiredPresetSkillIds.bind(presetSkillService);
+  presetSkillService.setDesiredPresetSkillIds = async (scope, presetSkillIds, options) => {
+    reconcileCalls.push({
+      scope,
+      presetSkillIds,
+      waitForReconcile: options?.waitForReconcile,
+      targetMode: options?.targetMode
+    });
+    return originalSetDesiredPresetSkillIds(scope, presetSkillIds, options);
+  };
 
-      return installed.get(slug);
-    }
-  });
-
-  const updatePromise = service.updateState({
+  await service.updateState({
     currentStep: "employee",
     install: {
       installed: true,
       version: "2026.3.13",
       disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "telegram",
+      entryId: "telegram:default"
+    },
+    channelProgress: {
+      status: "staged",
+      requiresGatewayApply: true
     },
     employee: {
       name: "Ryo-AI",
@@ -507,36 +814,15 @@ test("onboarding service returns pending preset skill sync immediately while rec
     }
   });
 
-  const raced = await Promise.race([
-    updatePromise.then((value) => ({ kind: "resolved" as const, value })),
-    delay(100).then(() => ({ kind: "timed-out" as const }))
-  ]);
+  assert.equal(reconcileCalls.length, 0);
 
-  releaseFirstVerify?.();
-  if (raced.kind !== "resolved") {
-    await updatePromise;
-  }
+  await service.complete({ destination: "chat" });
 
-  assert.equal(raced.kind, "resolved");
-  if (raced.kind !== "resolved") {
-    return;
-  }
-
-  assert.equal(raced.value.presetSkillSync?.summary, "2 preset skills are syncing on the reused-install runtime.");
-  assert.deepEqual(
-    raced.value.presetSkillSync?.entries.map((entry) => entry.status),
-    ["pending", "pending"]
-  );
-
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const persisted = await store.read();
-    if (persisted.presetSkills?.syncOverview?.entries.every((entry) => entry.status === "verified")) {
-      assert.equal(persisted.presetSkills.syncOverview.summary, "2 preset skills verified on the reused-install runtime.");
-      return;
-    }
-
-    await delay(10);
-  }
-
-  assert.fail("Expected preset skill reconciliation to finish after the onboarding request returned.");
+  assert.equal(reconcileCalls.length, 1);
+  assert.deepEqual(reconcileCalls[0], {
+    scope: "onboarding",
+    presetSkillIds: ["research-brief", "status-writer"],
+    waitForReconcile: true,
+    targetMode: "reused-install"
+  });
 });

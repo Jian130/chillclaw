@@ -235,13 +235,21 @@ export interface FirstRunState {
   selectedProfileId?: string;
 }
 
-export type OnboardingStep = "welcome" | "install" | "permissions" | "model" | "channel" | "employee" | "complete";
+export type OnboardingStep = "welcome" | "install" | "permissions" | "model" | "channel" | "employee";
 export type OnboardingDestination = "team" | "dashboard" | "chat";
 
 export interface OnboardingInstallState {
   installed: boolean;
   version?: string;
   disposition?: "reused-existing" | "installed-managed" | "installed-system" | "not-installed";
+  updateAvailable?: boolean;
+  latestVersion?: string;
+  updateSummary?: string;
+}
+
+export interface OnboardingPermissionsState {
+  confirmed: boolean;
+  confirmedAt?: string;
 }
 
 export interface OnboardingModelState {
@@ -254,6 +262,15 @@ export interface OnboardingModelState {
 export interface OnboardingChannelState {
   channelId: SupportedChannelId;
   entryId?: string;
+}
+
+export type OnboardingChannelProgressStatus = "idle" | "capturing" | "staged";
+
+export interface OnboardingChannelProgressState {
+  status: OnboardingChannelProgressStatus;
+  sessionId?: string;
+  message?: string;
+  requiresGatewayApply?: boolean;
 }
 
 export interface OnboardingEmployeeState {
@@ -272,8 +289,10 @@ export interface OnboardingEmployeeState {
 export interface OnboardingDraftState {
   currentStep: OnboardingStep;
   install?: OnboardingInstallState;
+  permissions?: OnboardingPermissionsState;
   model?: OnboardingModelState;
   channel?: OnboardingChannelState;
+  channelProgress?: OnboardingChannelProgressState;
   employee?: OnboardingEmployeeState;
   activeModelAuthSessionId?: string;
   activeChannelSessionId?: string;
@@ -323,6 +342,7 @@ export interface OnboardingEmployeePresetPresentation {
   label: string;
   description: string;
   theme: OnboardingEmployeePresetTheme;
+  avatarPresetId: string;
   starterSkillLabels: string[];
   toolLabels: string[];
   presetSkillIds?: string[];
@@ -348,22 +368,28 @@ export interface OnboardingStateResponse {
 export interface UpdateOnboardingStateRequest {
   currentStep?: OnboardingStep;
   install?: OnboardingInstallState;
+  permissions?: OnboardingPermissionsState;
   model?: OnboardingModelState;
   channel?: OnboardingChannelState;
+  channelProgress?: OnboardingChannelProgressState;
   employee?: OnboardingEmployeeState;
   activeModelAuthSessionId?: string;
   activeChannelSessionId?: string;
 }
 
 export interface CompleteOnboardingRequest {
-  destination: OnboardingDestination;
+  destination?: OnboardingDestination;
 }
 
 export interface CompleteOnboardingResponse {
   status: "completed";
-  destination: OnboardingDestination;
+  destination?: OnboardingDestination;
   summary: OnboardingCompletionSummary;
   overview: ProductOverview;
+}
+
+export interface OnboardingStepNavigationRequest {
+  step: OnboardingStep;
 }
 
 export interface SetupStepResult {
@@ -1028,6 +1054,7 @@ export interface ModelAuthSessionInputRequest {
 export interface ModelAuthSessionResponse {
   session: ModelAuthSession;
   modelConfig: ModelConfigOverview;
+  onboarding?: OnboardingStateResponse;
 }
 
 export interface SetDefaultModelRequest {
@@ -1058,6 +1085,7 @@ export interface ModelConfigActionResponse extends MutationSyncMeta {
   modelConfig: ModelConfigOverview;
   authSession?: ModelAuthSession;
   requiresGatewayApply?: boolean;
+  onboarding?: OnboardingStateResponse;
 }
 
 export interface RecoveryRunResponse {
@@ -1072,6 +1100,7 @@ export interface SetupRunResponse {
   steps: SetupStepResult[];
   overview: ProductOverview;
   install?: InstallResponse;
+  onboarding?: OnboardingStateResponse;
 }
 
 export interface AppServiceActionResponse {
@@ -1147,11 +1176,13 @@ export interface ChannelConfigActionResponse extends MutationSyncMeta {
   channelConfig: ChannelConfigOverview;
   session?: ChannelSession;
   requiresGatewayApply?: boolean;
+  onboarding?: OnboardingStateResponse;
 }
 
 export interface ChannelSessionResponse {
   session: ChannelSession;
   channelConfig: ChannelConfigOverview;
+  onboarding?: OnboardingStateResponse;
 }
 
 export interface PluginActionResponse extends MutationSyncMeta {

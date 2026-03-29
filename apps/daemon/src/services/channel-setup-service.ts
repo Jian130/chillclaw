@@ -3,6 +3,7 @@ import type {
   ChannelConfigOverview,
   ChannelCapability,
   ChannelFieldSummary,
+  ChannelSession,
   ChannelSessionInputRequest,
   ChannelSessionResponse,
   ChannelSetupOverview,
@@ -265,6 +266,17 @@ function buildEntry(
   };
 }
 
+function storedEntryFromConfiguredEntry(entry: ConfiguredChannelEntry): StoredChannelEntryState {
+  return {
+    id: entry.id,
+    channelId: entry.channelId,
+    label: entry.label,
+    editableValues: entry.editableValues,
+    maskedConfigSummary: entry.maskedConfigSummary,
+    lastUpdatedAt: entry.lastUpdatedAt ?? new Date().toISOString()
+  };
+}
+
 function mergeLiveAndStoredEntry(
   liveEntry: ConfiguredChannelEntry,
   record: StoredChannelEntryState | undefined
@@ -331,6 +343,44 @@ function workflowDetail(result: FeaturePreparationResult): string {
         : `${prerequisite.displayName} queued: ${prerequisite.command.join(" ")}`
     )
     .join(" ");
+}
+
+function channelStateFromSession(
+  session: ChannelSession,
+  current: ChannelSetupState
+): ChannelSetupState {
+  const lastLog = [...(session.logs ?? [])].reverse().find((line) => line.trim().length > 0);
+
+  if (session.status === "completed") {
+    return {
+      ...current,
+      status: "completed",
+      summary: session.message || `${current.title} login completed.`,
+      detail: lastLog ?? (session.message || current.detail),
+      lastUpdatedAt: new Date().toISOString(),
+      logs: session.logs
+    };
+  }
+
+  if (session.status === "failed") {
+    return {
+      ...current,
+      status: "failed",
+      summary: session.message || `${current.title} login failed.`,
+      detail: lastLog ?? (session.message || current.detail),
+      lastUpdatedAt: new Date().toISOString(),
+      logs: session.logs
+    };
+  }
+
+  return {
+    ...current,
+    status: "awaiting-pairing",
+    summary: session.message || current.summary,
+    detail: lastLog ?? current.detail,
+    lastUpdatedAt: new Date().toISOString(),
+    logs: session.logs
+  };
 }
 
 export class ChannelSetupService {
@@ -404,6 +454,45 @@ export class ChannelSetupService {
     };
   }
 
+  private async getSessionConfigOverview(state?: AppState, sessionOverride?: ChannelSession): Promise<ChannelConfigOverview> {
+    const current = state ?? (await this.store.read());
+    const activeSession = sessionOverride ?? (await this.adapter.gateway.getActiveChannelSession());
+    const channels = mergeChannelStates(current.channelOnboarding?.channels, {});
+    if (activeSession) {
+      channels[activeSession.channelId] = channelStateFromSession(activeSession, channels[activeSession.channelId]);
+    }
+    const storedEntries = current.channelOnboarding?.entries ?? {};
+    const entriesById = new Map<string, ConfiguredChannelEntry>();
+
+    for (const channelId of CHANNEL_ORDER) {
+      const record = storedEntries[entryIdFor(channelId)] ?? legacyEntryFromState(channels[channelId]);
+      const fallbackEntry = record ? buildEntry(record, channels[channelId]) : undefined;
+      if (!fallbackEntry) {
+        continue;
+      }
+
+      entriesById.set(fallbackEntry.id, fallbackEntry);
+    }
+
+    const entries = [...entriesById.values()].sort((left, right) => {
+      const channelDelta = CHANNEL_ORDER.indexOf(left.channelId) - CHANNEL_ORDER.indexOf(right.channelId);
+      if (channelDelta !== 0) {
+        return channelDelta;
+      }
+
+      return left.label.localeCompare(right.label);
+    });
+
+    return {
+      baseOnboardingCompleted: true,
+      capabilities: CHANNEL_CAPABILITIES,
+      entries,
+      activeSession,
+      // Interactive onboarding sessions are staged-only and should not probe the live gateway.
+      gatewaySummary: gatewaySummary(false, undefined, channels)
+    };
+  }
+
   async saveEntry(entryId: string | undefined, request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
     const workflowPreparation =
       request.action === "approve-pairing" ? undefined : await this.featureWorkflowService.prepareChannel(request.channelId);
@@ -473,7 +562,9 @@ export class ChannelSetupService {
       });
     }
 
-    const channelConfig = await this.getConfigOverview(nextState);
+    const channelConfig = result.session
+      ? await this.getSessionConfigOverview(nextState, result.session)
+      : await this.getConfigOverview(nextState);
     const sync = this.eventPublisher?.publishChannelConfigUpdated(channelConfig) ?? fallbackMutationSyncMeta(!result.session);
 
     return {
@@ -489,12 +580,21 @@ export class ChannelSetupService {
 
   async removeEntry(request: RemoveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
     const current = await this.store.read();
-    const record =
+    const fallbackChannelId = request.channelId ?? (request.entryId.split(":")[0] as SupportedChannelId);
+    const storedOrLegacyRecord =
       current.channelOnboarding?.entries?.[request.entryId] ??
       (() => {
-        const channelId = request.channelId ?? (request.entryId.split(":")[0] as SupportedChannelId);
-        return legacyEntryFromState((current.channelOnboarding?.channels?.[channelId] ?? defaultChannelMap()[channelId]) as ChannelSetupState);
+        return legacyEntryFromState(
+          (current.channelOnboarding?.channels?.[fallbackChannelId] ?? defaultChannelMap()[fallbackChannelId]) as ChannelSetupState
+        );
       })();
+    const configuredEntries = storedOrLegacyRecord ? [] : await this.adapter.config.getConfiguredChannelEntries();
+    const liveConfiguredEntry =
+      storedOrLegacyRecord
+        ? undefined
+        : configuredEntries.find((entry) => entry.id === request.entryId) ??
+          configuredEntries.find((entry) => entry.channelId === fallbackChannelId);
+    const record = storedOrLegacyRecord ?? (liveConfiguredEntry ? storedEntryFromConfiguredEntry(liveConfiguredEntry) : undefined);
 
     if (!record) {
       throw new Error("SlackClaw could not find that saved channel entry.");
@@ -506,12 +606,12 @@ export class ChannelSetupService {
       values: record.editableValues
     });
 
-    await Promise.all(secretFieldIdsFor(record.channelId).map((fieldId) => this.secrets.delete(channelSecretName(record.channelId, request.entryId, fieldId))));
+    await Promise.all(secretFieldIdsFor(record.channelId).map((fieldId) => this.secrets.delete(channelSecretName(record.channelId, record.id, fieldId))));
 
     const defaults = defaultChannelMap();
     const nextState = await this.store.update((next) => {
       const entries = { ...(next.channelOnboarding?.entries ?? {}) };
-      delete entries[request.entryId];
+      delete entries[record.id];
 
       return {
         ...next,
@@ -548,7 +648,7 @@ export class ChannelSetupService {
 
     return {
       session,
-      channelConfig: await this.getConfigOverview()
+      channelConfig: await this.getSessionConfigOverview(undefined, session)
     };
   }
 
@@ -561,7 +661,7 @@ export class ChannelSetupService {
 
     return {
       session,
-      channelConfig: await this.getConfigOverview()
+      channelConfig: await this.getSessionConfigOverview(undefined, session)
     };
   }
 

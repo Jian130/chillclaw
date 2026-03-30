@@ -300,6 +300,18 @@ test("channel config overview keeps active sessions separate from configured ent
   assert.equal(state.channelOnboarding?.channels.wechat.status, "awaiting-pairing");
 });
 
+test("channel config overview exposes personal WeChat pairing as a live follow-up action", async () => {
+  const { service } = createServices("channel-setup-wechat-pairing");
+
+  const overview = await service.getConfigOverview();
+  const capability = overview.capabilities.find((entry) => entry.id === "wechat");
+
+  assert.equal(capability?.supportsPairing, true);
+  assert.equal(capability?.supportsEdit, true);
+  assert.equal(capability?.supportsRemove, true);
+  assert.equal(capability?.fieldDefs.some((field) => field.id === "code"), true);
+});
+
 test("channel setup removes a configured entry through the generic path", async () => {
   const { service, store } = createServices("channel-setup-remove");
   await service.saveEntry(undefined, {

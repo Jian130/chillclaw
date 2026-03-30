@@ -12,9 +12,12 @@ import {
   isVisibleAIMemberAgentId,
   parseClawHubExploreOutput,
   parseClawHubSearchOutput,
+  removeRuntimeDerivedModelFromConfig,
   reconcileSavedEntriesWithRuntime,
+  resolveCatalogModelKey,
   summarizeTargetUpdateStatus
 } from "./openclaw-adapter.js";
+import { InMemorySecretsAdapter, modelAuthSecretName } from "../platform/secrets-adapter.js";
 
 test("reconcileSavedEntriesWithRuntime aligns saved entries with the live OpenClaw runtime chain", () => {
   const entries = [
@@ -135,7 +138,7 @@ test("reconcileSavedEntriesWithRuntime aligns saved entries with the live OpenCl
 
   assert.equal(reconciled.defaultEntryId, "runtime:vllm-qwen3-5-9b");
   assert.deepEqual(reconciled.fallbackEntryIds, [
-    "slackclaw-main",
+    "runtime:openai-codex-gpt-5-4",
     "fallback-anthropic",
     "fallback-anthropic-45"
   ]);
@@ -146,17 +149,152 @@ test("reconcileSavedEntriesWithRuntime aligns saved entries with the live OpenCl
   assert.equal(runtimeDefault?.authModeLabel, "Local");
   assert.equal(runtimeDefault?.isDefault, true);
 
-  const openAi = reconciled.entries.find((entry) => entry.id === "slackclaw-main");
+  const openAi = reconciled.entries.find((entry) => entry.id === "runtime:openai-codex-gpt-5-4");
   assert.equal(openAi?.isDefault, false);
   assert.equal(openAi?.isFallback, true);
+  assert.equal(openAi?.agentId, "");
+  assert.equal(openAi?.agentDir, "");
+  assert.equal(openAi?.workspaceDir, "");
 
   const duplicateAnthropic = reconciled.entries.find((entry) => entry.id === "normal-anthropic");
   assert.equal(duplicateAnthropic, undefined);
 });
 
+test("reconcileSavedEntriesWithRuntime converts implicit main entries into runtime-derived defaults", () => {
+  const entries = [
+    {
+      id: "slackclaw-main",
+      label: "OpenAI GPT-5",
+      providerId: "openai",
+      modelKey: "openai/gpt-5",
+      agentId: "main",
+      agentDir: "/tmp/main-agent",
+      workspaceDir: "/tmp/main-workspace",
+      authMethodId: "openai-codex",
+      authModeLabel: "OAuth",
+      profileLabel: "default",
+      profileIds: ["openai-codex:default"],
+      isDefault: true,
+      isFallback: false,
+      createdAt: "2026-03-12T00:00:00.000Z",
+      updatedAt: "2026-03-12T00:00:00.000Z"
+    }
+  ];
+
+  const configuredModels: ModelCatalogEntry[] = [
+    {
+      key: "openai/gpt-5",
+      name: "GPT-5",
+      input: "text+image",
+      contextWindow: 400000,
+      local: false,
+      available: true,
+      tags: ["default", "configured"],
+      missing: false
+    }
+  ];
+
+  const reconciled = reconcileSavedEntriesWithRuntime(entries as never[], configuredModels, "openai/gpt-5");
+
+  assert.equal(reconciled.defaultEntryId, "runtime:openai-gpt-5");
+  assert.deepEqual(reconciled.fallbackEntryIds, []);
+  assert.deepEqual(reconciled.entries.map((entry) => entry.id), ["runtime:openai-gpt-5"]);
+  assert.equal(reconciled.entries[0]?.agentId, "");
+  assert.equal(reconciled.entries[0]?.agentDir, "");
+  assert.equal(reconciled.entries[0]?.workspaceDir, "");
+  assert.deepEqual(reconciled.entries[0]?.profileIds, []);
+});
+
+test("removeRuntimeDerivedModelFromConfig clears a last default runtime model", () => {
+  const config = {
+    agents: {
+      defaults: {
+        model: {
+          primary: "minimax/MiniMax-M2.5",
+          fallbacks: []
+        },
+        models: {
+          "minimax/MiniMax-M2.5": {}
+        },
+        workspace: "/tmp/openclaw-workspace"
+      }
+    }
+  };
+
+  const result = removeRuntimeDerivedModelFromConfig(config, undefined, "minimax/MiniMax-M2.5");
+
+  assert.equal(result.changed, true);
+  assert.equal(result.removedDefault, true);
+  assert.deepEqual(result.remainingModelKeys, []);
+  assert.equal(config.agents?.defaults?.model, undefined);
+  assert.equal(config.agents?.defaults?.models, undefined);
+  assert.equal(config.agents?.defaults?.workspace, "/tmp/openclaw-workspace");
+});
+
+test("removeRuntimeDerivedModelFromConfig promotes the first fallback when removing the default", () => {
+  const config = {
+    agents: {
+      defaults: {
+        model: {
+          primary: "openai/gpt-5",
+          fallbacks: ["anthropic/claude-sonnet-4-6", "google/gemini-2.5-pro"]
+        },
+        models: {
+          "openai/gpt-5": {},
+          "anthropic/claude-sonnet-4-6": {},
+          "google/gemini-2.5-pro": {}
+        }
+      }
+    }
+  };
+
+  const result = removeRuntimeDerivedModelFromConfig(config, undefined, "openai/gpt-5");
+
+  assert.equal(result.changed, true);
+  assert.equal(result.removedDefault, true);
+  assert.deepEqual(result.remainingModelKeys, [
+    "anthropic/claude-sonnet-4-6",
+    "google/gemini-2.5-pro"
+  ]);
+  assert.deepEqual(config.agents?.defaults?.model, {
+    primary: "anthropic/claude-sonnet-4-6",
+    fallbacks: ["google/gemini-2.5-pro"]
+  });
+});
+
+test("resolveCatalogModelKey upgrades the stale MiniMax onboarding default to the supported live catalog model", () => {
+  const models: ModelCatalogEntry[] = [
+    {
+      key: "minimax/MiniMax-M2.7",
+      name: "MiniMax-M2.7",
+      input: "text",
+      contextWindow: 128000,
+      local: false,
+      available: true,
+      tags: ["configured"],
+      missing: false
+    },
+    {
+      key: "minimax/minimax-text-01",
+      name: "MiniMax Text 01",
+      input: "text",
+      contextWindow: 128000,
+      local: false,
+      available: true,
+      tags: [],
+      missing: false
+    }
+  ];
+
+  assert.equal(
+    resolveCatalogModelKey(models, "minimax/MiniMax-M2.5", { providerId: "minimax" }),
+    "minimax/MiniMax-M2.7"
+  );
+});
+
 test("AI member detection includes every real OpenClaw agent id", () => {
-  assert.equal(isVisibleAIMemberAgentId("main"), true);
-  assert.equal(isVisibleAIMemberAgentId("slackclaw-model-openai"), true);
+  assert.equal(isVisibleAIMemberAgentId("main"), false);
+  assert.equal(isVisibleAIMemberAgentId("slackclaw-model-openai"), false);
   assert.equal(isVisibleAIMemberAgentId("sales-partner"), true);
   assert.equal(isVisibleAIMemberAgentId(""), false);
 });
@@ -195,14 +333,14 @@ test("AI member discovery tolerates mixed plugin logs and preserves runtime meta
   await withFakeOpenClaw(async ({ adapter }) => {
     const members = await adapter.aiEmployees.listAIMemberRuntimeCandidates();
 
-    assert.equal(members.length, 3);
+    assert.equal(members.length, 1);
     assert.deepEqual(
       members.map((member) => member.agentId),
-      ["main", "slackclaw-model-openai", "existing-agent"]
+      ["existing-agent"]
     );
-    assert.equal(members[2]?.name, "Existing Agent");
-    assert.equal(members[2]?.emoji, "🧭");
-    assert.equal(members[2]?.bindingCount, 2);
+    assert.equal(members[0]?.name, "Existing Agent");
+    assert.equal(members[0]?.emoji, "🧭");
+    assert.equal(members[0]?.bindingCount, 2);
   });
 });
 
@@ -210,12 +348,12 @@ test("AI member discovery falls back to stderr when OpenClaw writes JSON there",
   await withFakeOpenClaw(async ({ adapter }) => {
     const members = await adapter.aiEmployees.listAIMemberRuntimeCandidates();
 
-    assert.equal(members.length, 3);
+    assert.equal(members.length, 1);
     assert.deepEqual(
       members.map((member) => member.agentId),
-      ["main", "slackclaw-model-openai", "stderr-agent"]
+      ["stderr-agent"]
     );
-    assert.equal(members[2]?.bindingCount, 1);
+    assert.equal(members[0]?.bindingCount, 1);
   }, {
     agentsListJsonOnStderr: true
   });
@@ -306,11 +444,15 @@ async function withFakeOpenClaw(
     legacyWechatRuntime?: boolean;
     openclawWeixinRuntime?: boolean;
     failPersonalWechatDelete?: boolean;
+    failPersonalWechatBindingAlias?: boolean;
+    bindingsUseMatchShape?: boolean;
+    failGatewayRestartWithPluginsAllowWarning?: boolean;
     longRunningWechatInstaller?: boolean;
     pluginInstalled?: boolean;
     pluginEnabled?: boolean;
     pluginUpdateAvailable?: boolean;
     gatewayServiceLoaded?: boolean;
+    minimaxCatalog?: boolean;
   }
 ): Promise<void> {
   const previousLock = fakeOpenClawLock;
@@ -330,6 +472,7 @@ async function withFakeOpenClaw(
   const pluginUpdateMarkerPath = join(tempDir, "plugin-update-marker.txt");
   const gatewayServiceMarkerPath = join(tempDir, "gateway-service.txt");
   const gatewayRunningMarkerPath = join(tempDir, "gateway-running.txt");
+  const bindingsPath = join(tempDir, "agent-bindings.txt");
   const binDir = join(tempDir, "bin");
   const npmPath = join(binDir, "npm");
   const agentDirPath = join(tempDir, "main-agent");
@@ -356,17 +499,46 @@ async function withFakeOpenClaw(
   const legacyWechatRuntime = options?.legacyWechatRuntime === true;
   const openclawWeixinRuntime = options?.openclawWeixinRuntime === true;
   const failPersonalWechatDelete = options?.failPersonalWechatDelete === true;
+  const failPersonalWechatBindingAlias = options?.failPersonalWechatBindingAlias === true;
+  const bindingsUseMatchShape = options?.bindingsUseMatchShape === true;
+  const failGatewayRestartWithPluginsAllowWarning = options?.failGatewayRestartWithPluginsAllowWarning === true;
   const longRunningWechatInstaller = options?.longRunningWechatInstaller === true;
   const pluginInstalled = options?.pluginInstalled === true;
   const pluginEnabled = options?.pluginEnabled === true;
   const pluginUpdateAvailable = options?.pluginUpdateAvailable === true;
   const gatewayServiceLoaded = options?.gatewayServiceLoaded !== false;
+  const minimaxCatalog = options?.minimaxCatalog === true;
   const chatHistoryPayload =
     options?.chatHistoryPayload ??
     '{"sessionKey":"agent:existing-agent:slackclaw-chat:thread-1","messages":[{"role":"assistant","content":[{"type":"text","text":"Hello from OpenClaw"}],"timestamp":1773000000000}]}';
 
   await writeFile(configPath, JSON.stringify({}));
   await writeFile(versionPath, "2026.3.7\n");
+  await mkdir(agentDirPath, { recursive: true });
+  await writeFile(
+    join(agentDirPath, "auth-profiles.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        profiles: {
+          "openai-codex:default": {
+            provider: "openai-codex",
+            type: "oauth",
+            label: "OpenAI Codex OAuth"
+          }
+        },
+        usageStats: {},
+        order: {
+          "openai-codex": ["openai-codex:default"]
+        },
+        lastGood: {
+          "openai-codex": "openai-codex:default"
+        }
+      },
+      null,
+      2
+    )
+  );
   if (pluginInstalled) {
     await writeFile(pluginInstalledMarkerPath, "1\n");
   }
@@ -473,6 +645,8 @@ elif [ "$1" = "models" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
   fi
   if [ "${cleanModelRuntime ? "1" : "0"}" = "1" ]; then
     echo '{"models":[]}'
+  elif [ "${minimaxCatalog ? "1" : "0"}" = "1" ]; then
+    echo '{"models":[{"key":"minimax/MiniMax-M2.7","name":"MiniMax-M2.7","input":"text","contextWindow":400000,"local":false,"available":true,"tags":["default","configured"],"missing":false},{"key":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","input":"text+image","contextWindow":200000,"local":false,"available":true,"tags":["fallback#1","configured"],"missing":false}]}'
   else
     echo '{"models":[{"key":"openai/gpt-5","name":"GPT-5","input":"text","contextWindow":400000,"local":false,"available":true,"tags":["default","configured"],"missing":false},{"key":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","input":"text+image","contextWindow":200000,"local":false,"available":true,"tags":["fallback#1","configured"],"missing":false}]}'
   fi
@@ -480,16 +654,28 @@ elif [ "$1" = "models" ] && [ "$2" = "list" ] && [ "$3" = "--all" ] && [ "$4" = 
   if [ "${slowModelReads ? "1" : "0"}" = "1" ]; then
     sleep 0.2
   fi
-  echo '{"models":[{"key":"openai/gpt-5","name":"GPT-5","input":"text","contextWindow":400000,"local":false,"available":true,"tags":["default","configured"],"missing":false},{"key":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","input":"text+image","contextWindow":200000,"local":false,"available":true,"tags":["fallback#1","configured"],"missing":false},{"key":"google/gemini-2.5-pro","name":"Gemini 2.5 Pro","input":"text+image","contextWindow":1000000,"local":false,"available":true,"tags":[],"missing":false}]}'
+  if [ "${minimaxCatalog ? "1" : "0"}" = "1" ]; then
+    echo '{"models":[{"key":"minimax/MiniMax-M2.7","name":"MiniMax-M2.7","input":"text","contextWindow":400000,"local":false,"available":true,"tags":["default","configured"],"missing":false},{"key":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","input":"text+image","contextWindow":200000,"local":false,"available":true,"tags":["fallback#1","configured"],"missing":false},{"key":"google/gemini-2.5-pro","name":"Gemini 2.5 Pro","input":"text+image","contextWindow":1000000,"local":false,"available":true,"tags":[],"missing":false}]}'
+  else
+    echo '{"models":[{"key":"openai/gpt-5","name":"GPT-5","input":"text","contextWindow":400000,"local":false,"available":true,"tags":["default","configured"],"missing":false},{"key":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","input":"text+image","contextWindow":200000,"local":false,"available":true,"tags":["fallback#1","configured"],"missing":false},{"key":"google/gemini-2.5-pro","name":"Gemini 2.5 Pro","input":"text+image","contextWindow":1000000,"local":false,"available":true,"tags":[],"missing":false}]}'
+  fi
 elif [ "$1" = "models" ] && [ "$2" = "status" ] && [ "$3" = "--json" ]; then
   if [ "${slowModelReads ? "1" : "0"}" = "1" ]; then
     sleep 0.2
   fi
   if [ "${cleanModelRuntime ? "1" : "0"}" = "1" ]; then
     echo '{"configPath":${JSON.stringify(configPath)},"agentDir":${JSON.stringify(agentDirPath)},"auth":{"providers":[],"oauth":{"providers":[]}}}'
+  elif [ "${minimaxCatalog ? "1" : "0"}" = "1" ]; then
+    echo '{"configPath":${JSON.stringify(configPath)},"agentDir":${JSON.stringify(agentDirPath)},"defaultModel":"minimax/MiniMax-M2.5","resolvedDefault":"minimax/MiniMax-M2.5","fallbacks":["anthropic/claude-sonnet-4-6"],"auth":{"providers":[],"oauth":{"providers":[]}}}'
   else
     echo '{"configPath":${JSON.stringify(configPath)},"agentDir":${JSON.stringify(agentDirPath)},"defaultModel":"openai/gpt-5","resolvedDefault":"openai/gpt-5","fallbacks":["anthropic/claude-sonnet-4-6"],"auth":{"providers":[],"oauth":{"providers":[]}}}'
   fi
+elif [ "$1" = "models" ] && [ "$2" = "--agent" ] && [ "$4" = "auth" ] && [ "$5" = "paste-token" ]; then
+  mkdir -p /tmp/agent
+  cat > /tmp/agent/auth-profiles.json <<'EOF'
+{"version":1,"profiles":{"minimax:slackclaw-existing-agent":{"provider":"minimax","type":"api_key","label":"MiniMax API"}},"usageStats":{},"order":{"minimax":["minimax:slackclaw-existing-agent"]},"lastGood":{"minimax":"minimax:slackclaw-existing-agent"}}
+EOF
+  echo '{"ok":true}'
 elif [ "$1" = "models" ] && [ "$2" = "auth" ] && [ "$3" = "login" ] && [ "$4" = "--provider" ] && [ "$5" = "openai-codex" ]; then
   cat > ${JSON.stringify(join(agentDirPath, "auth-profiles.json"))} <<'EOF'
 {"version":1,"profiles":{"openai-codex:slackclaw":{"provider":"openai-codex","type":"oauth","label":"OpenAI Codex OAuth"}},"usageStats":{},"order":{"openai-codex":["openai-codex:slackclaw"]},"lastGood":{"openai-codex":"openai-codex:slackclaw"}}
@@ -565,6 +751,10 @@ elif [ "$1" = "gateway" ] && [ "$2" = "restart" ]; then
     exit 0
   fi
   touch ${JSON.stringify(gatewayRunningMarkerPath)}
+  if [ "${failGatewayRestartWithPluginsAllowWarning ? "1" : "0"}" = "1" ]; then
+    >&2 echo '[plugins] plugins.allow is empty; discovered non-bundled plugins may auto-load: openclaw-weixin (/Users/home/.openclaw/extensions/openclaw-weixin/index.ts). Set plugins.allow to explicit trusted ids.'
+    exit 1
+  fi
   echo 'Gateway restarted'
 elif [ "$1" = "channels" ] && [ "$2" = "add" ] && [ "$3" = "--channel" ] && [ "$4" = "telegram" ] && [ "${failTelegramChannelsAdd ? "1" : "0"}" = "1" ]; then
   >&2 echo 'Unknown channel: telegram'
@@ -593,8 +783,44 @@ elif [ "$1" = "agents" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" =
     echo '[{"id":"main","identityName":"Maggie","bindings":0},{"id":"slackclaw-model-openai","identityName":"OpenAI Helper","bindings":0},{"id":"existing-agent","identityName":"Existing Agent","identityEmoji":"🧭","workspace":"/tmp/workspace","agentDir":"/tmp/agent","model":"openai/gpt-5","bindings":2}]'
     echo '[plugins] feishu_chat: Registered feishu_chat tool'
   fi
+elif [ "$1" = "agents" ] && [ "$2" = "bind" ] && [ "$3" = "--agent" ] && [ "$5" = "--bind" ]; then
+  if [ "${failPersonalWechatBindingAlias ? "1" : "0"}" = "1" ] && [ "$6" = "wechat:default" ]; then
+    >&2 echo 'Unknown channel "wechat".'
+    exit 1
+  fi
+  touch ${JSON.stringify(bindingsPath)}
+  if ! grep -Fqx "$4|$6" ${JSON.stringify(bindingsPath)}; then
+    echo "$4|$6" >> ${JSON.stringify(bindingsPath)}
+  fi
+  echo '{"ok":true}'
+elif [ "$1" = "agents" ] && [ "$2" = "unbind" ] && [ "$3" = "--agent" ] && [ "$5" = "--bind" ]; then
+  if [ -f ${JSON.stringify(bindingsPath)} ]; then
+    grep -Fvx "$4|$6" ${JSON.stringify(bindingsPath)} > ${JSON.stringify(bindingsPath)}.next || true
+    mv ${JSON.stringify(bindingsPath)}.next ${JSON.stringify(bindingsPath)}
+  fi
+  echo '{"ok":true}'
 elif [ "$1" = "agents" ] && [ "$2" = "bindings" ]; then
-  echo '[{"id":"telegram:default","target":"telegram:default"}]'
+  if [ -f ${JSON.stringify(bindingsPath)} ] && grep -q "^$4|" ${JSON.stringify(bindingsPath)}; then
+    first=1
+    printf '['
+    while IFS='|' read -r bound_agent bound_target; do
+      [ "$bound_agent" = "$4" ] || continue
+      if [ "$first" -eq 0 ]; then
+        printf ','
+      fi
+      if [ "${bindingsUseMatchShape ? "1" : "0"}" = "1" ] && [[ "$bound_target" == *:* ]]; then
+        bound_channel="${"$"}{bound_target%%:*}"
+        bound_account="${"$"}{bound_target#*:}"
+        printf '{"agentId":"%s","match":{"channel":"%s","accountId":"%s"},"description":"%s accountId=%s"}' "$bound_agent" "$bound_channel" "$bound_account" "$bound_channel" "$bound_account"
+      else
+        printf '{"id":"%s","target":"%s"}' "$bound_target" "$bound_target"
+      fi
+      first=0
+    done < ${JSON.stringify(bindingsPath)}
+    printf ']\n'
+  else
+    echo '[{"id":"telegram:default","target":"telegram:default"}]'
+  fi
 elif [ "$1" = "gateway" ] && [ "$2" = "call" ] && [ "$3" = "chat.send" ] && [ "$4" = "--json" ]; then
   echo '{"runId":"run-123"}'
 elif [ "$1" = "gateway" ] && [ "$2" = "call" ] && [ "$3" = "chat.history" ] && [ "$4" = "--json" ]; then
@@ -801,6 +1027,56 @@ test("creating a normal OAuth saved model entry authenticates through models aut
   });
 });
 
+test("updating a token-auth runtime model without reusable credentials requires entering the token again", async () => {
+  await withFakeOpenClaw(async ({ adapter }) => {
+    const statePath = resolve(process.env.SLACKCLAW_DATA_DIR ?? "", "openclaw-state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          modelEntries: [
+            {
+              id: "entry-minimax",
+              label: "MiniMax",
+              providerId: "minimax",
+              modelKey: "minimax/MiniMax-M2.7",
+              agentId: "",
+              agentDir: "",
+              workspaceDir: "",
+              authMethodId: "minimax-api",
+              profileIds: [],
+              isDefault: true,
+              isFallback: false,
+              createdAt: "2026-03-30T00:00:00.000Z",
+              updatedAt: "2026-03-30T00:00:00.000Z"
+            }
+          ],
+          defaultModelEntryId: "entry-minimax",
+          fallbackModelEntryIds: []
+        },
+        null,
+        2
+      )
+    );
+
+    await assert.rejects(
+      () =>
+        adapter.config.updateSavedModelEntry("entry-minimax", {
+          label: "MiniMax",
+          providerId: "minimax",
+          methodId: "minimax-api",
+          modelKey: "minimax/MiniMax-M2.7",
+          values: {},
+          makeDefault: true,
+          useAsFallback: false
+        }),
+      /Enter the API Key first\./i
+    );
+  }, {
+    minimaxCatalog: true
+  });
+});
+
 test("OpenClaw channel reads reuse one list and one probe across channel state and configured entry loads", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
     await Promise.all([
@@ -858,7 +1134,8 @@ test("personal WeChat runtime is normalized from openclaw-weixin", async () => {
     assert.ok(personalWechatEntry);
     assert.equal(personalWechatEntry?.channelId, "wechat");
     assert.equal(entries.some((entry) => entry.channelId === "wechat-work"), false);
-    assert.equal(personalWechatState.status, "completed");
+    assert.equal(personalWechatState.status, "awaiting-pairing");
+    assert.equal(personalWechatEntry?.pairingRequired, true);
     assert.equal(wechatWorkState.status, "not-started");
   }, {
     openclawWeixinRuntime: true
@@ -953,6 +1230,93 @@ test("saveAIMemberRuntime stages agent changes without restarting the gateway", 
 
     const status = await adapter.status();
     assert.equal(status.pendingGatewayApply, true);
+  });
+});
+
+test("saveAIMemberRuntime promotes the member agent to explicit default ownership and prunes main", async () => {
+  await withFakeOpenClaw(async ({ adapter, configPath }) => {
+    await writeFile(configPath, JSON.stringify({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-5",
+            fallbacks: []
+          },
+          models: {
+            "openai/gpt-5": {}
+          },
+          workspace: "/tmp/main-workspace"
+        },
+        list: [
+          {
+            id: "main",
+            name: "Main",
+            agentDir: "/tmp/main-agent",
+            workspace: "/tmp/main-workspace",
+            model: "openai/gpt-5",
+            default: true
+          }
+        ]
+      }
+    }, null, 2));
+
+    const modelConfig = await adapter.config.getModelConfig();
+    const brainEntry = modelConfig.savedEntries[0];
+    await adapter.aiEmployees.saveAIMemberRuntime({
+      memberId: "member-1",
+      existingAgentId: "existing-agent",
+      name: "AI Assistant",
+      jobTitle: "Research Assistant",
+      avatar: {
+        presetId: "operator",
+        accent: "var(--avatar-1)",
+        emoji: "🦊",
+        theme: "sunrise"
+      },
+      personality: "Calm and methodical",
+      soul: "Helpful and precise",
+      workStyles: ["Methodical"],
+      skillIds: [],
+      selectedSkills: [],
+      capabilitySettings: {
+        memoryEnabled: true,
+        contextWindow: 128000
+      },
+      knowledgePacks: [],
+      brain: {
+        entryId: brainEntry.id,
+        label: brainEntry.label,
+        providerId: brainEntry.providerId,
+        modelKey: brainEntry.modelKey
+      }
+    });
+
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      agents?: {
+        list?: Array<{ id: string; default?: boolean }>;
+      };
+    };
+
+    assert.equal(config.agents?.list?.some((entry) => entry.id === "main"), false);
+    assert.equal(config.agents?.list?.find((entry) => entry.id === "existing-agent")?.default, true);
+    assert.equal(config.agents?.list?.filter((entry) => entry.default).length, 1);
+  });
+});
+
+test("bindAIMemberChannel maps personal WeChat bindings to the runtime channel id", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath }) => {
+    const result = await adapter.aiEmployees.bindAIMemberChannel("existing-agent", {
+      binding: "wechat:default"
+    });
+    const commands = await readCommands(logPath);
+
+    assert.equal(result.requiresGatewayApply, true);
+    assert.equal(result.bindings.some((entry) => entry.target === "wechat:default"), true);
+    assert.equal(countCommands(commands, "agents bind --agent existing-agent --bind openclaw-weixin:default --json"), 1);
+    assert.equal(countCommands(commands, "agents bind --agent existing-agent --bind wechat:default --json"), 0);
+  }, {
+    failPersonalWechatBindingAlias: true,
+    bindingsUseMatchShape: true
   });
 });
 
@@ -1141,6 +1505,61 @@ test("personal WeChat captures installer output that only appears on an interact
   });
 });
 
+test("personal WeChat hides completed installer sessions from general config while onboarding can still fetch them", async () => {
+  await withFakeOpenClaw(async ({ adapter }) => {
+    const result = await adapter.config.saveChannelEntry({
+      channelId: "wechat",
+      action: "save",
+      values: {}
+    });
+    assert.ok(result.session);
+
+    let session = await adapter.gateway.getChannelSession(result.session.id);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (session.status === "completed") {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      session = await adapter.gateway.getChannelSession(result.session.id);
+    }
+
+    assert.equal(session.status, "completed", session.logs.join("\n"));
+    assert.match(session.message, /gateway activation after onboarding/i);
+
+    const activeSession = await adapter.gateway.getActiveChannelSession();
+    const liveState = await adapter.getChannelState("wechat");
+
+    assert.equal(activeSession, undefined);
+    assert.equal(liveState.status, "awaiting-pairing");
+  }, {
+    openclawWeixinRuntime: true
+  });
+});
+
+test("personal WeChat approves pairing through the runtime plugin channel id", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath }) => {
+    const result = await adapter.config.saveChannelEntry({
+      channelId: "wechat",
+      action: "approve-pairing",
+      values: {
+        code: " WX-PAIR-123 "
+      }
+    });
+    const commands = await readCommands(logPath);
+
+    assert.equal(result.channel.status, "completed");
+    assert.equal(
+      commands.some((command) => command === "pairing approve openclaw-weixin  WX-PAIR-123  --notify"),
+      false
+    );
+    assert.equal(
+      commands.some((command) => command === "pairing approve openclaw-weixin WX-PAIR-123 --notify"),
+      true
+    );
+  });
+});
+
 test("personal WeChat does not start a second installer while the QR session is still active", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
     const firstPromise = adapter.config.saveChannelEntry({
@@ -1201,6 +1620,181 @@ test("personal WeChat removal falls back to config cleanup when runtime delete i
     assert.equal("openclaw-weixin" in (config.channels ?? {}), false);
   }, {
     failPersonalWechatDelete: true
+  });
+});
+
+test("saveAIMemberRuntime prefers the canonical saved model key over stale client casing", async () => {
+  await withFakeOpenClaw(async ({ adapter, configPath }) => {
+    const modelConfig = await adapter.config.getModelConfig();
+    const brainEntry = modelConfig.savedEntries[0];
+    const result = await adapter.aiEmployees.saveAIMemberRuntime({
+      memberId: "member-2",
+      existingAgentId: "existing-agent",
+      name: "Canonical Brain",
+      jobTitle: "Research Assistant",
+      avatar: {
+        presetId: "operator",
+        accent: "var(--avatar-1)",
+        emoji: "🦊",
+        theme: "sunrise"
+      },
+      personality: "Calm and methodical",
+      soul: "Helpful and precise",
+      workStyles: ["Methodical"],
+      skillIds: [],
+      selectedSkills: [],
+      capabilitySettings: {
+        memoryEnabled: true,
+        contextWindow: 128000
+      },
+      knowledgePacks: [],
+      brain: {
+        entryId: brainEntry.id,
+        label: brainEntry.label,
+        providerId: brainEntry.providerId,
+        modelKey: "openai/GPT-5"
+      }
+    });
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      agents?: {
+        list?: Array<{
+          id?: string;
+          model?: string | { primary?: string; fallbacks?: string[] };
+        }>;
+      };
+    };
+    const savedAgent = config.agents?.list?.find((entry) => entry.id === "existing-agent");
+
+    assert.equal(result.requiresGatewayApply, true);
+    assert.deepEqual(savedAgent?.model, {
+      primary: "openai/gpt-5",
+      fallbacks: []
+    });
+  });
+});
+
+test("saveAIMemberRuntime upgrades stale MiniMax entries, avoids inherited fallbacks, and restores provider auth from saved secrets", async () => {
+  await withFakeOpenClaw(async ({ configPath }) => {
+    const secrets = new InMemorySecretsAdapter();
+    await secrets.set(modelAuthSecretName("minimax", "minimax-api", "apiKey"), "sk-minimax");
+    const adapter = new OpenClawAdapter(secrets);
+    const statePath = resolve(process.env.SLACKCLAW_DATA_DIR ?? "", "openclaw-state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          modelEntries: [
+            {
+              id: "runtime:minimax-minimax-m2-5",
+              label: "MiniMax M2.5",
+              providerId: "minimax",
+              modelKey: "minimax/MiniMax-M2.5",
+              agentId: "",
+              agentDir: "",
+              workspaceDir: "",
+              authMethodId: "minimax-api",
+              profileIds: [],
+              isDefault: true,
+              isFallback: false,
+              createdAt: "2026-03-30T00:00:00.000Z",
+              updatedAt: "2026-03-30T00:00:00.000Z"
+            }
+          ],
+          defaultModelEntryId: "runtime:minimax-minimax-m2-5",
+          fallbackModelEntryIds: []
+        },
+        null,
+        2
+      )
+    );
+
+    const result = await adapter.aiEmployees.saveAIMemberRuntime({
+      memberId: "member-minimax",
+      existingAgentId: "existing-agent",
+      name: "MiniMax Brain",
+      jobTitle: "Research Assistant",
+      avatar: {
+        presetId: "operator",
+        accent: "var(--avatar-1)",
+        emoji: "🦊",
+        theme: "sunrise"
+      },
+      personality: "Calm and methodical",
+      soul: "Helpful and precise",
+      workStyles: ["Methodical"],
+      skillIds: [],
+      selectedSkills: [],
+      capabilitySettings: {
+        memoryEnabled: true,
+        contextWindow: 128000
+      },
+      knowledgePacks: [],
+      brain: {
+        entryId: "runtime:minimax-minimax-m2-5",
+        label: "MiniMax M2.5",
+        providerId: "minimax",
+        modelKey: "minimax/MiniMax-M2.5"
+      }
+    });
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      agents?: {
+        list?: Array<{
+          id?: string;
+          model?: string | { primary?: string; fallbacks?: string[] };
+        }>;
+      };
+    };
+    const savedAgent = config.agents?.list?.find((entry) => entry.id === "existing-agent");
+    const authStore = JSON.parse(await readFile("/tmp/agent/auth-profiles.json", "utf8")) as {
+      profiles?: Record<string, { provider?: string }>;
+    };
+
+    assert.equal(result.requiresGatewayApply, true);
+    assert.deepEqual(savedAgent?.model, {
+      primary: "minimax/MiniMax-M2.7",
+      fallbacks: []
+    });
+    assert.deepEqual(Object.keys(authStore.profiles ?? {}), ["minimax:slackclaw-existing-agent"]);
+  }, {
+    minimaxCatalog: true
+  });
+});
+
+test("rehydrateMemberAuthFromSavedSecrets materializes a MiniMax profile in the managed member agent dir", async () => {
+  await withFakeOpenClaw(async () => {
+    const secrets = new InMemorySecretsAdapter();
+    await secrets.set(modelAuthSecretName("minimax", "minimax-api", "apiKey"), "sk-minimax");
+    const adapter = new OpenClawAdapter(secrets) as unknown as {
+      rehydrateMemberAuthFromSavedSecrets: (
+        agentId: string,
+        agentDir: string,
+        providerId: string,
+        methodId: string
+      ) => Promise<{
+        profiles?: Record<string, { provider?: string; type?: string; key?: string }>;
+        lastGood?: Record<string, string>;
+      } | undefined>;
+    };
+    const agentId = "slackclaw-member-ai-ryo";
+    const agentDir = resolve(process.env.SLACKCLAW_DATA_DIR ?? "", "ai-members", "member-new-minimax", "agent");
+    const profileId = `minimax:slackclaw-${agentId}`;
+
+    const store = await adapter.rehydrateMemberAuthFromSavedSecrets(agentId, agentDir, "minimax", "minimax-api");
+    const authStore = JSON.parse(await readFile(resolve(agentDir, "auth-profiles.json"), "utf8")) as {
+      profiles?: Record<string, { provider?: string; type?: string; key?: string }>;
+      lastGood?: Record<string, string>;
+    };
+
+    assert.equal(store?.profiles?.[profileId]?.provider, "minimax");
+    assert.equal(store?.profiles?.[profileId]?.type, "api_key");
+    assert.equal(store?.profiles?.[profileId]?.key, "sk-minimax");
+    assert.equal(store?.lastGood?.minimax, profileId);
+    assert.equal(authStore.profiles?.[profileId]?.provider, "minimax");
+    assert.equal(authStore.profiles?.[profileId]?.type, "api_key");
+    assert.equal(authStore.profiles?.[profileId]?.key, "sk-minimax");
+    assert.equal(authStore.lastGood?.minimax, profileId);
+  }, {
+    minimaxCatalog: true
   });
 });
 
@@ -1639,6 +2233,28 @@ test("finalizeOnboardingSetup applies staged gateway changes before completing",
 
     assert.equal(result.engineStatus.pendingGatewayApply, false);
     assert.equal(countCommands(commands, "gateway restart"), 1);
+  });
+});
+
+test("finalizeOnboardingSetup ignores plugins.allow warnings when the gateway restart otherwise succeeds", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath }) => {
+    await adapter.config.saveChannelEntry({
+      channelId: "telegram",
+      action: "save",
+      values: {
+        token: "123:warning-token",
+        accountName: "Warning Bot"
+      }
+    });
+
+    const result = await adapter.gateway.finalizeOnboardingSetup();
+    const commands = await readCommands(logPath);
+
+    assert.equal(result.engineStatus.running, true);
+    assert.equal(result.engineStatus.pendingGatewayApply, false);
+    assert.equal(countCommands(commands, "gateway restart"), 1);
+  }, {
+    failGatewayRestartWithPluginsAllowWarning: true
   });
 });
 

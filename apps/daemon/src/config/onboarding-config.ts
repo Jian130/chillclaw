@@ -21,7 +21,7 @@ const onboardingModelProviders: OnboardingModelProviderPresentation[] = [
     theme: "minimax",
     platformUrl: "https://platform.minimaxi.com/login",
     tutorialVideoUrl: "https://platform.minimaxi.com/login",
-    defaultModelKey: "minimax/MiniMax-M2.5",
+    defaultModelKey: "minimax/MiniMax-M2.7",
     authMethods: [
       {
         id: "minimax-api",

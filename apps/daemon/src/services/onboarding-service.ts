@@ -89,13 +89,69 @@ function normalizedEmployeeState(employee: OnboardingEmployeeState | undefined):
 
   return {
     ...employee,
-    name: employee.name?.trim() ?? "",
-    jobTitle: employee.jobTitle?.trim() ?? "",
+    // Preserve in-progress text exactly as typed during onboarding autosave.
+    name: employee.name ?? "",
+    jobTitle: employee.jobTitle ?? "",
     presetSkillIds: resolvePresetSkillIds(employee),
     knowledgePackIds: [...new Set((employee.knowledgePackIds ?? []).map((value) => value.trim()).filter(Boolean))],
     workStyles: [...new Set((employee.workStyles ?? []).map((value) => value.trim()).filter(Boolean))],
     personalityTraits: [...new Set((employee.personalityTraits ?? []).map((value) => value.trim()).filter(Boolean))]
   };
+}
+
+function normalizeModelLookupKey(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function modelKeyMatches(left: string | undefined, right: string | undefined): boolean {
+  if (!left?.trim() || !right?.trim()) {
+    return false;
+  }
+
+  if (left === right) {
+    return true;
+  }
+
+  const leftNormalized = normalizeModelLookupKey(left.includes("/") ? left.slice(left.indexOf("/") + 1) : left);
+  const rightNormalized = normalizeModelLookupKey(right.includes("/") ? right.slice(right.indexOf("/") + 1) : right);
+  return Boolean(leftNormalized) && leftNormalized === rightNormalized;
+}
+
+function resolveSavedModelEntry(
+  savedEntries: ModelConfigActionResponse["modelConfig"]["savedEntries"],
+  criteria: {
+    entryId?: string;
+    providerId?: string;
+    modelKey?: string;
+    preferDefault?: boolean;
+  }
+) {
+  if (criteria.entryId) {
+    const byId = savedEntries.find((entry) => entry.id === criteria.entryId);
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const providerEntries = criteria.providerId
+    ? savedEntries.filter((entry) => entry.providerId === criteria.providerId)
+    : savedEntries;
+  const byModel = criteria.modelKey
+    ? providerEntries.find((entry) => modelKeyMatches(entry.modelKey, criteria.modelKey))
+    : undefined;
+
+  if (byModel) {
+    return byModel;
+  }
+
+  if (criteria.preferDefault) {
+    const providerDefault = providerEntries.find((entry) => entry.isDefault);
+    if (providerDefault) {
+      return providerDefault;
+    }
+  }
+
+  return providerEntries.length === 1 ? providerEntries[0] : undefined;
 }
 
 function resolveAvatarPreset(presetId: string | undefined) {
@@ -305,9 +361,10 @@ export class OnboardingService {
 
     const shouldUpdateExistingEntry =
       Boolean(draft.model?.entryId) && draft.model?.providerId === request.providerId;
-    const result = shouldUpdateExistingEntry && draft.model?.entryId
+    const mutation = shouldUpdateExistingEntry && draft.model?.entryId
       ? await this.adapter.config.updateSavedModelEntry(draft.model.entryId, request)
       : await this.adapter.config.createSavedModelEntry(request);
+    const result = await this.clearOnboardingFallbackModels(mutation);
     const sync = this.eventPublisher?.publishModelConfigUpdated(result.modelConfig) ?? fallbackMutationSyncMeta(!result.authSession);
     const onboarding = await this.updateState(this.modelDraftPatchFromMutation(request, result));
 
@@ -320,7 +377,7 @@ export class OnboardingService {
   }
 
   async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
-    const response = await this.adapter.config.getModelAuthSession(sessionId);
+    const response = await this.clearOnboardingFallbacksFromSession(await this.adapter.config.getModelAuthSession(sessionId));
     const onboarding = await this.updateState(this.modelDraftPatchFromSession(response));
 
     return {
@@ -333,7 +390,9 @@ export class OnboardingService {
     sessionId: string,
     request: ModelAuthSessionInputRequest
   ): Promise<ModelAuthSessionResponse> {
-    const response = await this.adapter.config.submitModelAuthSessionInput(sessionId, request);
+    const response = await this.clearOnboardingFallbacksFromSession(
+      await this.adapter.config.submitModelAuthSessionInput(sessionId, request)
+    );
     const onboarding = await this.updateState(this.modelDraftPatchFromSession(response));
 
     return {
@@ -393,14 +452,64 @@ export class OnboardingService {
 
   async saveEmployeeDraft(employee: OnboardingEmployeeState): Promise<OnboardingStateResponse> {
     const { draft } = await this.readResolvedDraftState();
-    if (!this.isChannelStaged(draft) || !draft.channel?.entryId) {
-      throw new Error("Finish staging the first channel before naming the AI employee.");
+    let resolvedChannel = draft.channel;
+    let canTreatDeferredWechatChannelAsStaged =
+      resolvedChannel?.channelId === "wechat" &&
+      Boolean(resolvedChannel?.entryId) &&
+      !draft.activeChannelSessionId;
+    let canTreatChannelAsStaged =
+      Boolean(resolvedChannel?.entryId) &&
+      (stepIsAtOrAfter(draft.currentStep, "employee") || canTreatDeferredWechatChannelAsStaged);
+
+    if ((!this.isChannelStaged(draft) && !canTreatChannelAsStaged) || !resolvedChannel?.entryId) {
+      const summary = await this.buildSummary(draft);
+      resolvedChannel = summary.channel ?? draft.channel;
+      canTreatDeferredWechatChannelAsStaged =
+        resolvedChannel?.channelId === "wechat" &&
+        Boolean(resolvedChannel?.entryId) &&
+        !draft.activeChannelSessionId;
+      canTreatChannelAsStaged =
+        Boolean(resolvedChannel?.entryId) &&
+        (stepIsAtOrAfter(draft.currentStep, "employee") || canTreatDeferredWechatChannelAsStaged);
+
+      if ((!this.isChannelStaged(draft) && !canTreatChannelAsStaged) || !resolvedChannel?.entryId) {
+        throw new Error("Finish staging the first channel before naming the AI employee.");
+      }
+    }
+
+    let nextModel = draft.model;
+    if (draft.model) {
+      const modelConfig = await this.adapter.config.getModelConfig();
+      const matchedEntry = resolveSavedModelEntry(modelConfig.savedEntries, {
+        entryId: draft.model.entryId,
+        providerId: draft.model.providerId,
+        modelKey: draft.model.modelKey,
+        preferDefault: true
+      });
+
+      if (matchedEntry) {
+        nextModel = {
+          providerId: matchedEntry.providerId,
+          modelKey: matchedEntry.modelKey,
+          methodId: matchedEntry.authMethodId ?? draft.model.methodId,
+          entryId: matchedEntry.id
+        };
+      }
     }
 
     // Employee autosave should stay lightweight and rely on the already-staged draft state.
     return this.updateState(
       {
         currentStep: "employee",
+        model: nextModel,
+        channel: resolvedChannel,
+        channelProgress: canTreatChannelAsStaged
+          ? {
+              status: "staged",
+              message: draft.channelProgress?.message ?? "Channel staged for final gateway activation."
+            }
+          : draft.channelProgress,
+        activeChannelSessionId: canTreatChannelAsStaged ? "" : draft.activeChannelSessionId,
         employee: normalizedEmployeeState(employee)
       },
       { responseSummaryMode: "draft" }
@@ -426,10 +535,11 @@ export class OnboardingService {
 
   async complete(request: CompleteOnboardingRequest): Promise<CompleteOnboardingResponse> {
     const { draft } = await this.readResolvedDraftState();
-    const summary = await this.buildFinalizeSummary(draft);
+    const skipToDashboard = request.destination === "dashboard";
+    const summary = skipToDashboard ? await this.buildSummary(draft) : await this.buildFinalizeSummary(draft);
     let finalSummary = summary;
 
-    if (!(request.destination && this.canSkipFinalize(draft, summary))) {
+    if (!skipToDashboard) {
       this.assertReadyForFinalize(draft, summary);
 
       const employee = normalizedEmployeeState(draft.employee);
@@ -459,6 +569,12 @@ export class OnboardingService {
       if (!createdMember) {
         throw new Error("ChillClaw could not verify the staged AI employee after creation.");
       }
+
+      const channelBinding = summary.channel?.entryId ?? draft.channel?.entryId;
+      if (channelBinding && !createdMember.bindings.some((binding) => binding.target === channelBinding)) {
+        await this.aiTeamService.bindMemberChannelForOnboarding(createdMember.id, { binding: channelBinding });
+      }
+      await this.adapter.aiEmployees.setPrimaryAIMemberAgent(createdMember.agentId);
 
       await this.store.update((existing) => ({
         ...existing,
@@ -497,9 +613,8 @@ export class OnboardingService {
           memoryEnabled: employee.memoryEnabled
         }
       };
+      await this.adapter.gateway.finalizeOnboardingSetup();
     }
-
-    await this.adapter.gateway.finalizeOnboardingSetup();
 
     await this.store.update((existing) => ({
       ...existing,
@@ -513,6 +628,33 @@ export class OnboardingService {
       destination: request.destination,
       summary: finalSummary,
       overview: await this.overviewService.getOverview()
+    };
+  }
+
+  private async clearOnboardingFallbackModels(result: ModelConfigActionResponse): Promise<ModelConfigActionResponse> {
+    if (result.authSession || result.modelConfig.fallbackEntryIds.length === 0) {
+      return result;
+    }
+
+    const cleared = await this.adapter.config.replaceFallbackModelEntries({ entryIds: [] });
+    return {
+      ...result,
+      modelConfig: cleared.modelConfig,
+      requiresGatewayApply: result.requiresGatewayApply || cleared.requiresGatewayApply
+    };
+  }
+
+  private async clearOnboardingFallbacksFromSession(
+    response: ModelAuthSessionResponse
+  ): Promise<ModelAuthSessionResponse> {
+    if (response.session.status !== "completed" || response.modelConfig.fallbackEntryIds.length === 0) {
+      return response;
+    }
+
+    const cleared = await this.adapter.config.replaceFallbackModelEntries({ entryIds: [] });
+    return {
+      ...response,
+      modelConfig: cleared.modelConfig
     };
   }
 
@@ -686,20 +828,6 @@ export class OnboardingService {
     }
   }
 
-  private canSkipFinalize(
-    draft: ReturnType<typeof defaultOnboardingDraftState>,
-    summary: OnboardingCompletionSummary
-  ): boolean {
-    return (
-      draft.currentStep === "welcome" &&
-      !summary.install &&
-      !summary.model &&
-      !summary.channel &&
-      !summary.employee &&
-      !draft.permissions?.confirmed
-    );
-  }
-
   private assertReadyForFinalize(
     draft: ReturnType<typeof defaultOnboardingDraftState>,
     summary: OnboardingCompletionSummary
@@ -842,9 +970,12 @@ export class OnboardingService {
     if (draft.model) {
       const draftModel = draft.model;
       const modelConfig = await this.adapter.config.getModelConfig();
-      const matchedEntry =
-        modelConfig.savedEntries.find((entry) => entry.id === draftModel.entryId) ??
-        modelConfig.savedEntries.find((entry) => entry.modelKey === draftModel.modelKey && entry.providerId === draftModel.providerId);
+      const matchedEntry = resolveSavedModelEntry(modelConfig.savedEntries, {
+        entryId: draftModel.entryId,
+        providerId: draftModel.providerId,
+        modelKey: draftModel.modelKey,
+        preferDefault: true
+      });
 
       summary.model = matchedEntry
         ? {
@@ -905,13 +1036,20 @@ export class OnboardingService {
       this.adapter.instances.getDeploymentTargets()
     ]);
     const target = targets.targets.find((entry) => entry.active) ?? targets.targets.find((entry) => entry.installed);
+    const hasLiveInstallEvidence =
+      status.installed ||
+      Boolean(status.version) ||
+      Boolean(target?.installed || target?.version);
+    const installed =
+      hasLiveInstallEvidence ||
+      Boolean(existing?.installed && existing.disposition !== "not-installed" && existing.version);
 
     return {
-      installed: status.installed,
+      installed,
       version: status.version ?? target?.version ?? existing?.version,
       disposition:
         existing?.disposition ??
-        (!status.installed
+        (!installed
           ? "not-installed"
           : target?.installMode === "managed-local"
             ? "installed-managed"
@@ -946,12 +1084,12 @@ export class OnboardingService {
     request: SaveModelEntryRequest,
     mutation: ModelConfigActionResponse
   ): UpdateOnboardingStateRequest {
-    const savedEntry =
-      mutation.authSession?.entryId
-        ? mutation.modelConfig.savedEntries.find((entry) => entry.id === mutation.authSession?.entryId)
-        : mutation.modelConfig.savedEntries.find(
-            (entry) => entry.providerId === request.providerId && entry.modelKey === request.modelKey
-          );
+    const savedEntry = resolveSavedModelEntry(mutation.modelConfig.savedEntries, {
+      entryId: mutation.authSession?.entryId,
+      providerId: request.providerId,
+      modelKey: request.modelKey,
+      preferDefault: request.makeDefault
+    });
 
     if (mutation.authSession) {
       return {
@@ -981,7 +1119,11 @@ export class OnboardingService {
   private modelDraftPatchFromSession(response: ModelAuthSessionResponse): UpdateOnboardingStateRequest {
     const session = response.session;
     const resolvedEntry =
-      (session.entryId ? response.modelConfig.savedEntries.find((entry) => entry.id === session.entryId) : undefined) ??
+      resolveSavedModelEntry(response.modelConfig.savedEntries, {
+        entryId: session.entryId,
+        providerId: session.providerId,
+        preferDefault: true
+      }) ??
       response.modelConfig.savedEntries.find(
         (entry) => entry.providerId === session.providerId && (entry.authMethodId ?? "") === session.methodId
       );
@@ -1067,8 +1209,8 @@ export class OnboardingService {
       (session.entryId ? response.channelConfig.entries.find((entry) => entry.id === session.entryId) : undefined) ??
       response.channelConfig.entries.find((entry) => entry.channelId === session.channelId);
     const isStaged =
-      session.status === "completed" ||
-      resolvedEntry?.status === "completed";
+      resolvedEntry?.status === "completed" ||
+      (session.channelId === "wechat" && session.status === "completed");
 
     if (isStaged) {
       return {
@@ -1081,6 +1223,22 @@ export class OnboardingService {
           status: "staged",
           sessionId: session.id,
           message: session.message
+        },
+        activeChannelSessionId: ""
+      };
+    }
+
+    if (session.status === "completed") {
+      return {
+        currentStep: "channel",
+        channel: {
+          channelId: session.channelId,
+          entryId: resolvedEntry?.id ?? session.entryId
+        },
+        channelProgress: {
+          status: "idle",
+          sessionId: session.id,
+          message: resolvedEntry?.summary ?? session.message
         },
         activeChannelSessionId: ""
       };

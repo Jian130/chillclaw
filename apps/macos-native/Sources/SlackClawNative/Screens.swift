@@ -686,6 +686,10 @@ func nativeRuntimeOnlyModels(_ modelConfig: ModelConfigOverview?) -> [ModelCatal
     return nativeRuntimeConfiguredModels(modelConfig).filter { !managedKeys.contains($0.key) }
 }
 
+func nativeRuntimeDerivedModelEntry(_ modelConfig: ModelConfigOverview?, modelKey: String) -> SavedModelEntry? {
+    (modelConfig?.savedEntries ?? []).first { $0.id.hasPrefix("runtime:") && $0.modelKey == modelKey }
+}
+
 func nativeShouldDefaultNewModelEntry(_ modelConfig: ModelConfigOverview?) -> Bool {
     nativeRuntimeConfiguredModels(modelConfig).isEmpty
 }
@@ -708,6 +712,347 @@ private func nativeProviderForModel(_ model: ModelCatalogEntry, modelConfig: Mod
     }
 }
 
+private struct NativeConfigurationPalette {
+    let accent: Color
+    let accentStrong: Color
+    let softFill: Color
+    let softHighlight: Color
+}
+
+private func nativeConfigurationProviderCount(_ modelConfig: ModelConfigOverview?) -> Int {
+    guard let modelConfig else { return 0 }
+
+    return modelConfig.providers.filter { provider in
+        provider.configured || modelConfig.configuredModelKeys.contains(where: { key in
+            provider.providerRefs.contains { key.hasPrefix($0) }
+        })
+    }.count
+}
+
+private func nativeConfigurationDefaultRuntimeModel(_ modelConfig: ModelConfigOverview?) -> ModelCatalogEntry? {
+    guard let defaultModel = modelConfig?.defaultModel else { return nil }
+    return nativeRuntimeConfiguredModels(modelConfig).first(where: { $0.key == defaultModel })
+}
+
+private func nativeConfigurationProviderPalette(_ providerId: String) -> NativeConfigurationPalette {
+    switch providerId {
+    case "openai":
+        return .init(accent: Color(red: 0.07, green: 0.72, blue: 0.52), accentStrong: Color(red: 0.03, green: 0.60, blue: 0.42), softFill: Color(red: 0.93, green: 0.99, blue: 0.96), softHighlight: Color(red: 0.82, green: 0.97, blue: 0.90))
+    case "anthropic":
+        return .init(accent: Color(red: 0.96, green: 0.62, blue: 0.12), accentStrong: Color(red: 0.84, green: 0.45, blue: 0.04), softFill: Color(red: 1.0, green: 0.98, blue: 0.92), softHighlight: Color(red: 0.99, green: 0.93, blue: 0.78))
+    case "google", "gemini":
+        return .init(accent: Color(red: 0.24, green: 0.52, blue: 0.98), accentStrong: Color(red: 0.14, green: 0.39, blue: 0.90), softFill: Color(red: 0.94, green: 0.97, blue: 1.0), softHighlight: Color(red: 0.86, green: 0.92, blue: 1.0))
+    case "github", "github-copilot":
+        return .init(accent: Color(red: 0.43, green: 0.31, blue: 0.92), accentStrong: Color(red: 0.31, green: 0.23, blue: 0.80), softFill: Color(red: 0.98, green: 0.96, blue: 1.0), softHighlight: Color(red: 0.93, green: 0.91, blue: 0.99))
+    case "minimax":
+        return .init(accent: Color(red: 0.92, green: 0.29, blue: 0.60), accentStrong: Color(red: 0.84, green: 0.19, blue: 0.47), softFill: Color(red: 1.0, green: 0.95, blue: 0.98), softHighlight: Color(red: 0.99, green: 0.90, blue: 0.95))
+    default:
+        return .init(accent: Color(red: 0.39, green: 0.40, blue: 0.95), accentStrong: Color(red: 0.31, green: 0.28, blue: 0.89), softFill: Color(red: 0.94, green: 0.95, blue: 1.0), softHighlight: Color(red: 0.88, green: 0.90, blue: 0.99))
+    }
+}
+
+private func nativeConfigurationChannelPalette(_ channelId: SupportedChannelId) -> NativeConfigurationPalette {
+    switch channelId {
+    case .telegram:
+        return .init(accent: Color(red: 0.23, green: 0.57, blue: 0.98), accentStrong: Color(red: 0.12, green: 0.44, blue: 0.88), softFill: Color(red: 0.94, green: 0.97, blue: 1.0), softHighlight: Color(red: 0.87, green: 0.93, blue: 1.0))
+    case .whatsapp, .wechat:
+        return .init(accent: Color(red: 0.11, green: 0.68, blue: 0.31), accentStrong: Color(red: 0.08, green: 0.54, blue: 0.24), softFill: Color(red: 0.94, green: 0.99, blue: 0.95), softHighlight: Color(red: 0.85, green: 0.97, blue: 0.88))
+    case .feishu:
+        return .init(accent: Color(red: 0.06, green: 0.72, blue: 0.67), accentStrong: Color(red: 0.05, green: 0.56, blue: 0.52), softFill: Color(red: 0.92, green: 0.99, blue: 0.98), softHighlight: Color(red: 0.82, green: 0.98, blue: 0.95))
+    case .wechatWork:
+        return .init(accent: Color(red: 0.05, green: 0.64, blue: 0.91), accentStrong: Color(red: 0.02, green: 0.47, blue: 0.75), softFill: Color(red: 0.94, green: 0.98, blue: 1.0), softHighlight: Color(red: 0.86, green: 0.95, blue: 0.99))
+    }
+}
+
+private func nativeConfigurationProviderSymbol(_ providerId: String) -> String {
+    switch providerId {
+    case "openai": return "sparkles"
+    case "anthropic": return "brain.head.profile"
+    case "google", "gemini": return "wand.and.stars"
+    case "github", "github-copilot": return "command"
+    case "minimax": return "bolt.fill"
+    default: return "cpu"
+    }
+}
+
+private func nativeConfigurationChannelSymbol(_ channelId: SupportedChannelId) -> String {
+    switch channelId {
+    case .telegram: return "paperplane.fill"
+    case .whatsapp, .wechat: return "message.fill"
+    case .feishu: return "sparkles"
+    case .wechatWork: return "briefcase.fill"
+    }
+}
+
+private func nativeConfigurationAuthLabel(_ entry: SavedModelEntry) -> String {
+    if let label = entry.authModeLabel, !label.isEmpty {
+        return label
+    }
+    if let method = entry.authMethodId?.lowercased(), method.contains("api-key") {
+        return "API key"
+    }
+    if let method = entry.authMethodId?.lowercased(), method.contains("oauth") {
+        return "OAuth"
+    }
+    return "Configured"
+}
+
+private func nativeConfigurationFormattedTimestamp(_ value: String?) -> String {
+    guard let value, !value.isEmpty else { return "Unknown" }
+    guard let parsed = ISO8601DateFormatter().date(from: value) else { return value }
+    return parsed.formatted(date: .abbreviated, time: .shortened)
+}
+
+private func nativeConfigurationChannelTone(_ status: String) -> NativeStatusTone {
+    switch status {
+    case "completed", "ready":
+        return .success
+    case "failed":
+        return .warning
+    case "awaiting-pairing", "in-progress":
+        return .info
+    default:
+        return .neutral
+    }
+}
+
+private struct NativeConfigurationIconTile: View {
+    let palette: NativeConfigurationPalette
+    let systemImage: String
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: NativeUI.panelCornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [palette.accent, palette.accentStrong],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 74, height: 74)
+            .shadow(color: palette.accent.opacity(0.22), radius: 18, x: 0, y: 10)
+    }
+}
+
+private struct NativeConfigurationMetricView: View {
+    let title: String
+    let value: String
+    let palette: NativeConfigurationPalette
+    let emphasize: Bool
+
+    init(title: String, value: String, palette: NativeConfigurationPalette, emphasize: Bool = false) {
+        self.title = title
+        self.value = value
+        self.palette = palette
+        self.emphasize = emphasize
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: emphasize ? 20 : 18, weight: .bold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: NativeUI.panelCornerRadius, style: .continuous)
+                .fill(.white.opacity(0.86))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: NativeUI.panelCornerRadius, style: .continuous)
+                .stroke(emphasize ? palette.accent.opacity(0.20) : Color.white.opacity(0.68), lineWidth: 1)
+        )
+    }
+}
+
+private struct NativeConfigurationSectionHeader: View {
+    let eyebrow: String
+    let title: String
+    let subtitle: String
+    let count: Int
+    let tone: NativeTagTone
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                copy
+                Spacer(minLength: 12)
+                TagBadge("\(count)", tone: tone)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                copy
+                TagBadge("\(count)", tone: tone)
+            }
+        }
+    }
+
+    private var copy: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(eyebrow.uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(.title3.weight(.bold))
+            Text(subtitle)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct NativeConfigurationMetaPill: View {
+    let title: String
+    let value: String
+    let palette: NativeConfigurationPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                .fill(palette.softFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                .stroke(palette.accent.opacity(0.12), lineWidth: 1)
+        )
+    }
+}
+
+private struct NativeConfigurationAddCard: View {
+    let title: String
+    let description: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: NativeUI.mediumCornerRadius, style: .continuous)
+                        .fill(nativeBrandMarkGradient())
+                    Image(systemName: "plus")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(description)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(0.9))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous)
+                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                    .foregroundStyle(Color.blue.opacity(0.35))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct NativeConfigurationTabButton: View {
+    let title: String
+    let subtitle: String
+    let count: Int
+    let palette: NativeConfigurationPalette
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [palette.accent, palette.accentStrong],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
+                    Image(systemName: systemImage)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 42, height: 42)
+                .shadow(color: palette.accent.opacity(isSelected ? 0.24 : 0.14), radius: isSelected ? 14 : 10, x: 0, y: 8)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Text("\(count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color(red: 0.45, green: 0.28, blue: 0.88))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.95, green: 0.90, blue: 1.0))
+                    )
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous)
+                    .fill(isSelected ? Color.white.opacity(0.98) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.blue.opacity(0.30) : Color.clear,
+                        lineWidth: isSelected ? 1.5 : 0
+                    )
+            )
+            .shadow(color: isSelected ? Color.blue.opacity(0.08) : .clear, radius: 14, x: 0, y: 8)
+            .contentShape(RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 @MainActor
 struct ConfigurationScreen: View {
     @Bindable var appState: SlackClawAppState
@@ -720,19 +1065,52 @@ struct ConfigurationScreen: View {
     @State private var pendingConfigurationAction: NativeConfigurationPendingAction?
 
     var body: some View {
-        WorkspaceScaffold(title: "Configuration", subtitle: "Manage models, channels, and pairing flows.") {
-            if selectedTab == 0 {
-                ActionButton("Add Model", systemImage: "plus", variant: .primary) { presentAddModelSheet() }
-            } else {
-                ActionButton("Add Channel", systemImage: "plus", variant: .primary) { presentAddChannelSheet() }
+        let liveModelCount = nativeRuntimeConfiguredModels(appState.modelConfig).count
+        let liveChannelCount = appState.channelConfig?.entries.count ?? 0
+
+        WorkspaceScaffold(title: "Configuration", subtitle: "Configure AI models and communication channels.") {
+            HStack(spacing: 12) {
+                ActionButton("Refresh", systemImage: "arrow.clockwise", variant: .outline) {
+                    Task { await appState.refreshCurrentSectionIfNeeded() }
+                }
             }
         } content: {
             VStack(alignment: .leading, spacing: 20) {
-                Picker("Config", selection: $selectedTab) {
-                    Text("Models").tag(0)
-                    Text("Channels").tag(1)
+                HStack(spacing: 14) {
+                    NativeConfigurationTabButton(
+                        title: "AI Models",
+                        subtitle: liveModelCount > 0 ? "Live runtime models" : "No live runtime models yet",
+                        count: liveModelCount,
+                        palette: nativeConfigurationProviderPalette("default"),
+                        systemImage: "sparkles",
+                        isSelected: selectedTab == 0
+                    ) {
+                        selectedTab = 0
+                    }
+
+                    NativeConfigurationTabButton(
+                        title: "Channels",
+                        subtitle: liveChannelCount > 0 ? "Configured live channels" : "No live channels yet",
+                        count: liveChannelCount,
+                        palette: nativeConfigurationChannelPalette(.feishu),
+                        systemImage: "message.fill",
+                        isSelected: selectedTab == 1
+                    ) {
+                        selectedTab = 1
+                    }
                 }
-                .pickerStyle(.segmented)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous)
+                        .fill(Color.white.opacity(0.92))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous)
+                        .stroke(Color.blue.opacity(0.12), lineWidth: 1)
+                )
+                .shadow(color: Color.blue.opacity(0.06), radius: 20, x: 0, y: 12)
+
+                configurationQuickActions
 
                 if selectedTab == 0 {
                     modelsView
@@ -753,11 +1131,49 @@ struct ConfigurationScreen: View {
         }
     }
 
+    @ViewBuilder
+    private var configurationQuickActions: some View {
+        if selectedTab == 0 {
+            NativeConfigurationAddCard(
+                title: "Add Model",
+                description: "Create a new managed entry for a live provider or model."
+            ) {
+                presentAddModelSheet()
+            }
+        } else {
+            NativeConfigurationAddCard(
+                title: "Add Channel",
+                description: "Start another live channel setup in the current OpenClaw runtime."
+            ) {
+                presentAddChannelSheet()
+            }
+        }
+    }
+
     private var modelsView: some View {
         let runtimeManagedEntries = nativeManagedConfiguredModelEntries(appState.modelConfig)
         let runtimeOnlyModels = nativeRuntimeOnlyModels(appState.modelConfig)
+        let runtimeModels = nativeRuntimeConfiguredModels(appState.modelConfig)
+        let palette = nativeConfigurationProviderPalette("default")
+        let providerCount = nativeConfigurationProviderCount(appState.modelConfig)
+        let defaultModel = nativeConfigurationDefaultRuntimeModel(appState.modelConfig)
 
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 18) {
+            SurfaceCard(tone: .accent, padding: 24, spacing: 18) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 22) {
+                        modelHeroSummary(palette: palette)
+                        modelHeroMetrics(palette: palette, runtimeModels: runtimeModels, providerCount: providerCount, defaultModel: defaultModel)
+                            .frame(width: 300)
+                    }
+
+                    VStack(alignment: .leading, spacing: 18) {
+                        modelHeroSummary(palette: palette)
+                        modelHeroMetrics(palette: palette, runtimeModels: runtimeModels, providerCount: providerCount, defaultModel: defaultModel)
+                    }
+                }
+            }
+
             if runtimeManagedEntries.isEmpty && runtimeOnlyModels.isEmpty {
                 EmptyState(
                     title: "No configured models",
@@ -766,37 +1182,50 @@ struct ConfigurationScreen: View {
                 )
             } else {
                 if !runtimeManagedEntries.isEmpty {
-                    SurfaceCard(title: "Installed AI models", subtitle: "Managed entries that are active in the current OpenClaw runtime.") {
+                    VStack(alignment: .leading, spacing: 16) {
+                        NativeConfigurationSectionHeader(
+                            eyebrow: "Managed entries",
+                            title: "Installed AI models",
+                            subtitle: "Managed entries that are active in the current OpenClaw runtime.",
+                            count: runtimeManagedEntries.count,
+                            tone: .accent
+                        )
+
                         ForEach(runtimeManagedEntries) { entry in
-                            HStack {
-                                Text(entry.providerId)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                if entry.isDefault {
-                                    TagBadge("Default", tone: .success)
-                                }
-                                if entry.isFallback {
-                                    TagBadge("Fallback", tone: .info)
-                                }
-                                ActionButton("Edit", variant: .outline) {
-                                    presentModelSheet(for: entry)
-                                }
-                                .disabled(hasPendingConfigurationAction)
-                                ActionButton(
-                                    "Set Default",
-                                    variant: .secondary,
-                                    isBusy: pendingConfigurationAction == .setDefaultModel(entry.id),
-                                    isDisabled: entry.isDefault || blocksConfigurationAction(.setDefaultModel(entry.id))
-                                ) {
-                                    Task { await setDefaultModel(entry.id) }
-                                }
-                                ActionButton(
-                                    "Remove",
-                                    variant: .destructive,
-                                    isBusy: pendingConfigurationAction == .removeModel(entry.id),
-                                    isDisabled: blocksConfigurationAction(.removeModel(entry.id))
-                                ) {
-                                    Task { await removeModel(entry.id) }
+                            let provider = appState.modelConfig?.providers.first(where: { $0.id == entry.providerId })
+                            let runtimeModel = runtimeModels.first(where: { $0.key == entry.modelKey })
+                            let palette = nativeConfigurationProviderPalette(entry.providerId)
+                            let fallbackTag = runtimeModel?.tags.first(where: { $0.hasPrefix("fallback#") })
+
+                            SurfaceCard(padding: 22, spacing: 16) {
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(alignment: .top, spacing: 20) {
+                                        NativeConfigurationIconTile(
+                                            palette: palette,
+                                            systemImage: nativeConfigurationProviderSymbol(entry.providerId)
+                                        )
+                                        modelEntryBody(
+                                            entry: entry,
+                                            provider: provider,
+                                            palette: palette,
+                                            runtimeModel: runtimeModel,
+                                            fallbackTag: fallbackTag
+                                        )
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 18) {
+                                        NativeConfigurationIconTile(
+                                            palette: palette,
+                                            systemImage: nativeConfigurationProviderSymbol(entry.providerId)
+                                        )
+                                        modelEntryBody(
+                                            entry: entry,
+                                            provider: provider,
+                                            palette: palette,
+                                            runtimeModel: runtimeModel,
+                                            fallbackTag: fallbackTag
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -804,27 +1233,39 @@ struct ConfigurationScreen: View {
                 }
 
                 if !runtimeOnlyModels.isEmpty {
-                    SurfaceCard(title: "Detected from current OpenClaw runtime", subtitle: "These live models were detected in OpenClaw but do not have managed ChillClaw metadata yet.") {
+                    VStack(alignment: .leading, spacing: 16) {
+                        NativeConfigurationSectionHeader(
+                            eyebrow: "Runtime-only",
+                            title: "Detected from current OpenClaw runtime",
+                            subtitle: "These live models were detected in OpenClaw but do not have managed ChillClaw metadata yet.",
+                            count: runtimeOnlyModels.count,
+                            tone: .info
+                        )
+
                         ForEach(runtimeOnlyModels) { model in
                             let provider = nativeProviderForModel(model, modelConfig: appState.modelConfig)
-                            HStack {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(model.name)
-                                        .fontWeight(.semibold)
-                                    Text(provider?.label ?? model.key)
-                                        .foregroundStyle(.secondary)
-                                    HStack(spacing: 8) {
-                                        TagBadge(model.key, tone: .neutral)
-                                        if model.key == appState.modelConfig?.defaultModel {
-                                            TagBadge("Default", tone: .success)
-                                        }
-                                        if model.local {
-                                            TagBadge("Local", tone: .neutral)
-                                        }
-                                        TagBadge("Detected from runtime", tone: .info)
+                            let palette = nativeConfigurationProviderPalette(provider?.id ?? "default")
+                            let fallbackTag = model.tags.first(where: { $0.hasPrefix("fallback#") })
+                            let runtimeEntry = nativeRuntimeDerivedModelEntry(appState.modelConfig, modelKey: model.key)
+
+                            SurfaceCard(padding: 22, spacing: 16) {
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(alignment: .top, spacing: 20) {
+                                        NativeConfigurationIconTile(
+                                            palette: palette,
+                                            systemImage: nativeConfigurationProviderSymbol(provider?.id ?? "default")
+                                        )
+                                        runtimeOnlyModelBody(model: model, provider: provider, palette: palette, fallbackTag: fallbackTag, runtimeEntry: runtimeEntry)
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 18) {
+                                        NativeConfigurationIconTile(
+                                            palette: palette,
+                                            systemImage: nativeConfigurationProviderSymbol(provider?.id ?? "default")
+                                        )
+                                        runtimeOnlyModelBody(model: model, provider: provider, palette: palette, fallbackTag: fallbackTag, runtimeEntry: runtimeEntry)
                                     }
                                 }
-                                Spacer()
                             }
                         }
                     }
@@ -835,51 +1276,49 @@ struct ConfigurationScreen: View {
 
     private var channelsView: some View {
         let entries = appState.channelConfig?.entries ?? []
-        return VStack(alignment: .leading, spacing: 14) {
-            ForEach(entries) { entry in
-                let capability = appState.channelConfig?.capabilities.first(where: { $0.id == entry.channelId })
-                let actionState = configurationChannelActionState(entry: entry, capability: capability)
+        let palette = nativeConfigurationChannelPalette(.feishu)
 
-                SurfaceCard(title: entry.label, subtitle: nativeChannelDisplayLabel(entry.channelId)) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(entry.summary)
-                                .foregroundStyle(.secondary)
-                            if entry.pairingRequired {
-                                TagBadge("Pairing required", tone: .info)
-                            }
-                        }
-                        Spacer()
-                        if actionState.showApproveAction {
-                            ActionButton("Approve Pairing", variant: .secondary) {
-                                presentChannelSheet(for: entry, action: .approvePairing)
-                            }
-                            .disabled(hasPendingConfigurationAction)
-                        }
-                        ActionButton(actionState.primaryAction == .continueSetup ? "Continue Setup" : "Edit", variant: .outline) {
-                            presentChannelSheet(for: entry, action: .save)
-                        }
-                        .disabled(hasPendingConfigurationAction)
-                        ActionButton(
-                            "Remove",
-                            variant: .destructive,
-                            isBusy: pendingConfigurationAction == .removeChannel(entry.id),
-                            isDisabled: blocksConfigurationAction(.removeChannel(entry.id))
-                        ) {
-                            Task {
-                                await removeChannel(entry)
-                            }
-                        }
+        return VStack(alignment: .leading, spacing: 18) {
+            SurfaceCard(tone: .accent, padding: 24, spacing: 18) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 22) {
+                        channelHeroSummary(palette: palette)
+                        channelHeroMetrics(palette: palette, entries: entries)
+                            .frame(width: 300)
+                    }
+
+                    VStack(alignment: .leading, spacing: 18) {
+                        channelHeroSummary(palette: palette)
+                        channelHeroMetrics(palette: palette, entries: entries)
                     }
                 }
-        }
+            }
 
-        if let activeSession = appState.channelConfig?.activeSession {
-            SurfaceCard(title: "Active Channel Session", subtitle: activeSession.message) {
-                VStack(alignment: .leading, spacing: 8) {
+            if let activeSession = appState.channelConfig?.activeSession {
+                SurfaceCard(title: "Active channel session", subtitle: activeSession.message, tone: .muted, padding: 22, spacing: 14) {
                     if let prompt = activeSession.inputPrompt {
                         Text(prompt)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
+
+                    ScrollView(.vertical) {
+                        Text(activeSession.logs.joined(separator: "\n"))
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                    }
+                    .frame(minHeight: 180)
+                    .background(
+                        RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(0.88))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                            .stroke(Color.teal.opacity(0.12), lineWidth: 1)
+                    )
+
                     if let launchUrl = activeSession.launchUrl, let url = URL(string: launchUrl) {
                         ActionButton("Open Session Link", systemImage: "link", variant: .outline) {
                             NSWorkspace.shared.open(url)
@@ -887,6 +1326,425 @@ struct ConfigurationScreen: View {
                     }
                 }
             }
+
+            if entries.isEmpty {
+                EmptyState(
+                    title: "No channels are configured yet",
+                    description: "Add Telegram, WhatsApp, Feishu, or WeChat to start managing communication channels in ChillClaw.",
+                    symbol: "message"
+                )
+            } else {
+                NativeConfigurationSectionHeader(
+                    eyebrow: "Configured now",
+                    title: "Live channel entries",
+                    subtitle: appState.channelConfig?.gatewaySummary ?? "ChillClaw reads these configured channels directly from the current OpenClaw runtime.",
+                    count: entries.count,
+                    tone: .accent
+                )
+
+                ForEach(entries) { entry in
+                    let capability = appState.channelConfig?.capabilities.first(where: { $0.id == entry.channelId })
+                    let actionState = configurationChannelActionState(entry: entry, capability: capability)
+                    let palette = nativeConfigurationChannelPalette(entry.channelId)
+
+                    SurfaceCard(padding: 22, spacing: 16) {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .top, spacing: 20) {
+                                NativeConfigurationIconTile(
+                                    palette: palette,
+                                    systemImage: nativeConfigurationChannelSymbol(entry.channelId)
+                                )
+                                channelEntryBody(
+                                    entry: entry,
+                                    capability: capability,
+                                    actionState: actionState,
+                                    palette: palette
+                                )
+                            }
+
+                            VStack(alignment: .leading, spacing: 18) {
+                                NativeConfigurationIconTile(
+                                    palette: palette,
+                                    systemImage: nativeConfigurationChannelSymbol(entry.channelId)
+                                )
+                                channelEntryBody(
+                                    entry: entry,
+                                    capability: capability,
+                                    actionState: actionState,
+                                    palette: palette
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelHeroSummary(palette: NativeConfigurationPalette) -> some View {
+        HStack(alignment: .top, spacing: 18) {
+            NativeConfigurationIconTile(palette: palette, systemImage: "sparkles")
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("LIVE RUNTIME")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                Text("AI model configuration")
+                    .font(.system(size: 28, weight: .bold))
+                Text("ChillClaw reads the live OpenClaw model catalog and keeps provider status truthful to the installed engine.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Managed entries stay tied to the active OpenClaw runtime.", systemImage: "checkmark.circle.fill")
+                    Label("Default and fallback routing are visible in one place.", systemImage: "checkmark.circle.fill")
+                    Label("Credentials remain editable without showing stale history.", systemImage: "checkmark.circle.fill")
+                }
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelHeroMetrics(
+        palette: NativeConfigurationPalette,
+        runtimeModels: [ModelCatalogEntry],
+        providerCount: Int,
+        defaultModel: ModelCatalogEntry?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            NativeConfigurationMetricView(title: "Live models", value: "\(runtimeModels.count)", palette: palette)
+            NativeConfigurationMetricView(title: "Providers ready", value: "\(providerCount)", palette: palette)
+            NativeConfigurationMetricView(
+                title: "Default route",
+                value: defaultModel?.name ?? "Not set",
+                palette: palette,
+                emphasize: true
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func modelEntryBody(
+        entry: SavedModelEntry,
+        provider: ModelProviderConfig?,
+        palette: NativeConfigurationPalette,
+        runtimeModel: ModelCatalogEntry?,
+        fallbackTag: String?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    modelEntryHeader(entry: entry, provider: provider, runtimeModel: runtimeModel, fallbackTag: fallbackTag)
+                    Spacer(minLength: 12)
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    modelEntryHeader(entry: entry, provider: provider, runtimeModel: runtimeModel, fallbackTag: fallbackTag)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+                NativeConfigurationMetaPill(title: "Provider", value: provider?.label ?? entry.providerId, palette: palette)
+                NativeConfigurationMetaPill(
+                    title: "Authentication",
+                    value: entry.profileLabel.map { "\(nativeConfigurationAuthLabel(entry)) • \($0)" } ?? nativeConfigurationAuthLabel(entry),
+                    palette: palette
+                )
+                NativeConfigurationMetaPill(
+                    title: "Role",
+                    value: entry.isDefault ? "Default route" : entry.isFallback ? "Fallback route" : "Managed route",
+                    palette: palette
+                )
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    Text(runtimeModel?.local == true ? "This model is running in local mode." : "This route is available in the active OpenClaw runtime right now.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    modelEntryActions(entry: entry)
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(runtimeModel?.local == true ? "This model is running in local mode." : "This route is available in the active OpenClaw runtime right now.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    modelEntryActions(entry: entry)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelEntryHeader(
+        entry: SavedModelEntry,
+        provider: ModelProviderConfig?,
+        runtimeModel: ModelCatalogEntry?,
+        fallbackTag: String?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text((provider?.label ?? entry.providerId).uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            Text(entry.label)
+                .font(.title3.weight(.bold))
+            Text("Managed by ChillClaw and mapped to the live OpenClaw model chain.")
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TagBadge(entry.modelKey, tone: .neutral)
+                if entry.isDefault {
+                    TagBadge("Default", tone: .success)
+                }
+                if entry.isFallback {
+                    TagBadge("Fallback", tone: .accent)
+                }
+                if let fallbackTag {
+                    TagBadge(fallbackTag.replacingOccurrences(of: "#", with: " #"), tone: .accent)
+                }
+                if let runtimeModel, runtimeModel.local {
+                    TagBadge("Local", tone: .neutral)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelEntryActions(entry: SavedModelEntry) -> some View {
+        HStack(spacing: 10) {
+            ActionButton("Edit", variant: .outline) {
+                presentModelSheet(for: entry)
+            }
+            .disabled(hasPendingConfigurationAction)
+
+            ActionButton(
+                "Set Default",
+                variant: .secondary,
+                isBusy: pendingConfigurationAction == .setDefaultModel(entry.id),
+                isDisabled: entry.isDefault || blocksConfigurationAction(.setDefaultModel(entry.id))
+            ) {
+                Task { await setDefaultModel(entry.id) }
+            }
+
+            ActionButton(
+                "Remove",
+                variant: .destructive,
+                isBusy: pendingConfigurationAction == .removeModel(entry.id),
+                isDisabled: blocksConfigurationAction(.removeModel(entry.id))
+            ) {
+                Task { await removeModel(entry.id) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func runtimeOnlyModelBody(
+        model: ModelCatalogEntry,
+        provider: ModelProviderConfig?,
+        palette: NativeConfigurationPalette,
+        fallbackTag: String?,
+        runtimeEntry: SavedModelEntry?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text((provider?.label ?? model.key).uppercased())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                Text(model.name)
+                    .font(.title3.weight(.bold))
+                Text("Live in OpenClaw right now, but not yet managed as a ChillClaw entry.")
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    TagBadge(model.key, tone: .neutral)
+                    if model.key == appState.modelConfig?.defaultModel {
+                        TagBadge("Default", tone: .success)
+                    }
+                    if let fallbackTag {
+                        TagBadge(fallbackTag.replacingOccurrences(of: "#", with: " #"), tone: .accent)
+                    }
+                    if model.local {
+                        TagBadge("Local", tone: .neutral)
+                    }
+                    TagBadge("Detected from runtime", tone: .info)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+                NativeConfigurationMetaPill(title: "Provider", value: provider?.label ?? model.key, palette: palette)
+                NativeConfigurationMetaPill(
+                    title: "Context window",
+                    value: model.contextWindow > 0 ? "\(model.contextWindow.formatted()) tokens" : "Unknown",
+                    palette: palette
+                )
+                NativeConfigurationMetaPill(title: "Availability", value: model.available ? "Available now" : "Unavailable", palette: palette)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    Text("This model is currently coming from the active OpenClaw runtime without a managed ChillClaw entry.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    if let runtimeEntry {
+                        ActionButton(
+                            "Remove",
+                            variant: .destructive,
+                            isBusy: pendingConfigurationAction == .removeModel(runtimeEntry.id),
+                            isDisabled: blocksConfigurationAction(.removeModel(runtimeEntry.id))
+                        ) {
+                            Task { await removeModel(runtimeEntry.id) }
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("This model is currently coming from the active OpenClaw runtime without a managed ChillClaw entry.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if let runtimeEntry {
+                        ActionButton(
+                            "Remove",
+                            variant: .destructive,
+                            isBusy: pendingConfigurationAction == .removeModel(runtimeEntry.id),
+                            isDisabled: blocksConfigurationAction(.removeModel(runtimeEntry.id))
+                        ) {
+                            Task { await removeModel(runtimeEntry.id) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func channelHeroSummary(palette: NativeConfigurationPalette) -> some View {
+        HStack(alignment: .top, spacing: 18) {
+            NativeConfigurationIconTile(palette: palette, systemImage: "message.fill")
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("LIVE RUNTIME")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                Text("Communication channels")
+                    .font(.system(size: 28, weight: .bold))
+                Text("Configure official and workaround channels one by one through the current OpenClaw runtime.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Only live configured channels appear here.", systemImage: "checkmark.circle.fill")
+                    Label("Pairing and login progress stay visible while setup is active.", systemImage: "checkmark.circle.fill")
+                    Label("Gateway truth comes directly from the active OpenClaw runtime.", systemImage: "checkmark.circle.fill")
+                }
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func channelHeroMetrics(palette: NativeConfigurationPalette, entries: [ConfiguredChannelEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            NativeConfigurationMetricView(title: "Live channels", value: "\(entries.count)", palette: palette)
+            NativeConfigurationMetricView(title: "Channel types", value: "\((appState.channelConfig?.capabilities.count) ?? 0)", palette: palette)
+            NativeConfigurationMetricView(
+                title: "Gateway state",
+                value: appState.channelConfig?.gatewaySummary ?? "Ready",
+                palette: palette,
+                emphasize: true
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func channelEntryBody(
+        entry: ConfiguredChannelEntry,
+        capability: ChannelCapability?,
+        actionState: NativeConfigurationChannelActionState,
+        palette: NativeConfigurationPalette
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text((capability?.label ?? nativeChannelDisplayLabel(entry.channelId)).uppercased())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                Text(entry.label)
+                    .font(.title3.weight(.bold))
+                Text(entry.summary)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    StatusBadge(entry.status.capitalized, tone: nativeConfigurationChannelTone(entry.status))
+                    if entry.pairingRequired {
+                        TagBadge("Pairing required", tone: .info)
+                    }
+                    if capability?.officialSupport == false {
+                        TagBadge("Workaround", tone: .warning)
+                    }
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+                if entry.maskedConfigSummary.isEmpty {
+                    NativeConfigurationMetaPill(title: "Capability", value: capability?.label ?? nativeChannelDisplayLabel(entry.channelId), palette: palette)
+                    NativeConfigurationMetaPill(title: "Status", value: entry.status, palette: palette)
+                    NativeConfigurationMetaPill(title: "Last updated", value: nativeConfigurationFormattedTimestamp(entry.lastUpdatedAt), palette: palette)
+                } else {
+                    ForEach(entry.maskedConfigSummary, id: \.label) { item in
+                        NativeConfigurationMetaPill(title: item.label, value: item.value, palette: palette)
+                    }
+                }
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    Text(capability?.officialSupport == false ? "This channel uses the current workaround path supported by the active runtime." : "This channel is live in the current OpenClaw runtime.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    channelEntryActions(entry: entry, actionState: actionState)
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(capability?.officialSupport == false ? "This channel uses the current workaround path supported by the active runtime." : "This channel is live in the current OpenClaw runtime.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    channelEntryActions(entry: entry, actionState: actionState)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func channelEntryActions(
+        entry: ConfiguredChannelEntry,
+        actionState: NativeConfigurationChannelActionState
+    ) -> some View {
+        HStack(spacing: 10) {
+            if actionState.showApproveAction {
+                ActionButton("Approve Pairing", variant: .secondary) {
+                    presentChannelSheet(for: entry, action: .approvePairing)
+                }
+                .disabled(hasPendingConfigurationAction)
+            }
+
+            ActionButton(actionState.primaryAction == .continueSetup ? "Continue Setup" : "Edit", variant: .outline) {
+                presentChannelSheet(for: entry, action: .save)
+            }
+            .disabled(hasPendingConfigurationAction)
+
+            ActionButton(
+                "Remove",
+                variant: .destructive,
+                isBusy: pendingConfigurationAction == .removeChannel(entry.id),
+                isDisabled: blocksConfigurationAction(.removeChannel(entry.id))
+            ) {
+                Task { await removeChannel(entry) }
             }
         }
     }
@@ -1892,6 +2750,269 @@ struct SettingsScreen: View {
     }
 }
 
+private enum NativeConfigurationModelSheetBusyState: Equatable {
+    case idle
+    case remove
+    case save
+    case input
+    case refresh
+}
+
+private let nativeConfigurationCustomModelKeyOption = "__custom_model_key__"
+
+private enum NativeConfigurationModelEntryRole {
+    case normal
+    case `default`
+    case fallback
+}
+
+private struct NativeConfigurationModelOption: Identifiable {
+    let key: String
+    let name: String
+
+    var id: String { key }
+}
+
+private func nativeProviderFallbackGlyph(_ providerId: String, label: String? = nil) -> String {
+    let mapped: [String: String] = [
+        "openai": "OA",
+        "openai-codex": "OC",
+        "anthropic": "AN",
+        "amazon-bedrock": "AB",
+        "byteplus": "BY",
+        "cloudflare-ai-gateway": "CF",
+        "custom-provider": "CU",
+        "github": "GH",
+        "github-copilot": "GC",
+        "google": "GO",
+        "gemini": "GE",
+        "huggingface": "HF",
+        "hugging-face-inference": "HF",
+        "minimax": "MM",
+        "mistral": "MI",
+        "moonshot": "MO",
+        "volcano-engine": "VO",
+    ]
+
+    if let mapped = mapped[providerId] { return mapped }
+
+    let source = (label?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? label! : providerId)
+    let words = source
+        .replacingOccurrences(of: "-", with: " ")
+        .split(separator: " ")
+        .prefix(2)
+    let initials = words.compactMap { $0.first }.map(String.init).joined().uppercased()
+    if !initials.isEmpty {
+        return initials
+    }
+
+    return String(providerId.prefix(2)).uppercased()
+}
+
+private func nativeConfigurationModelOptions(
+    _ modelConfig: ModelConfigOverview?,
+    provider: ModelProviderConfig?
+) -> [NativeConfigurationModelOption] {
+    guard let modelConfig, let provider else { return [] }
+
+    let providerModels = modelConfig.models.filter { model in
+        provider.providerRefs.contains { ref in
+            model.key.starts(with: "\(ref.replacingOccurrences(of: #"/$"#, with: "", options: .regularExpression))/")
+        }
+    }
+
+    if !providerModels.isEmpty {
+        return providerModels.map { model in
+            NativeConfigurationModelOption(key: model.key, name: model.name)
+        }
+    }
+
+    return provider.sampleModels.map { modelKey in
+        NativeConfigurationModelOption(
+            key: modelKey,
+            name: modelKey.split(separator: "/").last.map(String.init) ?? modelKey
+        )
+    }
+}
+
+private func nativeConfigurationProviderConfiguredModels(
+    _ modelConfig: ModelConfigOverview?,
+    provider: ModelProviderConfig?
+) -> [String] {
+    guard let modelConfig, let provider else { return [] }
+    return modelConfig.configuredModelKeys.filter { key in
+        provider.providerRefs.contains { ref in key.starts(with: ref) }
+    }
+}
+
+private func nativeConfigurationProviderActiveModel(
+    _ modelConfig: ModelConfigOverview?,
+    provider: ModelProviderConfig?
+) -> String? {
+    guard let modelConfig, let provider else { return nil }
+
+    if let defaultModel = modelConfig.defaultModel,
+       provider.providerRefs.contains(where: { defaultModel.starts(with: $0) }) {
+        return defaultModel
+    }
+
+    return nativeConfigurationProviderConfiguredModels(modelConfig, provider: provider).first
+}
+
+private func nativeConfigurationModelKeyPlaceholder(_ provider: ModelProviderConfig?) -> String {
+    guard let provider else { return "provider/model-name" }
+    if let sample = provider.sampleModels.first, !sample.isEmpty {
+        return sample
+    }
+    return "\(provider.providerRefs.first?.replacingOccurrences(of: #"/?$"#, with: "/", options: .regularExpression) ?? "")model-name"
+}
+
+private func nativeConfigurationModelSelectValue(
+    models: [NativeConfigurationModelOption],
+    modelKey: String
+) -> String {
+    guard !modelKey.isEmpty else {
+        return models.first?.key ?? nativeConfigurationCustomModelKeyOption
+    }
+
+    return models.contains(where: { $0.key == modelKey }) ? modelKey : nativeConfigurationCustomModelKeyOption
+}
+
+private func nativeConfigurationResolveModelEntryRole(
+    makeDefault: Bool,
+    useAsFallback: Bool
+) -> NativeConfigurationModelEntryRole {
+    if makeDefault {
+        return .default
+    }
+    if useAsFallback {
+        return .fallback
+    }
+    return .normal
+}
+
+private func nativeConfigurationApplyModelEntryRole(
+    _ role: NativeConfigurationModelEntryRole
+) -> (makeDefault: Bool, useAsFallback: Bool) {
+    (
+        makeDefault: role == .default,
+        useAsFallback: role == .fallback
+    )
+}
+
+private func nativeConfigurationDefaultModelEntryRole(
+    liveConfiguredModelCount: Int,
+    initialEntry: SavedModelEntry?
+) -> NativeConfigurationModelEntryRole {
+    if let initialEntry {
+        return nativeConfigurationResolveModelEntryRole(
+            makeDefault: initialEntry.isDefault,
+            useAsFallback: initialEntry.isFallback
+        )
+    }
+
+    return liveConfiguredModelCount == 0 ? .default : .normal
+}
+
+private func nativeConfigurationValidateModelEntryDraft(
+    method: ModelAuthMethod?,
+    values: [String: String],
+    role: NativeConfigurationModelEntryRole
+) -> String? {
+    guard role != .normal else { return nil }
+    guard let method else { return "Choose an authentication method first." }
+
+    for field in method.fields {
+        let value = values[field.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if field.required && value.isEmpty {
+            return "\(field.label) is required."
+        }
+
+        let lowercaseLabel = field.label.lowercased()
+        let lowercaseFieldId = field.id.lowercased()
+        let looksLikeAPIKey = lowercaseFieldId.contains("apikey") || lowercaseLabel.contains("api key")
+        if looksLikeAPIKey && !value.isEmpty {
+            if value.contains(where: \.isWhitespace) {
+                return "\(field.label) cannot contain spaces."
+            }
+            if value.count < 10 {
+                return "\(field.label) looks too short."
+            }
+        }
+    }
+
+    return nil
+}
+
+private struct NativeConfigurationProviderMark: View {
+    let provider: ModelProviderConfig
+    let size: CGFloat
+
+    init(provider: ModelProviderConfig, size: CGFloat = 48) {
+        self.provider = provider
+        self.size = size
+    }
+
+    var body: some View {
+        let palette = nativeConfigurationProviderPalette(provider.id)
+
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.94), palette.softHighlight],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Text(nativeProviderFallbackGlyph(provider.id, label: provider.label))
+                .font(.system(size: size * 0.30, weight: .bold))
+                .foregroundStyle(palette.accentStrong)
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .stroke(palette.accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct NativeConfigurationChannelMark: View {
+    let channelId: SupportedChannelId
+    let size: CGFloat
+
+    init(channelId: SupportedChannelId, size: CGFloat = 48) {
+        self.channelId = channelId
+        self.size = size
+    }
+
+    var body: some View {
+        let palette = nativeConfigurationChannelPalette(channelId)
+
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [palette.softHighlight, palette.softFill],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Image(systemName: nativeConfigurationChannelSymbol(channelId))
+                .font(.system(size: size * 0.34, weight: .semibold))
+                .foregroundStyle(palette.accentStrong)
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .stroke(palette.accent.opacity(0.16), lineWidth: 1)
+        )
+    }
+}
+
 private struct ModelEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var appState: SlackClawAppState
@@ -1901,87 +3022,668 @@ private struct ModelEntrySheet: View {
     @State private var label = ""
     @State private var modelKey = ""
     @State private var methodId = ""
-    @State private var secretValue = ""
+    @State private var values: [String: String] = [:]
+    @State private var session: ModelAuthSession?
+    @State private var sessionInput = ""
+    @State private var busyState: NativeConfigurationModelSheetBusyState = .idle
+    @State private var makeDefault = false
+    @State private var useAsFallback = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(existingEntry == nil ? "Add Model" : "Edit Model")
-                .font(.title2)
-                .fontWeight(.semibold)
-            Picker("Provider", selection: $providerId) {
-                ForEach(appState.modelConfig?.providers ?? []) { provider in
-                    Text(provider.label).tag(provider.id)
-                }
-            }
-            TextField("Display name", text: $label)
-            TextField("Model key", text: $modelKey)
-            Picker("Auth Method", selection: $methodId) {
-                ForEach(currentProvider?.authMethods ?? []) { method in
-                    Text(method.label).tag(method.id)
-                }
-            }
-            if !(currentProvider?.authMethods.first(where: { $0.id == methodId })?.interactive ?? false) {
-                SecureField("Secret", text: $secretValue)
-            }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(existingEntry == nil ? "Save" : "Update") {
-                    Task { await save() }
-                }
-                .disabled(providerId.isEmpty || modelKey.isEmpty || methodId.isEmpty)
-            }
-        }
-        .padding(24)
-        .frame(width: 520)
-        .onAppear {
-            if let existingEntry {
-                providerId = existingEntry.providerId
-                label = existingEntry.label
-                modelKey = existingEntry.modelKey
-                secretValue = ""
-                if let authMethodId = existingEntry.authMethodId, !authMethodId.isEmpty {
-                    methodId = authMethodId
-                } else {
-                    methodId = appState.modelConfig?.providers.first(where: { $0.id == existingEntry.providerId })?.authMethods.first?.id ?? ""
-                }
-            } else if let firstProvider = appState.modelConfig?.providers.first {
-                providerId = firstProvider.id
-                methodId = firstProvider.authMethods.first?.id ?? ""
-                label = ""
-                modelKey = ""
-                secretValue = ""
-            }
-        }
+    private var modelProviders: [ModelProviderConfig] {
+        appState.modelConfig?.providers ?? []
     }
 
     private var currentProvider: ModelProviderConfig? {
-        appState.modelConfig?.providers.first(where: { $0.id == providerId })
+        modelProviders.first(where: { $0.id == providerId })
     }
 
-    private func save() async {
-        do {
-            let request = SaveModelEntryRequest(
-                label: label.isEmpty ? (currentProvider?.label ?? modelKey) : label,
-                providerId: providerId,
-                methodId: methodId,
-                modelKey: modelKey,
-                values: secretValue.isEmpty ? [:] : ["token": secretValue, "apiKey": secretValue],
-                makeDefault: nativeShouldDefaultNewModelEntry(appState.modelConfig),
-                useAsFallback: false
-            )
-            let response: ModelConfigActionResponse
-            if let existingEntry {
-                response = try await appState.client.updateModelEntry(entryId: existingEntry.id, request: request)
-            } else {
-                response = try await appState.client.createModelEntry(request)
+    private var currentMethod: ModelAuthMethod? {
+        currentProvider?.authMethods.first(where: { $0.id == methodId })
+    }
+
+    private var models: [NativeConfigurationModelOption] {
+        nativeConfigurationModelOptions(appState.modelConfig, provider: currentProvider)
+    }
+
+    private var selectedModelValue: String {
+        nativeConfigurationModelSelectValue(models: models, modelKey: modelKey)
+    }
+
+    private var showCustomModelInput: Bool {
+        models.isEmpty || selectedModelValue == nativeConfigurationCustomModelKeyOption
+    }
+
+    private var isEdit: Bool {
+        existingEntry != nil
+    }
+
+    private var role: NativeConfigurationModelEntryRole {
+        nativeConfigurationResolveModelEntryRole(makeDefault: makeDefault, useAsFallback: useAsFallback)
+    }
+
+    private var validationError: String? {
+        nativeConfigurationValidateModelEntryDraft(method: currentMethod, values: values, role: role)
+    }
+
+    private var saveDisabled: Bool {
+        providerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        methodId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        modelKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        validationError != nil ||
+        busyState != .idle
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if providerId.isEmpty {
+                        providerChooser
+                    } else if let provider = currentProvider {
+                        providerSetup(provider: provider)
+                    } else {
+                        EmptyState(
+                            title: "No providers available",
+                            description: "Refresh providers to reload the current OpenClaw model catalog.",
+                            symbol: "sparkles"
+                        )
+                    }
+                }
+                .padding(22)
             }
+
+            if !providerId.isEmpty {
+                Divider()
+                footer
+            }
+        }
+        .frame(width: 880, height: 720)
+        .background(Color(NSColor.windowBackgroundColor))
+        .onAppear {
+            configureInitialState()
+        }
+        .onChange(of: methodId) { _, _ in
+            session = nil
+            sessionInput = ""
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(isEdit ? "Edit AI Model" : "Add AI Model")
+                    .font(.title2.weight(.bold))
+                Text("Choose a provider, model, and authentication for this saved AI model entry.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: NativeUI.compactCornerRadius, style: .continuous)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(22)
+    }
+
+    private var providerChooser: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+            ForEach(modelProviders) { provider in
+                let palette = nativeConfigurationProviderPalette(provider.id)
+
+                Button {
+                    selectProvider(provider.id, preserveSelection: false)
+                } label: {
+                    HStack(alignment: .top, spacing: 14) {
+                        NativeConfigurationProviderMark(provider: provider)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(provider.label)
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(provider.description)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: NativeUI.panelCornerRadius, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.98), palette.softFill],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: NativeUI.panelCornerRadius, style: .continuous)
+                            .stroke(Color.blue.opacity(0.12), lineWidth: 1.5)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func providerSetup(provider: ModelProviderConfig) -> some View {
+        let palette = nativeConfigurationProviderPalette(provider.id)
+
+        SurfaceCard(tone: .muted, padding: 20, spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
+                    NativeConfigurationProviderMark(provider: provider, size: 56)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(provider.label)
+                            .font(.title3.weight(.bold))
+                        Text(provider.description)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 12) {
+                    ActionButton("Change Provider", variant: .outline) {
+                        session = nil
+                        sessionInput = ""
+                        providerId = ""
+                    }
+
+                    if !provider.docsUrl.isEmpty {
+                        ActionButton("Documentation", systemImage: "arrow.up.right.square", variant: .ghost) {
+                            openURLString(provider.docsUrl)
+                        }
+                    }
+                }
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: NativeUI.cardCornerRadius, style: .continuous)
+                .stroke(palette.accent.opacity(0.12), lineWidth: 1)
+        )
+
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Display name")
+                    .font(.headline)
+                TextField("\(provider.label) \(modelKey.split(separator: "/").last.map(String.init) ?? "model")", text: $label)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Model")
+                    .font(.headline)
+
+                if !models.isEmpty {
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { selectedModelValue },
+                            set: { nextValue in
+                                if nextValue == nativeConfigurationCustomModelKeyOption {
+                                    if models.contains(where: { $0.key == modelKey }) {
+                                        modelKey = ""
+                                    }
+                                    return
+                                }
+
+                                modelKey = nextValue
+                            }
+                        )
+                    ) {
+                        ForEach(models) { model in
+                            Text("\(model.name) (\(model.key))").tag(model.key)
+                        }
+                        Text("Custom model key…").tag(nativeConfigurationCustomModelKeyOption)
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if showCustomModelInput {
+                    TextField(nativeConfigurationModelKeyPlaceholder(provider), text: $modelKey)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Authentication Method")
+                    .font(.headline)
+                Picker("", selection: $methodId) {
+                    ForEach(provider.authMethods) { method in
+                        Text(method.label).tag(method.id)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+
+        if let method = currentMethod {
+            SurfaceCard(padding: 20, spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(nativeConfigurationSetupTitle(for: provider, method: method))
+                            .font(.headline)
+                        Text(method.description)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if method.interactive && session == nil {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: onboardingAuthMethodSymbol(method))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(palette.accentStrong)
+                                .frame(width: 26, height: 26)
+                                .background(
+                                    Circle()
+                                        .fill(palette.softHighlight)
+                                )
+
+                            Text("Saving this entry starts the interactive \(method.label.lowercased()) flow in OpenClaw.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !method.fields.isEmpty {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                            ForEach(method.fields) { field in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(field.label)
+                                        .font(.headline)
+
+                                    if field.secret == true {
+                                        SecureField(field.placeholder ?? field.label, text: Binding(
+                                            get: { values[field.id] ?? "" },
+                                            set: { values[field.id] = $0 }
+                                        ))
+                                        .textFieldStyle(.roundedBorder)
+                                    } else {
+                                        TextField(field.placeholder ?? field.label, text: Binding(
+                                            get: { values[field.id] ?? "" },
+                                            set: { values[field.id] = $0 }
+                                        ))
+                                        .textFieldStyle(.roundedBorder)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let validationError {
+                        Text(validationError)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+
+                    if let session {
+                        modelAuthProgress(session: session, palette: palette)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelAuthProgress(
+        session: ModelAuthSession,
+        palette: NativeConfigurationPalette
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Text("Authentication progress")
+                        .font(.headline)
+                    StatusBadge(session.status.capitalized, tone: session.status == "completed" ? .success : .info)
+                }
+
+                Text(session.message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !session.logs.isEmpty {
+                ScrollView {
+                    Text(session.logs.joined(separator: "\n"))
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                }
+                .frame(minHeight: 120, maxHeight: 180)
+                .background(
+                    RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                        .fill(palette.softFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                        .stroke(palette.accent.opacity(0.10), lineWidth: 1)
+                )
+            }
+
+            HStack(spacing: 12) {
+                if let launchURL = session.launchUrl, !launchURL.isEmpty {
+                    ActionButton("Open authentication window", systemImage: "arrow.up.right.square", variant: .outline) {
+                        openURLString(launchURL)
+                    }
+                }
+
+                ActionButton("Refresh authentication", systemImage: "arrow.clockwise", variant: .outline, isBusy: busyState == .refresh) {
+                    Task { await refreshSession() }
+                }
+            }
+
+            if session.status == "awaiting-input" {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let prompt = session.inputPrompt, !prompt.isEmpty {
+                        Text(prompt)
+                            .font(.callout.weight(.medium))
+                    }
+
+                    HStack(alignment: .top, spacing: 12) {
+                        TextField(session.inputPrompt ?? "Paste redirect URL or code", text: $sessionInput)
+                            .textFieldStyle(.roundedBorder)
+
+                        ActionButton(
+                            "Finish Authentication",
+                            variant: .primary,
+                            isBusy: busyState == .input,
+                            isDisabled: sessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busyState != .idle
+                        ) {
+                            Task { await submitSessionInput() }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(alignment: .center, spacing: 16) {
+            HStack(spacing: 10) {
+                TagBadge(currentProvider?.configured == true ? "Provider seen in OpenClaw" : "New provider setup", tone: .neutral)
+                switch role {
+                case .default:
+                    TagBadge("Default", tone: .success)
+                case .fallback:
+                    TagBadge("Fallback", tone: .accent)
+                case .normal:
+                    TagBadge("Normal", tone: .neutral)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 12) {
+                if let existingEntry {
+                    ActionButton("Remove", variant: .destructive, isBusy: busyState == .remove, isDisabled: busyState != .idle) {
+                        Task { await remove(entry: existingEntry) }
+                    }
+                }
+
+                ActionButton("Refresh providers", systemImage: "arrow.clockwise", variant: .outline, isBusy: busyState == .refresh, isDisabled: busyState != .idle) {
+                    Task { await refreshProviders() }
+                }
+
+                ActionButton(isEdit ? "Save Changes" : "Save Entry", variant: .primary, isBusy: busyState == .save, isDisabled: saveDisabled) {
+                    Task { await save() }
+                }
+            }
+        }
+        .padding(20)
+    }
+
+    private func remove(entry: SavedModelEntry) async {
+        busyState = .remove
+        defer { busyState = .idle }
+
+        do {
+            let response = try await appState.client.deleteModelEntry(entryId: entry.id)
             appState.modelConfig = response.modelConfig
             appState.applyBanner(response.message)
             await appState.refreshAll()
             dismiss()
         } catch {
             appState.presentErrorUnlessCancelled(error)
+        }
+    }
+
+    private func configureInitialState() {
+        let runtimeModelCount = nativeRuntimeConfiguredModels(appState.modelConfig).count
+        let nextRole = nativeConfigurationDefaultModelEntryRole(
+            liveConfiguredModelCount: runtimeModelCount,
+            initialEntry: existingEntry
+        )
+        let nextFlags = nativeConfigurationApplyModelEntryRole(nextRole)
+        makeDefault = nextFlags.makeDefault
+        useAsFallback = nextFlags.useAsFallback
+        session = nil
+        sessionInput = ""
+        values = [:]
+
+        if let existingEntry {
+            label = existingEntry.label
+            providerId = existingEntry.providerId
+            methodId = existingEntry.authMethodId ?? ""
+            modelKey = existingEntry.modelKey
+            selectProvider(existingEntry.providerId, preserveSelection: true)
+        } else {
+            providerId = ""
+            label = ""
+            methodId = ""
+            modelKey = ""
+        }
+    }
+
+    private func selectProvider(_ nextProviderId: String, preserveSelection: Bool) {
+        providerId = nextProviderId
+        session = nil
+        sessionInput = ""
+
+        guard let provider = modelProviders.first(where: { $0.id == nextProviderId }) else {
+            methodId = ""
+            modelKey = ""
+            values = [:]
+            return
+        }
+
+        if !preserveSelection || !provider.authMethods.contains(where: { $0.id == methodId }) {
+            if let existingEntry, existingEntry.providerId == provider.id, let existingMethodId = existingEntry.authMethodId, provider.authMethods.contains(where: { $0.id == existingMethodId }) {
+                methodId = existingMethodId
+            } else {
+                methodId = provider.authMethods.first?.id ?? ""
+            }
+        }
+
+        let providerModels = nativeConfigurationModelOptions(appState.modelConfig, provider: provider)
+        if preserveSelection {
+            if modelKey.isEmpty == false,
+               (providerModels.contains(where: { $0.key == modelKey }) || providerModels.isEmpty) {
+                // Keep the current selection.
+            } else if let existingEntry, existingEntry.providerId == provider.id {
+                modelKey = existingEntry.modelKey
+            } else {
+                modelKey = nativeConfigurationProviderActiveModel(appState.modelConfig, provider: provider)
+                    ?? provider.sampleModels.first
+                    ?? providerModels.first?.key
+                    ?? ""
+            }
+        } else {
+            modelKey = nativeConfigurationProviderActiveModel(appState.modelConfig, provider: provider)
+                ?? provider.sampleModels.first
+                ?? providerModels.first?.key
+                ?? ""
+            values = [:]
+        }
+    }
+
+    private func saveRequestValues() -> [String: String] {
+        guard let method = currentMethod else { return [:] }
+        return method.fields.reduce(into: [String: String]()) { result, field in
+            let value = values[field.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !value.isEmpty {
+                result[field.id] = value
+            }
+        }
+    }
+
+    private func save() async {
+        guard let provider = currentProvider, let currentMethod else { return }
+
+        busyState = .save
+        defer {
+            if busyState == .save {
+                busyState = .idle
+            }
+        }
+
+        do {
+            let request = SaveModelEntryRequest(
+                label: label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "\(provider.label) \(modelKey.split(separator: "/").last.map(String.init) ?? modelKey)"
+                    : label.trimmingCharacters(in: .whitespacesAndNewlines),
+                providerId: provider.id,
+                methodId: currentMethod.id,
+                modelKey: modelKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                values: saveRequestValues(),
+                makeDefault: makeDefault,
+                useAsFallback: useAsFallback
+            )
+
+            let response: ModelConfigActionResponse
+            if let existingEntry {
+                response = try await appState.client.updateModelEntry(entryId: existingEntry.id, request: request)
+            } else {
+                response = try await appState.client.createModelEntry(request)
+            }
+
+            appState.modelConfig = response.modelConfig
+            appState.applyBanner(response.message)
+            session = response.authSession
+
+            if response.authSession == nil && response.status == "completed" {
+                await appState.refreshAll()
+                dismiss()
+            } else {
+                busyState = .idle
+            }
+        } catch {
+            appState.presentErrorUnlessCancelled(error)
+        }
+    }
+
+    private func refreshProviders() async {
+        busyState = .refresh
+        defer { busyState = .idle }
+
+        do {
+            let next = try await appState.client.fetchModelConfig()
+            appState.modelConfig = next
+
+            if !providerId.isEmpty {
+                if next.providers.contains(where: { $0.id == providerId }) {
+                    selectProvider(providerId, preserveSelection: true)
+                } else {
+                    providerId = ""
+                    methodId = ""
+                    modelKey = ""
+                    values = [:]
+                    session = nil
+                    sessionInput = ""
+                }
+            }
+        } catch {
+            appState.presentErrorUnlessCancelled(error)
+        }
+    }
+
+    private func refreshSession() async {
+        guard let sessionID = session?.id else { return }
+
+        busyState = .refresh
+        defer { busyState = .idle }
+
+        do {
+            let next = try await appState.client.fetchModelAuthSession(sessionId: sessionID)
+            session = next.session
+            appState.modelConfig = next.modelConfig
+
+            if next.session.status == "completed" {
+                await appState.refreshAll()
+                dismiss()
+            }
+        } catch {
+            appState.presentErrorUnlessCancelled(error)
+        }
+    }
+
+    private func submitSessionInput() async {
+        guard let sessionID = session?.id else { return }
+        let value = sessionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+
+        busyState = .input
+        defer { busyState = .idle }
+
+        do {
+            let next = try await appState.client.submitModelAuthInput(sessionId: sessionID, value: value)
+            session = next.session
+            sessionInput = ""
+            appState.modelConfig = next.modelConfig
+
+            if next.session.status == "completed" {
+                await appState.refreshAll()
+                dismiss()
+            }
+        } catch {
+            appState.presentErrorUnlessCancelled(error)
+        }
+    }
+
+    private func openURLString(_ value: String) {
+        guard let url = URL(string: value) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func nativeConfigurationSetupTitle(
+        for provider: ModelProviderConfig,
+        method: ModelAuthMethod
+    ) -> String {
+        switch resolveNativeOnboardingModelSetupVariant(providerID: provider.id, methodKind: method.kind) {
+        case .oauth:
+            return "Interactive flow"
+        case .guidedMiniMaxAPIKey:
+            return "API key setup"
+        case .defaultAPIKey:
+            return method.kind == "api-key" ? "API key setup" : "Direct setup"
         }
     }
 }
@@ -1992,101 +3694,417 @@ private struct ChannelEntrySheet: View {
     let existingEntry: ConfiguredChannelEntry?
     let preferredAction: NativeConfigurationChannelSheetAction
 
-    @State private var channelId: SupportedChannelId = .telegram
+    @State private var channelId: SupportedChannelId?
     @State private var values: [String: String] = [:]
     @State private var busyAction: NativeConfigurationChannelSheetAction?
     @State private var message = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(existingEntry == nil ? "Add Channel" : "Edit Channel")
-                .font(.title2)
-                .fontWeight(.semibold)
-            Picker("Channel", selection: $channelId) {
-                ForEach(appState.channelConfig?.capabilities ?? []) { capability in
-                    Text(capability.label).tag(capability.id)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if channelId == nil {
+                        channelChooser
+                    } else if let capability = currentCapability {
+                        channelSetup(capability: capability)
+                    } else {
+                        EmptyState(
+                            title: "No channels available",
+                            description: "Refresh the current OpenClaw channel catalog and try again.",
+                            symbol: "message"
+                        )
+                    }
                 }
+                .padding(22)
             }
-            if let existingEntry {
-                HStack(spacing: 10) {
-                    Text(existingEntry.summary)
-                        .foregroundStyle(.secondary)
-                    if existingEntry.pairingRequired {
-                        Text("Pairing required")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.blue)
+
+            if channelId != nil {
+                Divider()
+                footer
+            }
+        }
+        .frame(width: 880, height: 720)
+        .background(Color(NSColor.windowBackgroundColor))
+        .onAppear {
+            configureInitialState()
+        }
+    }
+
+    private var channelCapabilities: [ChannelCapability] {
+        appState.channelConfig?.capabilities ?? []
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(existingEntry == nil ? "Add Channel" : "Edit Channel")
+                    .font(.title2.weight(.bold))
+                Text("Choose a communication channel, review the setup guidance, and save the account through ChillClaw.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: NativeUI.compactCornerRadius, style: .continuous)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(22)
+    }
+
+    private var channelChooser: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+            ForEach(channelCapabilities) { capability in
+                let palette = nativeConfigurationChannelPalette(capability.id)
+
+                Button {
+                    selectChannel(capability.id, preserveValues: false)
+                } label: {
+                    HStack(alignment: .top, spacing: 14) {
+                        NativeConfigurationChannelMark(channelId: capability.id)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(capability.label)
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(capability.description)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: NativeUI.panelCornerRadius, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.98), palette.softFill],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: NativeUI.panelCornerRadius, style: .continuous)
+                            .stroke(Color.blue.opacity(0.12), lineWidth: 1.5)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func channelSetup(capability: ChannelCapability) -> some View {
+        let palette = nativeConfigurationChannelPalette(capability.id)
+
+        SurfaceCard(tone: .muted, padding: 20, spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
+                    NativeConfigurationChannelMark(channelId: capability.id, size: 56)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(capability.label)
+                            .font(.title3.weight(.bold))
+                        Text(capability.description)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 12) {
+                    ActionButton("Change Channel", variant: .outline) {
+                        channelId = nil
+                        message = ""
+                    }
+
+                    if let docsURL = capability.docsUrl, !docsURL.isEmpty {
+                        ActionButton("Documentation", systemImage: "arrow.up.right.square", variant: .ghost) {
+                            openURLString(docsURL)
+                        }
                     }
                 }
             }
-            ForEach(currentCapability?.fieldDefs ?? []) { field in
-                TextField(field.label, text: Binding(
-                    get: { values[field.id, default: ""] },
-                    set: { values[field.id] = $0 }
-                ))
-            }
-            if let activeSession, activeSession.channelId == channelId {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Active session")
-                        .font(.headline)
-                    Text(activeSession.message)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: NativeUI.cardCornerRadius, style: .continuous)
+                .stroke(palette.accent.opacity(0.12), lineWidth: 1)
+        )
+
+        if let existingEntry {
+            SurfaceCard(padding: 20, spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Current configuration")
+                            .font(.headline)
+                        Spacer(minLength: 0)
+                        StatusBadge(existingEntry.status.capitalized, tone: nativeConfigurationChannelTone(existingEntry.status))
+                    }
+
+                    Text(existingEntry.summary)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
+
+                    if !existingEntry.maskedConfigSummary.isEmpty {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                            ForEach(existingEntry.maskedConfigSummary) { item in
+                                NativeConfigurationMetaPill(title: item.label, value: item.value, palette: palette)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        channelGuidance(capability: capability, palette: palette)
+
+        if let activeSession {
+            SurfaceCard(padding: 20, spacing: 16) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Active session")
+                            .font(.headline)
+                        StatusBadge(activeSession.status.capitalized, tone: activeSession.status == "completed" ? .success : .info)
+                    }
+
+                    Text(activeSession.message)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
                     if !activeSession.logs.isEmpty {
                         ScrollView {
                             Text(activeSession.logs.joined(separator: "\n"))
                                 .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
                         }
-                        .frame(minHeight: 100, maxHeight: 160)
+                        .frame(minHeight: 120, maxHeight: 180)
+                        .background(
+                            RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                                .fill(palette.softFill)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                                .stroke(palette.accent.opacity(0.10), lineWidth: 1)
+                        )
                     }
-                    if let prompt = activeSession.inputPrompt {
+
+                    if let prompt = activeSession.inputPrompt, !prompt.isEmpty {
                         Text(prompt)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+
+                    if let launchURL = activeSession.launchUrl, !launchURL.isEmpty {
+                        ActionButton("Open session link", systemImage: "arrow.up.right.square", variant: .outline) {
+                            openURLString(launchURL)
+                        }
+                    }
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: NativeUI.compactCornerRadius, style: .continuous))
             }
-            if !message.isEmpty {
-                Text(message)
-                    .font(.footnote)
+        }
+
+        if !capability.fieldDefs.isEmpty {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                ForEach(capability.fieldDefs) { field in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(field.label)
+                            .font(.headline)
+
+                        channelFieldEditor(field)
+
+                        if let helpText = field.helpText, !helpText.isEmpty {
+                            Text(helpText)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .gridCellColumns(field.kind == "textarea" ? 2 : 1)
+                }
+            }
+        }
+
+        if !message.isEmpty {
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func channelGuidance(
+        capability: ChannelCapability,
+        palette: NativeConfigurationPalette
+    ) -> some View {
+        switch capability.guidedSetupKind {
+        case "feishu":
+            SurfaceCard(padding: 20, spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Feishu setup guidance")
+                        .font(.headline)
+                    Text("Follow the official Feishu channel guide, then return here to save credentials and finish pairing in ChillClaw.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("1. Create the enterprise app and enable bot capability.")
+                        Text("2. Copy the App ID and App Secret into ChillClaw.")
+                        Text("3. Use Prepare so OpenClaw can verify the Feishu plugin is ready.")
+                        Text("4. Publish the app, send the bot a direct message, then approve pairing here.")
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                    if let docsURL = capability.docsUrl, !docsURL.isEmpty {
+                        ActionButton("Open official Feishu guide", systemImage: "arrow.up.right.square", variant: .outline) {
+                            openURLString(docsURL)
+                        }
+                    }
+                }
+            }
+        case "wechat-work":
+            SurfaceCard(padding: 20, spacing: 14) {
+                Text("WeChat Work setup guidance")
+                    .font(.headline)
+                Text("ChillClaw manages the required WeCom plugin automatically. Save the Bot ID and Secret here, and the daemon will install or update the plugin before writing the channel config.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(currentCapability?.id == .wechat ? (activeSession == nil ? "Start Login" : "Restart Login") : (existingEntry == nil ? "Save Channel" : "Save Changes")) {
-                    Task { await runAction(.save) }
+        case "wechat":
+            SurfaceCard(padding: 20, spacing: 14) {
+                Text("Personal WeChat login")
+                    .font(.headline)
+                Text("ChillClaw starts the QR-first WeChat installer for you. Use Start Login to begin, then keep this sheet open while the session log streams the pairing steps.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func channelFieldEditor(_ field: ChannelFieldDefinition) -> some View {
+        switch field.kind {
+        case "select":
+            Picker(
+                "",
+                selection: Binding(
+                    get: { values[field.id] ?? field.options?.first?.value ?? "" },
+                    set: { values[field.id] = $0 }
+                )
+            ) {
+                ForEach(field.options ?? [], id: \.value) { option in
+                    Text(option.label).tag(option.value)
                 }
-                .disabled(false)
+            }
+            .labelsHidden()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case "textarea":
+            TextEditor(text: Binding(
+                get: { values[field.id] ?? "" },
+                set: { values[field.id] = $0 }
+            ))
+            .font(.system(size: 14))
+            .frame(minHeight: 120)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                    .fill(Color(NSColor.textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: NativeUI.standardCornerRadius, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            )
+        default:
+            if field.secret == true {
+                SecureField(field.placeholder ?? field.label, text: Binding(
+                    get: { values[field.id] ?? "" },
+                    set: { values[field.id] = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+            } else {
+                TextField(field.placeholder ?? field.label, text: Binding(
+                    get: { values[field.id] ?? "" },
+                    set: { values[field.id] = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(alignment: .center, spacing: 16) {
+            HStack(spacing: 10) {
+                TagBadge((currentCapability?.officialSupport == true) ? "Official" : "Workaround", tone: currentCapability?.officialSupport == true ? .success : .warning)
+                if existingEntry?.pairingRequired == true {
+                    StatusBadge("Pairing required", tone: .info)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 12) {
+                if currentCapability?.guidedSetupKind == "feishu" {
+                    ActionButton("Prepare", variant: .outline, isBusy: busyAction == .prepare, isDisabled: busyAction != nil) {
+                        Task { await runAction(.prepare) }
+                    }
+                }
+
+                if currentCapability?.supportsLogin == true {
+                    ActionButton("Start Login", variant: .outline, isBusy: busyAction == .login, isDisabled: busyAction != nil) {
+                        Task { await runAction(.login) }
+                    }
+                }
+
+                if let currentCapability, currentCapability.id != .whatsapp && currentCapability.id != .wechat {
+                    ActionButton(existingEntry == nil ? "Save Channel" : "Save Changes", variant: .primary, isBusy: busyAction == .save, isDisabled: busyAction != nil) {
+                        Task { await runAction(.save) }
+                    }
+                }
+
                 if currentCapability?.supportsPairing == true {
-                    Button("Approve Pairing") {
+                    ActionButton("Approve Pairing", variant: .outline, isBusy: busyAction == .approvePairing, isDisabled: values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busyAction != nil) {
                         Task { await runAction(.approvePairing) }
                     }
-                    .disabled(values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
-        .padding(24)
-        .frame(width: 520)
-        .onAppear {
-            channelId = existingEntry?.channelId ?? appState.channelConfig?.capabilities.first?.id ?? .telegram
-            values = defaultChannelValues.merging(existingEntry?.editableValues ?? [:], uniquingKeysWith: { _, new in new })
-            message = ""
-            if preferredAction == .approvePairing {
-                values["code"] = values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
+        .padding(20)
     }
 
     private var currentCapability: ChannelCapability? {
-        appState.channelConfig?.capabilities.first(where: { $0.id == channelId })
+        guard let channelId else { return nil }
+        return channelCapabilities.first(where: { $0.id == channelId })
     }
 
     private var activeSession: ChannelSession? {
-        appState.channelConfig?.activeSession
+        guard let channelId else { return nil }
+        guard let activeSession = appState.channelConfig?.activeSession, activeSession.channelId == channelId else {
+            return nil
+        }
+        return activeSession
     }
 
     private var defaultChannelValues: [String: String] {
@@ -2096,8 +4114,52 @@ private struct ChannelEntrySheet: View {
         ]
     }
 
+    private func configureInitialState() {
+        message = ""
+        if let existingEntry {
+            selectChannel(existingEntry.channelId, preserveValues: true)
+            values = seededValues(for: existingEntry.channelId, existingValues: existingEntry.editableValues)
+        } else {
+            channelId = nil
+            values = defaultChannelValues
+        }
+
+        if preferredAction == .approvePairing {
+            values["code"] = values["code", default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func seededValues(
+        for channelId: SupportedChannelId,
+        existingValues: [String: String]
+    ) -> [String: String] {
+        let capability = channelCapabilities.first(where: { $0.id == channelId })
+        var next = defaultChannelValues
+        next.merge(existingValues, uniquingKeysWith: { _, new in new })
+
+        for field in capability?.fieldDefs ?? [] where field.kind == "select" {
+            if (next[field.id] ?? "").isEmpty, let defaultValue = field.options?.first?.value {
+                next[field.id] = defaultValue
+            }
+        }
+
+        return next
+    }
+
+    private func selectChannel(_ nextChannelId: SupportedChannelId, preserveValues: Bool) {
+        channelId = nextChannelId
+        message = ""
+
+        if preserveValues, let existingEntry, existingEntry.channelId == nextChannelId {
+            values = seededValues(for: nextChannelId, existingValues: existingEntry.editableValues)
+            return
+        }
+
+        values = seededValues(for: nextChannelId, existingValues: [:])
+    }
+
     private func runAction(_ action: NativeConfigurationChannelSheetAction) async {
-        guard busyAction == nil else { return }
+        guard busyAction == nil, let channelId else { return }
 
         busyAction = action
         defer { busyAction = nil }
@@ -2116,11 +4178,23 @@ private struct ChannelEntrySheet: View {
             appState.channelConfig = response.channelConfig
             appState.applyBanner(response.message)
             message = response.message
-            await appState.refreshAll()
-            dismiss()
+
+            if shouldCloseNativeConfigurationChannelSheetAfterAction(
+                action: action,
+                channelId: channelId,
+                hasSession: response.session != nil
+            ) {
+                await appState.refreshAll()
+                dismiss()
+            }
         } catch {
             appState.presentErrorUnlessCancelled(error)
         }
+    }
+
+    private func openURLString(_ value: String) {
+        guard let url = URL(string: value) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 

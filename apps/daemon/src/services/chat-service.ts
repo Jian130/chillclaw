@@ -212,13 +212,24 @@ export class ChatService {
     }
 
     try {
-      const detail = await this.adapter.gateway.getChatThreadDetail({
+      const activeRun = this.activeRuns.get(thread.id);
+      let detail = await this.adapter.gateway.getChatThreadDetail({
         threadId: thread.id,
         agentId: thread.agentId,
         sessionKey: thread.sessionKey
       });
+      if (activeRun && this.shouldRetryGatewayDetail(detail.messages, activeRun)) {
+        const retried = await this.adapter.gateway.getChatThreadDetail({
+          threadId: thread.id,
+          agentId: thread.agentId,
+          sessionKey: thread.sessionKey
+        });
+        if (retried.messages.length >= detail.messages.length) {
+          detail = retried;
+        }
+      }
 
-      const hydratedDetail = this.hydrateGatewayDetail(thread, detail, this.activeRuns.get(thread.id));
+      const hydratedDetail = this.hydrateGatewayDetail(thread, detail, activeRun);
       this.cacheDetail(hydratedDetail);
       return hydratedDetail;
     } catch (error) {
@@ -973,6 +984,13 @@ export class ChatService {
     }
 
     return -1;
+  }
+
+  private shouldRetryGatewayDetail(messages: ChatMessage[], activeRun: ActiveChatRun): boolean {
+    return (
+      this.findMatchingHistoryUserMessageIndex(messages, activeRun) < 0 &&
+      messages.length <= activeRun.baselineMessageCount
+    );
   }
 
   private applyDetailOverride(detail: ChatThreadDetail): ChatThreadDetail {

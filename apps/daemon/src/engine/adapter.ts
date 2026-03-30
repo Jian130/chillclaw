@@ -223,6 +223,8 @@ export interface ConfigManager {
 export interface AIEmployeeManager {
   listAIMemberRuntimeCandidates(): Promise<AIMemberRuntimeCandidate[]>;
   saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }>;
+  getPrimaryAIMemberAgentId(): Promise<string | undefined>;
+  setPrimaryAIMemberAgent(agentId: string | undefined): Promise<{ requiresGatewayApply?: boolean }>;
   getAIMemberBindings(agentId: string): Promise<MemberBindingSummary[]>;
   bindAIMemberChannel(agentId: string, request: BindAIMemberChannelRequest): Promise<{
     bindings: MemberBindingSummary[];
@@ -232,7 +234,10 @@ export interface AIEmployeeManager {
     bindings: MemberBindingSummary[];
     requiresGatewayApply?: boolean;
   }>;
-  deleteAIMemberRuntime(agentId: string, request: DeleteAIMemberRequest): Promise<{ requiresGatewayApply?: boolean }>;
+  deleteAIMemberRuntime(agentId: string, request: DeleteAIMemberRequest): Promise<{
+    requiresGatewayApply?: boolean;
+    wasPrimary?: boolean;
+  }>;
 }
 
 export interface GatewayManager {
@@ -250,7 +255,7 @@ export interface GatewayManager {
   abortChatMessage(request: AbortChatRequest & { agentId: string; threadId: string; sessionKey: string }): Promise<void>;
   startWhatsappLogin(): Promise<{ message: string; channel: ChannelSetupState }>;
   approvePairing(
-    channelId: "telegram" | "whatsapp" | "feishu" | "wechat-work",
+    channelId: "telegram" | "whatsapp" | "feishu" | "wechat-work" | "wechat",
     request: PairingApprovalRequest
   ): Promise<{ message: string; channel: ChannelSetupState }>;
   prepareFeishu(): Promise<{ message: string; channel: ChannelSetupState }>;

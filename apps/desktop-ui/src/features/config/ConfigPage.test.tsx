@@ -20,6 +20,7 @@ import {
   providerConfiguredModels,
   providerIcon,
   runtimeConfiguredModels,
+  runtimeDerivedModelEntry,
   shouldCloseChannelDialogAfterAction,
   resolveModelEntryRole,
   validateModelEntryDraft
@@ -117,10 +118,10 @@ const wechatCapability: ChannelCapability = {
   description: "Personal WeChat login.",
   officialSupport: false,
   iconKey: "wechat",
-  fieldDefs: [],
-  supportsEdit: false,
-  supportsRemove: false,
-  supportsPairing: false,
+  fieldDefs: [{ id: "code", label: "Pairing code", required: false }],
+  supportsEdit: true,
+  supportsRemove: true,
+  supportsPairing: true,
   supportsLogin: true,
   guidedSetupKind: "wechat"
 };
@@ -222,6 +223,23 @@ describe("ConfigPage helpers", () => {
     expect(activeSavedModelEntries(savedEntries, runtimeModels).map((entry) => entry.id)).toEqual(["saved-anthropic"]);
   });
 
+  it("finds the synthetic runtime entry used for removing runtime-only models", () => {
+    const runtimeEntry = {
+      id: "runtime:openai-gpt-5",
+      label: "OpenAI GPT-5",
+      providerId: "openai",
+      modelKey: "openai/gpt-5",
+      agentId: "",
+      isDefault: true,
+      isFallback: false,
+      createdAt: "2026-03-18T00:00:00.000Z",
+      updatedAt: "2026-03-18T00:00:00.000Z"
+    };
+
+    expect(runtimeDerivedModelEntry([runtimeEntry], "openai/gpt-5")?.id).toBe("runtime:openai-gpt-5");
+    expect(runtimeDerivedModelEntry([runtimeEntry], "anthropic/claude-sonnet-4-6")).toBeUndefined();
+  });
+
   it("falls back to provider sample models when the runtime has none for that provider", () => {
     const anthropicProvider: ModelProviderConfig = {
       ...provider,
@@ -303,7 +321,7 @@ describe("ConfigPage helpers", () => {
       )
     ).toEqual({
       primaryAction: "continue-setup",
-      showApproveAction: false
+      showApproveAction: true
     });
   });
 

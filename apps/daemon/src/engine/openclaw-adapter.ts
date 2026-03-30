@@ -73,7 +73,7 @@ import { appendGatewayApplyMessage, summarizePendingGatewayApply } from "./openc
 import { type CommandResult, probeCommand as probeExternalCommand, resolveCommandFromPath as resolveCommandFromShellPath, runCommand as runExternalCommand } from "../platform/cli-runner.js";
 import { createDefaultSecretsAdapter } from "../platform/macos-keychain-secrets-adapter.js";
 import { OpenClawGatewaySocketAdapter, normalizeGatewaySocketUrl, readGatewayChatText } from "../platform/openclaw-gateway-socket-adapter.js";
-import type { SecretsAdapter } from "../platform/secrets-adapter.js";
+import { modelAuthSecretName, type SecretsAdapter } from "../platform/secrets-adapter.js";
 import {
   managedPluginConfigKeys,
   managedPluginDefinitionById,
@@ -388,7 +388,7 @@ interface OpenClawAgentListEntry {
 export function isVisibleAIMemberAgentId(agentId: string | undefined): boolean {
   const trimmed = agentId?.trim();
 
-  return Boolean(trimmed);
+  return Boolean(trimmed && trimmed !== OPENCLAW_MAIN_AGENT_ID && !isManagedModelAgentId(trimmed));
 }
 
 function isManagedModelAgentId(agentId: string | undefined): boolean {
@@ -396,13 +396,26 @@ function isManagedModelAgentId(agentId: string | undefined): boolean {
   return Boolean(trimmed && trimmed.startsWith("slackclaw-model-"));
 }
 
+function isImplicitMainAgentId(agentId: string | undefined): boolean {
+  return agentId?.trim() === OPENCLAW_MAIN_AGENT_ID;
+}
+
 interface OpenClawAgentBindingJsonEntry {
+  agentId?: string;
   id?: string;
   bind?: string;
   target?: string;
   channel?: string;
   account?: string;
+  accountId?: string;
   route?: string;
+  description?: string;
+  match?: {
+    channel?: string;
+    account?: string;
+    accountId?: string;
+    route?: string;
+  };
 }
 
 interface OpenClawAdapterState {
@@ -1648,6 +1661,10 @@ function sessionRunningMessage(channelId: "whatsapp" | "wechat"): string {
 }
 
 function sessionCompletedMessage(channelId: "whatsapp" | "wechat"): string {
+  if (channelId === "wechat") {
+    return "WeChat login finished. ChillClaw saved this channel and will finish gateway activation after onboarding.";
+  }
+
   return `${sessionTitle(channelId)} login completed.`;
 }
 
@@ -1663,8 +1680,12 @@ function sessionAwaitingMessage(session: LoginSessionState): string {
   return session.inputPrompt ? "WeChat login is waiting for follow-up input." : "WeChat login is waiting for QR confirmation.";
 }
 
-function activeChannelSession(): ChannelSession | undefined {
+function activeChannelSession(options?: { includeCompleted?: boolean }): ChannelSession | undefined {
   if (!activeChannelLoginSession) {
+    return undefined;
+  }
+
+  if (activeChannelLoginSession.status === "completed" && options?.includeCompleted !== true) {
     return undefined;
   }
 
@@ -1712,6 +1733,45 @@ function runtimeChannelKeys(channelId: SupportedChannelId): string[] {
     default:
       return [channelId];
   }
+}
+
+function supportedBindingChannelId(prefix: string): SupportedChannelId | undefined {
+  if (prefix === "telegram" || prefix === "whatsapp" || prefix === "feishu" || prefix === "wechat-work" || prefix === "wechat") {
+    return prefix;
+  }
+
+  return normalizeRuntimeChannelId(prefix);
+}
+
+function toRuntimeBindingTarget(binding: string): string {
+  const trimmed = binding.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const [prefix, ...rest] = trimmed.split(":");
+  const channelId = supportedBindingChannelId(prefix);
+  if (!channelId) {
+    return trimmed;
+  }
+
+  const runtimeChannelId = runtimeChannelKeys(channelId)[0] ?? prefix;
+  return [runtimeChannelId, ...rest].join(":");
+}
+
+function normalizeRuntimeBindingTarget(target: string): string {
+  const trimmed = target.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const [prefix, ...rest] = trimmed.split(":");
+  const channelId = normalizeRuntimeChannelId(prefix);
+  if (!channelId) {
+    return trimmed;
+  }
+
+  return [channelId, ...rest].join(":");
 }
 
 function normalizeRuntimeChannelId(channelId: string): SupportedChannelId | undefined {
@@ -2884,6 +2944,24 @@ function commandFailureText(result: CommandResult): string {
   return [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
 }
 
+function stripIgnorableOpenClawWarningLines(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.toLowerCase().includes("plugins.allow is empty"))
+    .join("\n")
+    .trim();
+}
+
+function hasOnlyIgnorableOpenClawWarnings(result: CommandResult): boolean {
+  const failureText = commandFailureText(result);
+  if (!failureText) {
+    return false;
+  }
+
+  return stripIgnorableOpenClawWarningLines(failureText).length === 0;
+}
+
 function classifyCommandDriftFailure(result: CommandResult, patterns: string[] = []): CommandFallbackDecision {
   const text = commandFailureText(result).toLowerCase();
 
@@ -3211,7 +3289,13 @@ async function readModelSnapshot(options?: { fresh?: boolean }): Promise<ModelRe
       ]);
       const activeConfig = await readOpenClawConfigFile(status?.configPath);
       const configuredAuthProviders = await readConfiguredAuthProviders(status);
-      const supplemental = collectSupplementalModelRefs(status, activeConfig);
+      const rawSupplemental = collectSupplementalModelRefs(status, activeConfig);
+      const supplemental = {
+        refs: new Set(
+          [...rawSupplemental.refs].map((ref) => resolveCatalogModelKey(allModels, ref) ?? ref)
+        ),
+        defaultModel: resolveCatalogModelKey(allModels, rawSupplemental.defaultModel) ?? rawSupplemental.defaultModel
+      };
 
       return {
         allModels,
@@ -3446,6 +3530,94 @@ function providerDefinitionByModelKey(modelKey: string): InternalModelProviderCo
   );
 }
 
+function normalizeModelLookupKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function modelKeysMatch(left: string | undefined, right: string | undefined): boolean {
+  if (!left?.trim() || !right?.trim()) {
+    return false;
+  }
+
+  if (left === right) {
+    return true;
+  }
+
+  const leftName = left.includes("/") ? left.slice(left.indexOf("/") + 1) : left;
+  const rightName = right.includes("/") ? right.slice(right.indexOf("/") + 1) : right;
+  return normalizeModelLookupKey(leftName) === normalizeModelLookupKey(rightName);
+}
+
+function resolveLegacyCatalogModelReplacement(
+  models: ModelCatalogEntry[],
+  provider: InternalModelProviderConfig | undefined,
+  normalizedName: string
+): string | undefined {
+  if (provider?.id === "minimax" && normalizedName === normalizeModelLookupKey("MiniMax-M2.5")) {
+    const replacement = models.find((model) => model.key.toLowerCase() === "minimax/minimax-m2.7".toLowerCase());
+    return replacement?.key;
+  }
+
+  return undefined;
+}
+
+function matchesProviderModelRef(modelKey: string, provider?: InternalModelProviderConfig): boolean {
+  if (!provider) {
+    return true;
+  }
+
+  return provider.providerRefs.some((prefix) => modelKey.startsWith(prefix));
+}
+
+export function resolveCatalogModelKey(
+  models: ModelCatalogEntry[],
+  raw: string | null | undefined,
+  options?: { providerId?: string }
+): string | undefined {
+  const trimmed = raw?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const direct = models.find((model) => model.key === trimmed);
+  if (direct) {
+    return direct.key;
+  }
+
+  const lower = trimmed.toLowerCase();
+  const caseInsensitive = models.find((model) => model.key.toLowerCase() === lower);
+  if (caseInsensitive) {
+    return caseInsensitive.key;
+  }
+
+  const provider =
+    (options?.providerId ? providerDefinitionById(options.providerId) : undefined) ??
+    providerDefinitionByModelKey(trimmed);
+  const providerScopedModels = models.filter((model) => matchesProviderModelRef(model.key, provider));
+  const rawName = trimmed.includes("/") ? trimmed.slice(trimmed.indexOf("/") + 1) : trimmed;
+  const normalizedName = normalizeModelLookupKey(rawName);
+  const legacyReplacement = resolveLegacyCatalogModelReplacement(models, provider, normalizedName);
+
+  if (legacyReplacement) {
+    return legacyReplacement;
+  }
+
+  const fuzzyMatches = providerScopedModels.filter((model) => {
+    const modelName = model.key.includes("/") ? model.key.slice(model.key.indexOf("/") + 1) : model.key;
+    return (
+      normalizeModelLookupKey(modelName) === normalizedName ||
+      normalizeModelLookupKey(model.name) === normalizedName
+    );
+  });
+
+  if (fuzzyMatches.length === 1) {
+    return fuzzyMatches[0]?.key;
+  }
+
+  return undefined;
+}
+
 function authModeLabelForCredentialType(type: unknown): string | undefined {
   if (type === "oauth") {
     return "OAuth";
@@ -3488,6 +3660,10 @@ function authModeLabelForMethodKind(kind: ModelAuthMethod["kind"] | undefined): 
 
 function runtimeEntryIdForModelKey(modelKey: string): string {
   return `runtime:${modelKey.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase()}`;
+}
+
+function isRuntimeDerivedModelEntryId(entryId: string): boolean {
+  return entryId.startsWith("runtime:");
 }
 
 function runtimeEntryLabel(model: ModelCatalogEntry): string {
@@ -3540,6 +3716,99 @@ function orderedRuntimeModels(configuredModels: ModelCatalogEntry[], defaultMode
   return [...ordered, ...remaining];
 }
 
+function configuredModelChain(
+  config: OpenClawConfigFileJson,
+  status?: Pick<OpenClawModelStatusJson, "aliases">
+): { primary?: string; fallbacks: string[] } {
+  const raw = config.agents?.defaults?.model;
+  const aliases = status?.aliases ?? {};
+
+  if (typeof raw === "string") {
+    return {
+      primary: resolveModelRef(raw, undefined, aliases) ?? raw,
+      fallbacks: []
+    };
+  }
+
+  if (!raw || typeof raw !== "object") {
+    return { primary: undefined, fallbacks: [] };
+  }
+
+  return {
+    primary: resolveModelRef(raw.primary, undefined, aliases) ?? raw.primary,
+    fallbacks: (raw.fallbacks ?? [])
+      .map((value) => resolveModelRef(value, undefined, aliases) ?? value)
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+  };
+}
+
+export function removeRuntimeDerivedModelFromConfig(
+  config: OpenClawConfigFileJson,
+  status: Pick<OpenClawModelStatusJson, "aliases"> | undefined,
+  modelKey: string
+): {
+  changed: boolean;
+  remainingModelKeys: string[];
+  removedDefault: boolean;
+} {
+  const aliases = status?.aliases ?? {};
+  const defaults = config.agents?.defaults;
+  const existingModels = defaults?.models ?? {};
+  const nextModels = Object.fromEntries(
+    Object.entries(existingModels).filter(([key]) => (resolveModelRef(key, undefined, aliases) ?? key) !== modelKey)
+  );
+  const existingChain = configuredModelChain(config, status);
+  const removedDefault = existingChain.primary === modelKey;
+  const nextPrimary =
+    existingChain.primary === modelKey ? existingChain.fallbacks[0] : existingChain.primary;
+  const nextFallbacks = existingChain.fallbacks.filter((item, index) => item !== modelKey && !(removedDefault && index === 0));
+  const changed =
+    Object.keys(nextModels).length !== Object.keys(existingModels).length ||
+    removedDefault ||
+    existingChain.fallbacks.some((item) => item === modelKey);
+
+  if (!changed) {
+    return {
+      changed: false,
+      remainingModelKeys: Object.keys(existingModels),
+      removedDefault: false
+    };
+  }
+
+  config.agents = config.agents ?? {};
+  const nextDefaults: NonNullable<NonNullable<OpenClawConfigFileJson["agents"]>["defaults"]> = {
+    ...(defaults ?? {}),
+    models: nextModels
+  };
+
+  if (nextPrimary) {
+    nextDefaults.model = {
+      primary: nextPrimary,
+      fallbacks: nextFallbacks
+    };
+  } else {
+    delete nextDefaults.model;
+  }
+
+  if (Object.keys(nextModels).length === 0) {
+    delete nextDefaults.models;
+  }
+
+  if (Object.keys(nextDefaults).length === 0) {
+    if (config.agents) {
+      delete config.agents.defaults;
+    }
+  } else {
+    config.agents.defaults = nextDefaults;
+  }
+
+  return {
+    changed: true,
+    remainingModelKeys: Object.keys(nextModels),
+    removedDefault
+  };
+}
+
 function buildRuntimeDerivedEntry(model: ModelCatalogEntry, now: string): SavedModelEntryState {
   const provider = providerDefinitionByModelKey(model.key);
   return {
@@ -3561,6 +3830,30 @@ function buildRuntimeDerivedEntry(model: ModelCatalogEntry, now: string): SavedM
   };
 }
 
+function normalizeImplicitMainSavedEntry(
+  entry: SavedModelEntryState,
+  configuredModels: ModelCatalogEntry[],
+  now: string
+): SavedModelEntryState {
+  if (!isImplicitMainAgentId(entry.agentId)) {
+    return entry;
+  }
+
+  const resolvedModelKey =
+    resolveCatalogModelKey(configuredModels, entry.modelKey, { providerId: entry.providerId }) ?? entry.modelKey;
+
+  return {
+    ...entry,
+    id: runtimeEntryIdForModelKey(resolvedModelKey),
+    modelKey: resolvedModelKey,
+    agentId: "",
+    agentDir: "",
+    workspaceDir: "",
+    profileIds: [],
+    updatedAt: now
+  };
+}
+
 export function reconcileSavedEntriesWithRuntime(
   entries: SavedModelEntryState[],
   configuredModels: ModelCatalogEntry[],
@@ -3571,14 +3864,26 @@ export function reconcileSavedEntriesWithRuntime(
   fallbackEntryIds: string[];
 } {
   const now = new Date().toISOString();
-  const orderedConfiguredModels = orderedRuntimeModels(configuredModels, defaultModel);
+  const resolvedDefaultModel = resolveCatalogModelKey(configuredModels, defaultModel) ?? defaultModel;
+  const orderedConfiguredModels = orderedRuntimeModels(configuredModels, resolvedDefaultModel);
   const entriesByModelKey = new Map<string, SavedModelEntryState[]>();
   const usedEntryIds = new Set<string>();
 
-  for (const entry of entries) {
-    const existing = entriesByModelKey.get(entry.modelKey) ?? [];
-    existing.push(entry);
-    entriesByModelKey.set(entry.modelKey, existing);
+  for (const rawEntry of entries) {
+    const entry = normalizeImplicitMainSavedEntry(rawEntry, configuredModels, now);
+    const resolvedModelKey =
+      resolveCatalogModelKey(configuredModels, entry.modelKey, { providerId: entry.providerId }) ?? entry.modelKey;
+    const existing = entriesByModelKey.get(resolvedModelKey) ?? [];
+    existing.push(
+      resolvedModelKey === entry.modelKey
+        ? entry
+        : {
+            ...entry,
+            modelKey: resolvedModelKey,
+            updatedAt: now
+          }
+    );
+    entriesByModelKey.set(resolvedModelKey, existing);
   }
 
   const activeEntries: SavedModelEntryState[] = orderedConfiguredModels.map((model, index) => {
@@ -3676,16 +3981,31 @@ function authModeForCredentialType(type: unknown): "api_key" | "token" | "oauth"
   return "oauth";
 }
 
+function matchingProfileIdsForProvider(
+  store: OpenClawAuthProfileStoreJson,
+  provider: InternalModelProviderConfig | undefined
+): string[] {
+  return Object.entries(store.profiles ?? {})
+    .filter(([, profile]) =>
+      provider ? providerMatchesAuthProvider(provider, String(profile.provider ?? "")) : true
+    )
+    .map(([profileId]) => profileId);
+}
+
 function normalizeBindingTarget(entry: string | OpenClawAgentBindingJsonEntry): MemberBindingSummary | undefined {
   if (typeof entry === "string") {
     const trimmed = entry.trim();
-    return trimmed ? { id: trimmed, target: trimmed } : undefined;
+    const normalized = normalizeRuntimeBindingTarget(trimmed);
+    return normalized ? { id: normalized, target: normalized } : undefined;
   }
 
+  const matchAccount = entry.match?.accountId?.trim() || entry.match?.account?.trim();
   const target =
     entry.target?.trim() ||
     entry.bind?.trim() ||
-    [entry.channel?.trim(), entry.account?.trim()].filter(Boolean).join(":") ||
+    [entry.channel?.trim(), entry.accountId?.trim() || entry.account?.trim()].filter(Boolean).join(":") ||
+    [entry.match?.channel?.trim(), matchAccount].filter(Boolean).join(":") ||
+    entry.match?.route?.trim() ||
     entry.route?.trim();
 
   if (!target) {
@@ -3693,9 +4013,31 @@ function normalizeBindingTarget(entry: string | OpenClawAgentBindingJsonEntry): 
   }
 
   return {
-    id: entry.id?.trim() || target,
-    target
+    id: normalizeRuntimeBindingTarget(entry.id?.trim() || target),
+    target: normalizeRuntimeBindingTarget(target)
   };
+}
+
+function pruneExplicitMainAgentEntry(config: OpenClawConfigFileJson): boolean {
+  const existingList = config.agents?.list ?? [];
+  const nextList = existingList.filter((entry) => entry.id !== OPENCLAW_MAIN_AGENT_ID);
+
+  if (nextList.length === existingList.length) {
+    return false;
+  }
+
+  config.agents = config.agents ?? {};
+  if (nextList.length > 0) {
+    config.agents.list = nextList;
+  } else if (config.agents) {
+    delete config.agents.list;
+  }
+
+  return true;
+}
+
+function preferredConfiguredPrimaryAgentId(config: OpenClawConfigFileJson): string | undefined {
+  return (config.agents?.list ?? []).find((entry) => entry.default === true && isVisibleAIMemberAgentId(entry.id))?.id;
 }
 
 function toSavedModelEntry(entry: SavedModelEntryState): SavedModelEntry {
@@ -3777,12 +4119,14 @@ function mergeModelCatalogEntries(
   options?: { available?: boolean; defaultModel?: string }
 ): ModelCatalogEntry[] {
   const byKey = new Map(existing.map((entry) => [entry.key, { ...entry }]));
+  const resolvedDefaultModel = resolveCatalogModelKey(existing, options?.defaultModel) ?? options?.defaultModel;
 
-  for (const ref of refs) {
+  for (const rawRef of refs) {
+    const ref = resolveCatalogModelKey(existing, rawRef) ?? rawRef;
     const current = byKey.get(ref);
     const tags = new Set(current?.tags ?? []);
 
-    if (options?.defaultModel === ref) {
+    if (resolvedDefaultModel === ref) {
       tags.add("default");
     }
 
@@ -3966,6 +4310,32 @@ function deriveLiveChannelState(
           : linked
             ? "WhatsApp is linked. If it is not fully connected yet, restart the gateway or refresh status."
             : "WhatsApp setup is in progress. Finish pairing to bring the account online."
+    });
+  }
+
+  if (channelId === "wechat") {
+    const account = accounts[0];
+    const linked = account?.linked ?? channel?.linked ?? false;
+    const connected = account?.connected ?? channel?.connected ?? false;
+    const lastError = account?.lastError ?? channel?.lastError ?? undefined;
+    const pairingRequired = /pairing required/i.test(lastError ?? "");
+
+    return createChannelState("wechat", {
+      status: connected ? "completed" : "awaiting-pairing",
+      summary: connected
+        ? "WeChat is configured in OpenClaw."
+        : pairingRequired
+          ? "WeChat is waiting for pairing approval."
+          : linked
+            ? "WeChat is linked but still finishing setup."
+            : "WeChat login is staged and waiting for pairing.",
+      detail: connected
+        ? "SlackClaw detected an existing configuration from the installed OpenClaw runtime."
+        : lastError
+          ? `WeChat is configured, but OpenClaw reported: ${lastError}`
+          : linked
+            ? "WeChat login finished staging, but the runtime is not connected yet. Complete pairing before using chat."
+            : "Complete the remaining WeChat pairing steps before using chat."
     });
   }
 
@@ -4235,6 +4605,8 @@ export class OpenClawAdapter implements EngineAdapter {
     this.aiEmployees = new OpenClawAIEmployeeManager({
       listAIMemberRuntimeCandidates: () => this.listAIMemberRuntimeCandidates(),
       saveAIMemberRuntime: (request) => this.saveAIMemberRuntime(request),
+      getPrimaryAIMemberAgentId: () => this.getPrimaryAIMemberAgentId(),
+      setPrimaryAIMemberAgent: (agentId) => this.setPrimaryAIMemberAgent(agentId),
       getAIMemberBindings: (agentId) => this.getAIMemberBindings(agentId),
       bindAIMemberChannel: (agentId, request) => this.bindAIMemberChannel(agentId, request),
       unbindAIMemberChannel: (agentId, request) => this.unbindAIMemberChannel(agentId, request),
@@ -4679,6 +5051,15 @@ export class OpenClawAdapter implements EngineAdapter {
   private async ensureSavedModelState(): Promise<OpenClawAdapterState> {
     const state = this.normalizeStateFlags(await readAdapterState());
     if ((state.modelEntries?.length ?? 0) > 0) {
+      if ((state.modelEntries ?? []).some((entry) => isImplicitMainAgentId(entry.agentId))) {
+        const snapshot = await readModelSnapshot();
+        const completeConfiguredModels = mergeModelCatalogEntries(snapshot.configuredModels, snapshot.supplemental.refs, {
+          available: true,
+          defaultModel: snapshot.supplemental.defaultModel
+        });
+        return this.reconcileSavedModelState(state, completeConfiguredModels, snapshot.supplemental.defaultModel);
+      }
+
       return state;
     }
 
@@ -4708,6 +5089,20 @@ export class OpenClawAdapter implements EngineAdapter {
     return nextState;
   }
 
+  private async readResolvedSavedModelState(): Promise<OpenClawAdapterState> {
+    const snapshot = await readModelSnapshot();
+    const completeConfiguredModels = mergeModelCatalogEntries(snapshot.configuredModels, snapshot.supplemental.refs, {
+      available: true,
+      defaultModel: snapshot.supplemental.defaultModel
+    });
+
+    return this.reconcileSavedModelState(
+      await this.ensureSavedModelState(),
+      completeConfiguredModels,
+      snapshot.supplemental.defaultModel
+    );
+  }
+
   private async seedSavedModelEntriesFromCurrentConfig(state: OpenClawAdapterState): Promise<OpenClawAdapterState> {
     const snapshot = await this.readOpenClawConfigSnapshot();
     const modelKey =
@@ -4726,36 +5121,32 @@ export class OpenClawAdapter implements EngineAdapter {
 
     const provider = providerDefinitionByModelKey(modelKey);
     const createdAt = new Date().toISOString();
-    const agentId = OPENCLAW_MAIN_AGENT_ID;
     const agentDir = snapshot.status?.agentDir ?? getMainOpenClawAgentDir();
-    const workspaceDir =
-      snapshot.config.agents?.defaults?.workspace && typeof snapshot.config.agents.defaults.workspace === "string"
-        ? snapshot.config.agents.defaults.workspace
-        : resolve(process.env.HOME ?? "", ".openclaw", "workspace");
     const summary = await this.readEntryAuthSummary(agentDir, provider?.id);
+    const runtimeEntryId = runtimeEntryIdForModelKey(modelKey);
 
     return {
       ...state,
       modelEntries: [
         {
-          id: "slackclaw-main",
+          id: runtimeEntryId,
           label: this.buildEntryLabel(undefined, provider?.id ?? modelRefProvider(modelKey) ?? "custom", modelKey),
           providerId: provider?.id ?? modelRefProvider(modelKey) ?? "custom",
           modelKey,
-          agentId,
-          agentDir,
-          workspaceDir,
+          agentId: "",
+          agentDir: "",
+          workspaceDir: "",
           authMethodId: undefined,
           authModeLabel: summary.authModeLabel,
           profileLabel: summary.profileLabel,
-          profileIds: summary.profileIds,
+          profileIds: [],
           isDefault: true,
           isFallback: false,
           createdAt,
           updatedAt: createdAt
         }
       ],
-      defaultModelEntryId: "slackclaw-main",
+      defaultModelEntryId: runtimeEntryId,
       fallbackModelEntryIds: []
     };
   }
@@ -4782,6 +5173,74 @@ export class OpenClawAdapter implements EngineAdapter {
         bindingCount: typeof agent.bindings === "number" ? agent.bindings : 0,
         bindings: []
       }));
+  }
+
+  async getPrimaryAIMemberAgentId(): Promise<string | undefined> {
+    const snapshot = await this.readOpenClawConfigSnapshot();
+    return preferredConfiguredPrimaryAgentId(snapshot.config);
+  }
+
+  async setPrimaryAIMemberAgent(agentId: string | undefined): Promise<{ requiresGatewayApply?: boolean }> {
+    const normalizedAgentId = agentId?.trim() || undefined;
+    const snapshot = await this.readOpenClawConfigSnapshot();
+    const existingList = snapshot.config.agents?.list ?? [];
+    let nextList = existingList.filter((entry) => entry.id !== OPENCLAW_MAIN_AGENT_ID);
+    let changed = nextList.length !== existingList.length;
+
+    if (normalizedAgentId) {
+      const existingIndex = nextList.findIndex((entry) => entry.id === normalizedAgentId);
+
+      if (existingIndex < 0) {
+        const runtimeEntry = (await this.listOpenClawAgents()).find((entry) => entry.id === normalizedAgentId);
+        if (!runtimeEntry) {
+          throw new Error(`SlackClaw could not find the AI member agent ${normalizedAgentId}.`);
+        }
+
+        nextList.push({
+          id: normalizedAgentId,
+          ...(runtimeEntry.identityName?.trim() || runtimeEntry.name?.trim()
+            ? { name: runtimeEntry.identityName?.trim() || runtimeEntry.name?.trim() }
+            : {}),
+          ...(runtimeEntry.workspace?.trim() ? { workspace: runtimeEntry.workspace.trim() } : {}),
+          ...(runtimeEntry.agentDir?.trim() ? { agentDir: runtimeEntry.agentDir.trim() } : {}),
+          ...(runtimeEntry.model ? { model: runtimeEntry.model } : {})
+        });
+        changed = true;
+      }
+    }
+
+    nextList = nextList.map((entry) => {
+      const shouldBeDefault = Boolean(normalizedAgentId && entry.id === normalizedAgentId);
+      const nextEntry = { ...entry };
+
+      if (shouldBeDefault) {
+        nextEntry.default = true;
+      } else if ("default" in nextEntry) {
+        delete nextEntry.default;
+      }
+
+      if ((entry.default === true) !== shouldBeDefault) {
+        changed = true;
+      }
+
+      return nextEntry;
+    });
+
+    if (!changed) {
+      return { requiresGatewayApply: false };
+    }
+
+    snapshot.config.agents = snapshot.config.agents ?? {};
+    if (nextList.length > 0) {
+      snapshot.config.agents.list = nextList;
+    } else if (snapshot.config.agents) {
+      delete snapshot.config.agents.list;
+    }
+
+    await this.writeOpenClawConfigSnapshot(snapshot.configPath, snapshot.config);
+    await this.markGatewayApplyPending();
+
+    return { requiresGatewayApply: true };
   }
 
   private async ensureMemberAgent(
@@ -4845,14 +5304,143 @@ export class OpenClawAdapter implements EngineAdapter {
     );
   }
 
+  private async rehydrateMemberAuthFromSavedSecrets(
+    agentId: string,
+    agentDir: string,
+    providerId: string,
+    methodId: string
+  ): Promise<OpenClawAuthProfileStoreJson | undefined> {
+    const provider = providerDefinitionById(providerId);
+    const method = provider?.authMethods.find((item) => item.id === methodId);
+
+    if (!provider || !method || !canUseTokenPasteAuth(method)) {
+      return undefined;
+    }
+
+    const tokenField = method.fields[0];
+    const token = tokenField ? await this.secrets.get(modelAuthSecretName(providerId, methodId, tokenField.id)) : undefined;
+
+    if (!token?.trim()) {
+      return undefined;
+    }
+
+    const authProvider = resolveTokenAuthProvider(provider, method);
+    const profileId = method.tokenProfileId ?? `${authProvider}:slackclaw-${agentId}`;
+    const result = await runOpenClaw(
+      buildModelsCommandArgs(
+        [
+          "auth",
+          "paste-token",
+          "--provider",
+          authProvider,
+          "--profile-id",
+          profileId
+        ],
+        agentId
+      ),
+      {
+        allowFailure: true,
+        input: `${token.trim()}\n`
+      }
+    );
+
+    if (result.code !== 0) {
+      throw new Error(
+        result.stderr ||
+          result.stdout ||
+          `SlackClaw could not restore saved ${provider.label} credentials for ${agentId}.`
+      );
+    }
+
+    const restoredStore = await readAuthStore(agentDir);
+    if (matchingProfileIdsForProvider(restoredStore, provider).length > 0) {
+      return restoredStore;
+    }
+
+    // Some OpenClaw builds accept the pasted token but do not materialize a profile
+    // inside the managed member agent directory. Create the minimal per-agent store
+    // ourselves so the new member can use the saved credential immediately.
+    const nextStore: OpenClawAuthProfileStoreJson = {
+      version: restoredStore.version ?? 1,
+      profiles: {
+        ...(restoredStore.profiles ?? {}),
+        [profileId]: {
+          ...(restoredStore.profiles?.[profileId] ?? {}),
+          provider: authProvider,
+          type: "api_key",
+          key: token.trim(),
+          label: method.label || `${provider.label} API Key`
+        }
+      },
+      usageStats: restoredStore.usageStats ?? {},
+      order: {
+        ...(restoredStore.order ?? {}),
+        [authProvider]: Array.from(new Set([profileId, ...(restoredStore.order?.[authProvider] ?? [])]))
+      },
+      lastGood: {
+        ...(restoredStore.lastGood ?? {}),
+        [authProvider]: profileId
+      }
+    };
+
+    await writeAuthStore(agentDir, nextStore);
+    return nextStore;
+  }
+
+  private async hasReusableAuthForSavedModelEntry(
+    entry: SavedModelEntryState | undefined,
+    providerId: string,
+    method: InternalModelAuthMethod
+  ): Promise<boolean> {
+    if (!entry) {
+      return false;
+    }
+
+    const provider = providerDefinitionById(providerId);
+    const snapshot = await this.readOpenClawConfigSnapshot();
+    const sourceAuthDir = entry.agentDir || snapshot.status?.agentDir || getMainOpenClawAgentDir();
+    const sourceStore = sourceAuthDir ? await readAuthStore(sourceAuthDir) : undefined;
+    const matchingProfiles =
+      entry.profileIds.length > 0
+        ? entry.profileIds.filter((profileId) => Boolean(sourceStore?.profiles?.[profileId]))
+        : matchingProfileIdsForProvider(
+            sourceStore ?? {
+              version: 1,
+              profiles: {},
+              usageStats: {},
+              order: {},
+              lastGood: {}
+            },
+            provider
+          );
+
+    if (matchingProfiles.length > 0) {
+      return true;
+    }
+
+    const secretFields = method.fields.filter((field) => field.secret === true);
+    for (const field of secretFields) {
+      const value = await this.secrets.get(modelAuthSecretName(providerId, method.id, field.id));
+      if (value?.trim()) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private async syncMemberBrain(
     request: AIMemberRuntimeRequest,
     agentId: string,
     agentDir: string,
     workspaceDir: string
   ): Promise<void> {
-    const modelState = await this.ensureSavedModelState();
-    const sourceEntry = modelState.modelEntries?.find((entry) => entry.id === request.brain.entryId);
+    const modelState = await this.readResolvedSavedModelState();
+    const sourceEntry =
+      modelState.modelEntries?.find((entry) => entry.id === request.brain.entryId) ??
+      modelState.modelEntries?.find(
+        (entry) => entry.providerId === request.brain.providerId && modelKeysMatch(entry.modelKey, request.brain.modelKey)
+      );
 
     if (!sourceEntry) {
       throw new Error("Saved model entry for this AI member was not found.");
@@ -4869,19 +5457,57 @@ export class OpenClawAdapter implements EngineAdapter {
         agentDir,
         workspaceDir
       },
-      request.brain.modelKey
+      {
+        primary: request.brain.modelKey,
+        fallbacks: []
+      }
     );
 
     const sourceAuthDir = sourceEntry.agentDir || snapshot.status?.agentDir || getMainOpenClawAgentDir();
-    const sourceStore = sourceAuthDir ? await readAuthStore(sourceAuthDir) : undefined;
-    if (!sourceStore?.profiles || Object.keys(sourceStore.profiles).length === 0) {
-      return;
+    const provider = providerDefinitionById(sourceEntry.providerId);
+    let sourceStore = sourceAuthDir ? await readAuthStore(sourceAuthDir) : undefined;
+    let profileIdsToCopy =
+      sourceEntry.profileIds.length > 0
+        ? sourceEntry.profileIds.filter((profileId) => Boolean(sourceStore?.profiles?.[profileId]))
+        : matchingProfileIdsForProvider(
+            sourceStore ?? {
+              version: 1,
+              profiles: {},
+              usageStats: {},
+              order: {},
+              lastGood: {}
+            },
+            provider
+          );
+
+    if (profileIdsToCopy.length === 0 && sourceEntry.authMethodId) {
+      sourceStore = await this.rehydrateMemberAuthFromSavedSecrets(
+        agentId,
+        agentDir,
+        sourceEntry.providerId,
+        sourceEntry.authMethodId
+      );
+      profileIdsToCopy = matchingProfileIdsForProvider(
+        sourceStore ?? {
+          version: 1,
+          profiles: {},
+          usageStats: {},
+          order: {},
+          lastGood: {}
+        },
+        provider
+      );
     }
 
-    const profileIdsToCopy =
-      sourceEntry.profileIds.length > 0
-        ? sourceEntry.profileIds.filter((profileId) => Boolean(sourceStore.profiles?.[profileId]))
-        : Object.keys(sourceStore.profiles ?? {});
+    if (!sourceStore?.profiles || Object.keys(sourceStore.profiles).length === 0 || profileIdsToCopy.length === 0) {
+      if (sourceEntry.authMethodId) {
+        throw new Error(
+          `SlackClaw could not find saved ${sourceEntry.providerId} credentials for ${request.name}. Re-save that model in Configuration first.`
+        );
+      }
+
+      return;
+    }
     const nextProfiles = Object.fromEntries(
       profileIdsToCopy.map((profileId) => [profileId, sourceStore.profiles?.[profileId]]).filter((entry): entry is [string, NonNullable<OpenClawAuthProfileStoreJson["profiles"]>[string]] => Boolean(entry[1]))
     );
@@ -4938,6 +5564,63 @@ export class OpenClawAdapter implements EngineAdapter {
           .filter((entry): entry is MemberBindingSummary => Boolean(entry));
       }
     );
+  }
+
+  private async readBindingOwnerAgentIds(binding: string, excludeAgentId?: string): Promise<string[]> {
+    const agents = await this.listOpenClawAgents();
+    const owners: string[] = [];
+
+    for (const agent of agents) {
+      const candidateAgentId = agent.id?.trim();
+      if (!candidateAgentId || candidateAgentId === excludeAgentId) {
+        continue;
+      }
+
+      const bindings = await this.readMemberBindings(candidateAgentId);
+      if (bindings.some((entry) => entry.target === binding)) {
+        owners.push(candidateAgentId);
+      }
+    }
+
+    return owners;
+  }
+
+  private async bindMemberChannelExclusively(
+    agentId: string,
+    binding: string
+  ): Promise<{ bindings: MemberBindingSummary[]; requiresGatewayApply?: boolean }> {
+    const ownerAgentIds = await this.readBindingOwnerAgentIds(binding, agentId);
+    const runtimeBinding = toRuntimeBindingTarget(binding);
+
+    for (const ownerAgentId of ownerAgentIds) {
+      const result = await runOpenClaw(["agents", "unbind", "--agent", ownerAgentId, "--bind", runtimeBinding, "--json"], { allowFailure: true });
+      if (result.code !== 0) {
+        throw new Error(result.stderr || result.stdout || `SlackClaw could not unbind ${binding} from ${ownerAgentId}.`);
+      }
+    }
+
+    const result = await runOpenClaw(["agents", "bind", "--agent", agentId, "--bind", runtimeBinding, "--json"], { allowFailure: true });
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `SlackClaw could not bind ${binding} to ${agentId}.`);
+    }
+
+    invalidateReadCache(...ownerAgentIds.map((ownerAgentId) => `agents:bindings:${ownerAgentId}`), `agents:bindings:${agentId}`);
+    const bindings = await this.readMemberBindings(agentId);
+
+    if (!bindings.some((entry) => entry.target === binding)) {
+      throw new Error(`SlackClaw could not verify that ${binding} is owned by ${agentId}.`);
+    }
+
+    const lingeringOwners = await this.readBindingOwnerAgentIds(binding, agentId);
+    if (lingeringOwners.length > 0) {
+      throw new Error(`SlackClaw could not clear ${binding} from ${lingeringOwners.join(", ")}.`);
+    }
+
+    await this.markGatewayApplyPending();
+    return {
+      bindings,
+      requiresGatewayApply: true
+    };
   }
 
   private async upsertAgentConfigEntry(
@@ -5144,6 +5827,7 @@ export class OpenClawAdapter implements EngineAdapter {
       },
       models: Object.fromEntries(allModelKeys.map((modelKey) => [modelKey, snapshot.config.agents?.defaults?.models?.[modelKey] ?? {}]))
     };
+    pruneExplicitMainAgentEntry(snapshot.config);
 
     if (!defaultEntry.agentId || !defaultEntry.agentDir || !defaultEntry.workspaceDir) {
       await this.writeOpenClawConfigSnapshot(snapshot.configPath, snapshot.config);
@@ -5170,6 +5854,31 @@ export class OpenClawAdapter implements EngineAdapter {
     await this.syncRuntimeAuthProfiles(snapshot.configPath, snapshot.config, defaultEntry, activeEntries);
     await writeAdapterState(state);
     return state;
+  }
+
+  private async removeRuntimeDerivedModelEntry(
+    entry: SavedModelEntryState,
+    nextState: OpenClawAdapterState
+  ): Promise<ModelConfigActionResponse> {
+    if (nextState.defaultModelEntryId) {
+      await this.syncRuntimeModelChain(nextState);
+    } else {
+      const snapshot = await this.readOpenClawConfigSnapshot();
+      removeRuntimeDerivedModelFromConfig(snapshot.config, snapshot.status, entry.modelKey);
+      pruneExplicitMainAgentEntry(snapshot.config);
+      await this.writeOpenClawConfigSnapshot(snapshot.configPath, snapshot.config);
+      await writeAdapterState(nextState);
+    }
+
+    await this.markGatewayApplyPending();
+
+    return {
+      ...this.mutationSyncMeta(),
+      status: "completed",
+      message: appendGatewayApplyMessage(`${entry.label} was removed from OpenClaw.`),
+      modelConfig: await this.getModelConfig(),
+      requiresGatewayApply: true
+    };
   }
 
   private buildSavedModelEntryState(
@@ -5360,12 +6069,14 @@ export class OpenClawAdapter implements EngineAdapter {
   ): Promise<void> {
     const snapshot = await this.readOpenClawConfigSnapshot();
 
-    if (isManagedModelAgentId(entry.agentId)) {
+    if (isManagedModelAgentId(entry.agentId) || isImplicitMainAgentId(entry.agentId)) {
       snapshot.config.agents = {
         ...snapshot.config.agents,
         list: (snapshot.config.agents?.list ?? []).filter((item) => item.id !== entry.agentId)
       };
     }
+
+    pruneExplicitMainAgentEntry(snapshot.config);
 
     if (isManagedModelAgentId(entry.agentId)) {
       removeProfileIdsFromConfig(snapshot.config, entry.profileIds);
@@ -5496,9 +6207,17 @@ export class OpenClawAdapter implements EngineAdapter {
       throw new Error(`Unknown auth method for provider ${request.providerId}: ${request.methodId}`);
     }
 
+    const modelSnapshot = await readModelSnapshot();
+    const normalizedRequest: SaveModelEntryRequest = {
+      ...request,
+      modelKey:
+        resolveCatalogModelKey(modelSnapshot.allModels, request.modelKey, { providerId: request.providerId }) ??
+        request.modelKey.trim()
+    };
+
     const existingEntry = currentState.modelEntries?.find((entry) => entry.id === entryId);
-    if (!shouldAuthenticateSavedModelEntry(mode, request, method)) {
-      return this.finalizeSavedModelEntryMetadataOnly(entryId, request);
+    if (!shouldAuthenticateSavedModelEntry(mode, normalizedRequest, method)) {
+      return this.finalizeSavedModelEntryMetadataOnly(entryId, normalizedRequest);
     }
 
     const defaultAuthContext = await this.readOpenClawConfigSnapshot();
@@ -5521,14 +6240,19 @@ export class OpenClawAdapter implements EngineAdapter {
       agentId,
       agentDir: paths.agentDir,
       workspaceDir: paths.workspaceDir,
-      draft: request
+      draft: normalizedRequest
     };
 
-    if (mode === "update" && !hasProvidedModelAuthValues(request)) {
+    if (mode === "update" && !hasProvidedModelAuthValues(normalizedRequest)) {
+      if ((method.tokenProviderId || canUseTokenPasteAuth(method)) && !(await this.hasReusableAuthForSavedModelEntry(existingEntry, request.providerId, method))) {
+        const tokenField = method.fields[0];
+        throw new Error(`Enter the ${tokenField?.label ?? "token"} first.`);
+      }
+
       return this.finalizeSavedModelEntryOperation(operation);
     }
 
-    return this.startEntryAuthentication(provider, method, request, operation);
+    return this.startEntryAuthentication(provider, method, normalizedRequest, operation);
   }
 
   async install(autoConfigure: boolean, options?: { forceLocal?: boolean }): Promise<InstallResponse> {
@@ -6366,13 +7090,14 @@ export class OpenClawAdapter implements EngineAdapter {
     const remainingEntries = (state.modelEntries ?? []).filter((item) => item.id !== entryId);
     const removingDefault = state.defaultModelEntryId === entryId;
     const remainingFallbackIds = (state.fallbackModelEntryIds ?? []).filter((id) => id !== entryId);
+    const runtimeDerivedEntry = isRuntimeDerivedModelEntryId(entry.id);
     let nextDefaultEntryId = state.defaultModelEntryId;
     let nextFallbackEntryIds = remainingFallbackIds;
 
     if (removingDefault) {
       const promotedFallbackId = remainingFallbackIds[0];
 
-      if (!promotedFallbackId) {
+      if (!promotedFallbackId && !runtimeDerivedEntry) {
         throw new Error("Set another default AI model before removing the current default model.");
       }
 
@@ -6386,7 +7111,11 @@ export class OpenClawAdapter implements EngineAdapter {
       defaultModelEntryId: nextDefaultEntryId,
       fallbackModelEntryIds: nextFallbackEntryIds
     });
-    const touchedRuntime = entry.isDefault || entry.isFallback;
+    const touchedRuntime = runtimeDerivedEntry || entry.isDefault || entry.isFallback;
+
+    if (runtimeDerivedEntry) {
+      return this.removeRuntimeDerivedModelEntry(entry, nextState);
+    }
 
     await this.cleanupRemovedSavedModelEntry(entry, nextState);
 
@@ -7295,7 +8024,10 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   async getChannelState(channelId: SupportedChannelId): Promise<ChannelSetupState> {
-    if (activeChannelLoginSession?.channelId === channelId) {
+    if (
+      activeChannelLoginSession?.channelId === channelId &&
+      !(channelId === "wechat" && activeChannelLoginSession.status === "completed")
+    ) {
       return createChannelState(channelId, {
         status: activeChannelLoginSession.status,
         summary:
@@ -7534,7 +8266,7 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   async getChannelSession(sessionId: string): Promise<ChannelSession> {
-    const session = activeChannelSession();
+    const session = activeChannelSession({ includeCompleted: true });
 
     if (!session || session.id !== sessionId) {
       throw new Error("Channel session not found.");
@@ -7620,11 +8352,15 @@ export class OpenClawAdapter implements EngineAdapter {
           secret: request.values.secret ?? ""
         });
       case "wechat":
+        if (request.action === "approve-pairing") {
+          return this.approvePairing("wechat", { code: request.values.code ?? "" });
+        }
+
         {
           const result = await this.startWechatLogin();
           return {
             ...result,
-            session: await this.getActiveChannelSession()
+            session: activeChannelSession({ includeCompleted: true })
           };
         }
       default:
@@ -7725,18 +8461,43 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   private async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
+    const modelState = await this.readResolvedSavedModelState();
+    const sourceEntry =
+      modelState.modelEntries?.find((entry) => entry.id === request.brain.entryId) ??
+      modelState.modelEntries?.find(
+        (entry) => entry.providerId === request.brain.providerId && modelKeysMatch(entry.modelKey, request.brain.modelKey)
+      );
+    const modelSnapshot = await readModelSnapshot();
+    const resolvedModelKey =
+      resolveCatalogModelKey(modelSnapshot.allModels, sourceEntry?.modelKey ?? request.brain.modelKey, {
+        providerId: sourceEntry?.providerId ?? request.brain.providerId
+      }) ??
+      sourceEntry?.modelKey ??
+      request.brain.modelKey;
+    const resolvedBrain = sourceEntry
+      ? {
+          ...request.brain,
+          entryId: sourceEntry.id,
+          label: sourceEntry.label,
+          providerId: sourceEntry.providerId,
+          modelKey: resolvedModelKey
+        }
+      : {
+          ...request.brain,
+          modelKey: resolvedModelKey
+        };
     const agentId =
       request.existingAgentId ??
       resolveReadableMemberAgentId(
-      request.name,
+        request.name,
         (await this.listOpenClawAgents()).map((agent) => agent.id).filter((agentId): agentId is string => Boolean(agentId))
       );
-    const { agentDir, workspaceDir, created } = await this.ensureMemberAgent(request.memberId, agentId, request.brain);
+    const { agentDir, workspaceDir, created } = await this.ensureMemberAgent(request.memberId, agentId, resolvedBrain);
 
     await this.setMemberIdentity(agentId, request);
     await rm(resolve(workspaceDir, "knowledge"), { recursive: true, force: true }).catch(() => undefined);
     await writeMemberWorkspaceFiles(request, workspaceDir, { createBootstrap: created });
-    await this.syncMemberBrain(request, agentId, agentDir, workspaceDir);
+    await this.syncMemberBrain({ ...request, brain: resolvedBrain }, agentId, agentDir, workspaceDir);
     await runOpenClaw(["memory", "index", "--agent", agentId, "--force"], { allowFailure: true });
     await this.markGatewayApplyPending();
     invalidateReadCache("agents:list", `agents:bindings:${agentId}`, "skills:");
@@ -7744,6 +8505,10 @@ export class OpenClawAdapter implements EngineAdapter {
     const agents = await this.listOpenClawAgents();
     if (!agents.some((agent) => agent.id === agentId)) {
       throw new Error(`SlackClaw could not verify the AI member agent ${agentId}.`);
+    }
+
+    if (!(await this.getPrimaryAIMemberAgentId())) {
+      await this.setPrimaryAIMemberAgent(agentId);
     }
 
     return {
@@ -7771,17 +8536,7 @@ export class OpenClawAdapter implements EngineAdapter {
       throw new Error("AI member agent is missing.");
     }
 
-    const result = await runOpenClaw(["agents", "bind", "--agent", agentId, "--bind", request.binding, "--json"], { allowFailure: true });
-    if (result.code !== 0) {
-      throw new Error(result.stderr || result.stdout || `SlackClaw could not bind ${request.binding} to ${agentId}.`);
-    }
-
-    await this.markGatewayApplyPending();
-    invalidateReadCache(`agents:bindings:${agentId}`);
-    return {
-      bindings: await this.readMemberBindings(agentId),
-      requiresGatewayApply: true
-    };
+    return this.bindMemberChannelExclusively(agentId, request.binding);
   }
 
   async unbindAIMemberChannel(
@@ -7792,7 +8547,8 @@ export class OpenClawAdapter implements EngineAdapter {
       throw new Error("AI member agent is missing.");
     }
 
-    const result = await runOpenClaw(["agents", "unbind", "--agent", agentId, "--bind", request.binding, "--json"], { allowFailure: true });
+    const runtimeBinding = toRuntimeBindingTarget(request.binding);
+    const result = await runOpenClaw(["agents", "unbind", "--agent", agentId, "--bind", runtimeBinding, "--json"], { allowFailure: true });
     if (result.code !== 0) {
       throw new Error(result.stderr || result.stdout || `SlackClaw could not unbind ${request.binding} from ${agentId}.`);
     }
@@ -7805,16 +8561,20 @@ export class OpenClawAdapter implements EngineAdapter {
     };
   }
 
-  async deleteAIMemberRuntime(agentId: string, request: DeleteAIMemberRequest): Promise<{ requiresGatewayApply?: boolean }> {
+  async deleteAIMemberRuntime(
+    agentId: string,
+    request: DeleteAIMemberRequest
+  ): Promise<{ requiresGatewayApply?: boolean; wasPrimary?: boolean }> {
     if (!agentId) {
-      return { requiresGatewayApply: false };
+      return { requiresGatewayApply: false, wasPrimary: false };
     }
 
+    const wasPrimary = (await this.getPrimaryAIMemberAgentId()) === agentId;
     const agents = await this.listOpenClawAgents();
     const existing = agents.find((agent) => agent.id === agentId);
 
     if (!existing) {
-      return { requiresGatewayApply: false };
+      return { requiresGatewayApply: false, wasPrimary };
     }
 
     const result = await runOpenClaw(["agents", "delete", agentId, "--force", "--json"], { allowFailure: true });
@@ -7831,6 +8591,15 @@ export class OpenClawAdapter implements EngineAdapter {
       await rm(dirname(existing.agentDir), { recursive: true, force: true }).catch(() => undefined);
     }
 
+    const snapshot = await this.readOpenClawConfigSnapshot();
+    if ((snapshot.config.agents?.list ?? []).some((entry) => entry.id === agentId)) {
+      snapshot.config.agents = {
+        ...snapshot.config.agents,
+        list: (snapshot.config.agents?.list ?? []).filter((entry) => entry.id !== agentId)
+      };
+      await this.writeOpenClawConfigSnapshot(snapshot.configPath, snapshot.config);
+    }
+
     await this.markGatewayApplyPending();
     invalidateReadCache("agents:list", `agents:bindings:${agentId}`);
 
@@ -7839,7 +8608,10 @@ export class OpenClawAdapter implements EngineAdapter {
       throw new Error(`SlackClaw could not verify deletion of AI member agent ${agentId}.`);
     }
 
-    return { requiresGatewayApply: true };
+    return {
+      requiresGatewayApply: true,
+      wasPrimary
+    };
   }
 
   async getChatThreadDetail(request: { agentId: string; threadId: string; sessionKey: string }): Promise<ChatThreadDetail> {
@@ -8167,11 +8939,21 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   async approvePairing(
-    channelId: "telegram" | "whatsapp" | "feishu" | "wechat-work",
+    channelId: "telegram" | "whatsapp" | "feishu" | "wechat-work" | "wechat",
     request: PairingApprovalRequest
   ): Promise<{ message: string; channel: ChannelSetupState }> {
-    const runtimeChannelId = channelId === "wechat-work" ? CANONICAL_WECOM_CHANNEL_KEY : channelId;
-    const result = await runOpenClaw(["pairing", "approve", runtimeChannelId, request.code, "--notify"], { allowFailure: true });
+    const code = request.code.trim();
+    if (!code) {
+      throw new Error("Enter the pairing code first.");
+    }
+
+    const runtimeChannelId =
+      channelId === "wechat-work"
+        ? CANONICAL_WECOM_CHANNEL_KEY
+        : channelId === "wechat"
+          ? PERSONAL_WECHAT_RUNTIME_CHANNEL_KEY
+          : channelId;
+    const result = await runOpenClaw(["pairing", "approve", runtimeChannelId, code, "--notify"], { allowFailure: true });
 
     if (result.code !== 0) {
       throw new Error(result.stderr || result.stdout || `SlackClaw could not approve the ${channelId} pairing code.`);
@@ -8189,7 +8971,9 @@ export class OpenClawAdapter implements EngineAdapter {
           ? "WhatsApp"
           : channelId === "feishu"
             ? "Feishu"
-            : "WeChat Work";
+            : channelId === "wechat-work"
+              ? "WeChat Work"
+              : "WeChat";
 
     return {
       message: `${label} pairing approved.`,
@@ -8344,7 +9128,7 @@ export class OpenClawAdapter implements EngineAdapter {
         activeChannelLoginSession.status = code === 0 ? "completed" : "failed";
         activeChannelLoginSession.logs.push(
           code === 0
-            ? "WeChat installer finished and SlackClaw staged the login artifacts for final apply."
+            ? "WeChat installer finished. ChillClaw saved this channel and will finish gateway activation after onboarding."
             : `WeChat installer exited with code ${code ?? 1}.`
         );
         settleStartupNow();
@@ -8481,19 +9265,19 @@ export class OpenClawAdapter implements EngineAdapter {
 
     if (this.gatewayServiceNotLoaded(restart.stdout, restart.stderr)) {
       const install = await runOpenClaw(["gateway", "install", "--json"], { allowFailure: true });
-      if (install.code !== 0) {
+      if (install.code !== 0 && !hasOnlyIgnorableOpenClawWarnings(install)) {
         throw new Error(
           install.stderr || install.stdout || `SlackClaw could not install the OpenClaw gateway service after ${reason}.`
         );
       }
 
       const start = await runOpenClaw(["gateway", "start"], { allowFailure: true });
-      if (start.code !== 0) {
+      if (start.code !== 0 && !hasOnlyIgnorableOpenClawWarnings(start)) {
         throw new Error(
           start.stderr || start.stdout || `SlackClaw could not start the OpenClaw gateway service after ${reason}.`
         );
       }
-    } else if (restart.code !== 0) {
+    } else if (restart.code !== 0 && !hasOnlyIgnorableOpenClawWarnings(restart)) {
       throw new Error(restart.stderr || restart.stdout || `SlackClaw could not restart the OpenClaw gateway after ${reason}.`);
     }
 

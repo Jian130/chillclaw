@@ -200,6 +200,64 @@ test("AI team save rejects skill ids that are not verified in the active runtime
   );
 });
 
+test("AI team binding rehomes a channel away from the previous member", async () => {
+  const { service } = createService("ai-team-binding-rehome", new MockAdapter());
+
+  const first = await service.saveMember(undefined, {
+    name: "Alex Morgan",
+    jobTitle: "Research Lead",
+    avatar: {
+      presetId: "operator",
+      accent: "var(--avatar-1)",
+      emoji: "🦊",
+      theme: "sunrise"
+    },
+    brainEntryId: "mock-openai-gpt-4o-mini",
+    personality: "Analytical",
+    soul: "Keep work clear and grounded.",
+    workStyles: ["Methodical"],
+    skillIds: ["research-brief"],
+    knowledgePackIds: [],
+    capabilitySettings: {
+      memoryEnabled: true,
+      contextWindow: 128000
+    }
+  });
+  const second = await service.saveMember(undefined, {
+    name: "Jordan Lee",
+    jobTitle: "Support Lead",
+    avatar: {
+      presetId: "operator",
+      accent: "var(--avatar-1)",
+      emoji: "🦊",
+      theme: "sunrise"
+    },
+    brainEntryId: "mock-openai-gpt-4o-mini",
+    personality: "Calm",
+    soul: "Help clearly.",
+    workStyles: [],
+    skillIds: [],
+    knowledgePackIds: [],
+    capabilitySettings: {
+      memoryEnabled: true,
+      contextWindow: 128000
+    }
+  });
+
+  const firstMember = first.overview.members.find((member) => member.name === "Alex Morgan")!;
+  const secondMember = second.overview.members.find((member) => member.name === "Jordan Lee")!;
+
+  await service.bindMemberChannel(firstMember.id, { binding: "telegram:default" });
+  await service.bindMemberChannel(secondMember.id, { binding: "telegram:default" });
+
+  const overview = await service.getOverview();
+  const reboundFirst = overview.members.find((member) => member.id === firstMember.id)!;
+  const reboundSecond = overview.members.find((member) => member.id === secondMember.id)!;
+
+  assert.deepEqual(reboundFirst.bindings, []);
+  assert.deepEqual(reboundSecond.bindings.map((binding) => binding.target), ["telegram:default"]);
+});
+
 test("AI team save resolves preset skill ids through daemon-owned preset verification", async () => {
   class PresetSkillReadyAdapter extends MockAdapter {
     private presetReady = false;

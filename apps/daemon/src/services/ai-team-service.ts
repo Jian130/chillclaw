@@ -140,6 +140,61 @@ function importedMemberSummary(candidate: AIMemberRuntimeCandidate, overview: AI
   };
 }
 
+function preferredPrimaryMemberAgentId(members: AITeamOverview["members"]): string | undefined {
+  return members
+    .filter((member) => member.source !== "detected" && member.agentId.trim())
+    .sort((left, right) => {
+      const leftHasBindings = left.bindingCount > 0 || left.bindings.length > 0 ? 0 : 1;
+      const rightHasBindings = right.bindingCount > 0 || right.bindings.length > 0 ? 0 : 1;
+      if (leftHasBindings !== rightHasBindings) {
+        return leftHasBindings - rightHasBindings;
+      }
+
+      const nameDelta = left.name.localeCompare(right.name);
+      if (nameDelta !== 0) {
+        return nameDelta;
+      }
+
+      return left.agentId.localeCompare(right.agentId);
+    })[0]?.agentId;
+}
+
+function rehomeStoredBinding(
+  members: AITeamState["members"],
+  targetMemberId: string,
+  binding: string,
+  nextBindings: MemberBindingsResponse["bindings"],
+  updatedAt: string
+): AITeamState["members"] {
+  const nextMembers = { ...members };
+
+  for (const [memberId, member] of Object.entries(members)) {
+    if (memberId === targetMemberId) {
+      nextMembers[memberId] = {
+        ...member,
+        bindingCount: nextBindings.length,
+        bindings: nextBindings,
+        lastUpdatedAt: updatedAt
+      };
+      continue;
+    }
+
+    const filteredBindings = member.bindings.filter((entry) => entry.target !== binding);
+    if (filteredBindings.length === member.bindings.length) {
+      continue;
+    }
+
+    nextMembers[memberId] = {
+      ...member,
+      bindingCount: filteredBindings.length,
+      bindings: filteredBindings,
+      lastUpdatedAt: updatedAt
+    };
+  }
+
+  return nextMembers;
+}
+
 function buildBrainAssignment(brains: AITeamOverview["availableBrains"], brainEntryId: string): BrainAssignment {
   const entry = brains.find((item) => item.id === brainEntryId);
 
@@ -439,6 +494,7 @@ export class AITeamService {
       throw new Error("AI member not found.");
     }
 
+    const currentPrimaryAgentId = await this.adapter.aiEmployees.getPrimaryAIMemberAgentId();
     const result = await this.adapter.aiEmployees.deleteAIMemberRuntime(member.agentId, request);
 
     await this.store.update((current) => {
@@ -480,7 +536,14 @@ export class AITeamService {
       };
     });
 
-    const nextOverview = await this.getOverview();
+    let promotionRequiresGatewayApply = false;
+    let nextOverview = await this.getOverview();
+    if (currentPrimaryAgentId === member.agentId || result.wasPrimary) {
+      const nextPrimaryAgentId = preferredPrimaryMemberAgentId(nextOverview.members);
+      const promotion = await this.adapter.aiEmployees.setPrimaryAIMemberAgent(nextPrimaryAgentId);
+      promotionRequiresGatewayApply = promotion.requiresGatewayApply === true;
+      nextOverview = await this.getOverview();
+    }
     const sync = this.eventPublisher?.publishAITeamUpdated(nextOverview) ?? fallbackMutationSyncMeta();
 
     return {
@@ -491,7 +554,7 @@ export class AITeamService {
           ? `${member.name} was removed and the workspace/history was kept.`
           : `${member.name} was removed.`,
       overview: nextOverview,
-      requiresGatewayApply: result.requiresGatewayApply
+      requiresGatewayApply: result.requiresGatewayApply || promotionRequiresGatewayApply
     };
   }
 
@@ -546,21 +609,14 @@ export class AITeamService {
 
     const result = await this.adapter.aiEmployees.bindAIMemberChannel(member.agentId, request);
     const bindings = result.bindings;
+    const updatedAt = new Date().toISOString();
     await this.store.update((current) => {
       const currentState = current.aiTeam ?? defaultAITeamState();
       return {
         ...current,
         aiTeam: {
           ...currentState,
-          members: {
-            ...currentState.members,
-            [memberId]: {
-              ...currentState.members[memberId],
-              bindingCount: bindings.length,
-              bindings,
-              lastUpdatedAt: new Date().toISOString()
-            }
-          },
+          members: rehomeStoredBinding(currentState.members, memberId, request.binding, bindings, updatedAt),
           activity: [
             activityItem(memberId, member.name, "Bound channel", `${member.name} is now bound to ${request.binding}.`, "updated"),
             ...currentState.activity
@@ -577,6 +633,41 @@ export class AITeamService {
       status: "completed",
       message: `${member.name} is now bound to ${request.binding}.`,
       overview: nextOverview,
+      requiresGatewayApply: result.requiresGatewayApply
+    };
+  }
+
+  async bindMemberChannelForOnboarding(
+    memberId: string,
+    request: BindAIMemberChannelRequest
+  ): Promise<{ requiresGatewayApply?: boolean }> {
+    const state = await this.store.read();
+    const aiTeam = state.aiTeam ?? defaultAITeamState();
+    const member = aiTeam.members[memberId];
+
+    if (!member) {
+      throw new Error("AI member not found.");
+    }
+
+    const result = await this.adapter.aiEmployees.bindAIMemberChannel(member.agentId, request);
+    const bindings = result.bindings;
+    const updatedAt = new Date().toISOString();
+    await this.store.update((current) => {
+      const currentState = current.aiTeam ?? defaultAITeamState();
+      return {
+        ...current,
+        aiTeam: {
+          ...currentState,
+          members: rehomeStoredBinding(currentState.members, memberId, request.binding, bindings, updatedAt),
+          activity: [
+            activityItem(memberId, member.name, "Bound channel", `${member.name} is now bound to ${request.binding}.`, "updated"),
+            ...currentState.activity
+          ].slice(0, 20)
+        }
+      };
+    });
+
+    return {
       requiresGatewayApply: result.requiresGatewayApply
     };
   }

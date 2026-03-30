@@ -1719,6 +1719,8 @@ export default function OnboardingPage() {
                           <p className="card__description">
                             ChillClaw will run the personal WeChat installer and keep the QR-first session log here. Start
                             the login flow, scan the QR code on your phone, and keep this step open until the installer finishes.
+                            Once the channel is saved, ChillClaw will continue to the AI employee step and finish gateway
+                            activation after onboarding.
                           </p>
                         </div>
                       ) : null}

@@ -43,6 +43,29 @@ struct OnboardingTests {
     }
 
     @Test
+    func onboardingHeaderSkipRoutesToDashboard() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let viewSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/OnboardingView.swift"),
+            encoding: .utf8
+        )
+        let viewModelSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/OnboardingViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(viewSource.contains("viewModel.copy.skipDetail"))
+        #expect(viewSource.contains("await viewModel.skipToDashboard()"))
+        #expect(viewSource.contains("if !viewModel.showingCompletion"))
+        #expect(!viewSource.contains("viewModel.currentStep == .welcome || viewModel.currentStep == .install || viewModel.currentStep == .model"))
+        #expect(viewModelSource.contains("func skipToDashboard() async"))
+        #expect(viewModelSource.contains("completeOnboarding(.init(destination: .dashboard))"))
+    }
+
+    @Test
     func startupAndOnboardingUseHeroLoadingState() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -350,6 +373,25 @@ struct OnboardingTests {
     }
 
     @Test
+    func nativeOnboardingInstallProgressAnimationAdvancesWithoutOvershootingPhaseCeiling() {
+        let detecting = advanceNativeOnboardingInstallProgress(.init(phase: .detecting, percent: 16, message: nil))
+        #expect(detecting.percent == 16.55)
+
+        let installing = advanceNativeOnboardingInstallProgress(.init(phase: .installing, percent: 75.9, message: nil))
+        #expect(installing.percent == 76)
+
+        let merged = mergeNativeOnboardingInstallProgress(
+            current: .init(phase: .installing, percent: 28, message: "Installing"),
+            phase: .verifying,
+            percent: 82,
+            message: "Verifying"
+        )
+        #expect(merged.phase == .verifying)
+        #expect(merged.percent == 82)
+        #expect(merged.message == "Verifying")
+    }
+
+    @Test
     func existingInstallAdvanceDraftMovesToPermissions() {
         let request = buildExistingInstallAdvanceRequest(
             overview: makeOverview(setupCompleted: false, installed: true, running: false, version: "2026.3.13")
@@ -413,6 +455,83 @@ struct OnboardingTests {
         let payload = try JSONDecoder.slackClaw.decode(OnboardingStepNavigationRequest.self, from: body)
 
         #expect(payload.step == .permissions)
+    }
+
+    @Test
+    func skipToDashboardCompletesOnboardingAndLoadsDashboard() async throws {
+        let recorder = NativeRequestRecorder()
+        let loadRecorder = NativeLoadRecorder()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/complete"):
+                let body = try JSONEncoder.slackClaw.encode(
+                    CompleteOnboardingResponse(
+                        status: "completed",
+                        destination: .dashboard,
+                        summary: .init(),
+                        overview: makeOverview(setupCompleted: true, installed: true, running: true, version: "2026.3.13")
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = SlackClawChatViewModel(transport: FakeChatTransport())
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: {
+                    await loadRecorder.record("overview")
+                    return makeOverview(setupCompleted: true, installed: true, running: true, version: "2026.3.13")
+                },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: {
+                    await loadRecorder.record("models")
+                    return emptyModelConfig()
+                },
+                fetchChannelConfig: {
+                    await loadRecorder.record("channels")
+                    return emptyChannelConfig()
+                },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: {
+                    await loadRecorder.record("team")
+                    return emptyAITeamOverview()
+                }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+
+        await viewModel.skipToDashboard()
+        await waitForRecordedURLCount(recorder, expectedCount: 1)
+
+        let request = try #require(await recorder.recordedRequests().first)
+        let body = try #require(bodyData(for: request))
+        let payload = try JSONDecoder.slackClaw.decode(CompleteOnboardingRequest.self, from: body)
+
+        #expect(payload.destination == .dashboard)
+        #expect(appState.selectedSection == .dashboard)
+        #expect(appState.overview?.firstRun.setupCompleted == true)
+        #expect(await loadRecorder.events() == ["overview", "models", "team"])
     }
 
     @Test
@@ -1502,6 +1621,250 @@ struct OnboardingTests {
     }
 
     @Test
+    func completedPersonalWechatSessionAdvancesToEmployeeWithoutPairingApproval() async throws {
+        let recorder = NativeRequestRecorder()
+        let sessionId = "wechat:default:login"
+        let awaitingEntry = ConfiguredChannelEntry(
+            id: "wechat:default",
+            channelId: .wechat,
+            label: "WeChat",
+            status: "awaiting-pairing",
+            summary: "Saved for final gateway activation.",
+            detail: "ChillClaw will finish gateway activation after onboarding.",
+            maskedConfigSummary: [],
+            editableValues: [:],
+            pairingRequired: false,
+            lastUpdatedAt: "2026-03-28T00:00:05.000Z"
+        )
+        let initialConfig = ChannelConfigOverview(
+            baseOnboardingCompleted: true,
+            capabilities: [],
+            entries: [awaitingEntry],
+            activeSession: .init(
+                id: sessionId,
+                channelId: .wechat,
+                entryId: awaitingEntry.id,
+                status: "running",
+                message: "WeChat login is waiting for QR confirmation.",
+                logs: ["Starting the personal WeChat installer."],
+                launchUrl: nil,
+                inputPrompt: nil
+            ),
+            gatewaySummary: "Gateway ready"
+        )
+        let awaitingConfig = ChannelConfigOverview(
+            baseOnboardingCompleted: true,
+            capabilities: [],
+            entries: [awaitingEntry],
+            activeSession: nil,
+            gatewaySummary: "Gateway ready"
+        )
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/channel/entries"):
+                var nextState = makeOnboardingStateResponse(step: .channel)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: awaitingEntry.id)
+                nextState.draft.activeChannelSessionId = sessionId
+                nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
+                let body = try JSONEncoder.slackClaw.encode(
+                    ChannelConfigActionResponse(
+                        status: "interactive",
+                        message: "Started WeChat login",
+                        channelConfig: initialConfig,
+                        session: initialConfig.activeSession,
+                        requiresGatewayApply: false,
+                        onboarding: nextState
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/onboarding/channel/session/wechat:default:login"):
+                var nextState = makeOnboardingStateResponse(step: .employee)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: awaitingEntry.id)
+                nextState.draft.channelProgress = .init(status: .staged, sessionId: sessionId, message: awaitingEntry.summary, requiresGatewayApply: false)
+                let body = try JSONEncoder.slackClaw.encode(
+                    ChannelSessionResponse(
+                        session: .init(
+                            id: sessionId,
+                            channelId: .wechat,
+                            entryId: awaitingEntry.id,
+                            status: "completed",
+                            message: "WeChat login finished. ChillClaw saved this channel and will finish gateway activation after onboarding.",
+                            logs: [
+                                "Starting the personal WeChat installer.",
+                                "QR confirmation complete."
+                            ],
+                            launchUrl: nil,
+                            inputPrompt: nil
+                        ),
+                        channelConfig: awaitingConfig,
+                        onboarding: nextState
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = SlackClawChatViewModel(transport: FakeChatTransport())
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { awaitingConfig },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .channel)
+        viewModel.updateSelectedChannel(.wechat)
+
+        await viewModel.saveChannel()
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
+
+        #expect(viewModel.currentStep == .employee)
+        #expect(viewModel.currentDraft.activeChannelSessionId == nil)
+    }
+
+    @Test
+    func personalWechatOnboardingAlwaysUsesTheLoginSaveAction() async throws {
+        let recorder = NativeRequestRecorder()
+        let sessionId = "wechat:default:login"
+        let initialEntry = ConfiguredChannelEntry(
+            id: "wechat:default",
+            channelId: .wechat,
+            label: "WeChat",
+            status: "awaiting-pairing",
+            summary: "Waiting for QR confirmation.",
+            detail: "Installer is still running.",
+            maskedConfigSummary: [],
+            editableValues: [:],
+            pairingRequired: false,
+            lastUpdatedAt: "2026-03-28T00:00:05.000Z"
+        )
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "POST", url.path) {
+            case ("POST", "/api/onboarding/channel/entries"):
+                let requestBody = try #require(bodyData(for: request))
+                let payload = try JSONDecoder.slackClaw.decode(SaveChannelEntryRequest.self, from: requestBody)
+                #expect(payload.action == "save")
+
+                var nextState = makeOnboardingStateResponse(step: .channel)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: initialEntry.id)
+                nextState.draft.activeChannelSessionId = sessionId
+                nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
+                let responseBody = try JSONEncoder.slackClaw.encode(
+                    ChannelConfigActionResponse(
+                        status: "interactive",
+                        message: "Started WeChat login",
+                        channelConfig: .init(
+                            baseOnboardingCompleted: true,
+                            capabilities: [],
+                            entries: [initialEntry],
+                            activeSession: .init(
+                                id: sessionId,
+                                channelId: .wechat,
+                                entryId: initialEntry.id,
+                                status: "running",
+                                message: "WeChat login is waiting for QR confirmation.",
+                                logs: ["Starting the personal WeChat installer."],
+                                launchUrl: nil,
+                                inputPrompt: nil
+                            ),
+                            gatewaySummary: "Gateway ready"
+                        ),
+                        session: .init(
+                            id: sessionId,
+                            channelId: .wechat,
+                            entryId: initialEntry.id,
+                            status: "running",
+                            message: "WeChat login is waiting for QR confirmation.",
+                            logs: ["Starting the personal WeChat installer."],
+                            launchUrl: nil,
+                            inputPrompt: nil
+                        ),
+                        requiresGatewayApply: false,
+                        onboarding: nextState
+                    )
+                )
+                return (jsonResponse(url: url), responseBody)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = SlackClawChatViewModel(transport: FakeChatTransport())
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: {
+                    .init(
+                        baseOnboardingCompleted: true,
+                        capabilities: [],
+                        entries: [initialEntry],
+                        activeSession: nil,
+                        gatewaySummary: "Gateway ready"
+                    )
+                },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        var onboarding = makeOnboardingStateResponse(step: .channel)
+        onboarding.draft.channel = .init(channelId: .wechat, entryId: initialEntry.id)
+        viewModel.onboardingState = onboarding
+        viewModel.updateSelectedChannel(SupportedChannelId.wechat)
+
+        await viewModel.saveChannel()
+
+        #expect(viewModel.currentStep == OnboardingStep.channel)
+        #expect(viewModel.currentDraft.activeChannelSessionId == sessionId)
+    }
+
+    @Test
     func savingPersonalWechatChannelUsesFreshSessionPayloadWhenConfigSessionLags() async throws {
         let recorder = NativeRequestRecorder()
         let sessionId = "wechat:default:login"
@@ -2314,6 +2677,214 @@ struct OnboardingTests {
         #expect(urls.filter { $0.contains("/api/channels/config") }.count == 1)
         #expect(urls.filter { $0.contains("/api/models/config") }.isEmpty)
         #expect(urls.filter { $0.contains("/api/ai-team/overview") }.isEmpty)
+    }
+
+    @Test
+    func employeeAutosaveIgnoresOutOfOrderResponsesWhileTyping() async throws {
+        actor SaveOrder {
+            private var count = 0
+
+            func next() -> Int {
+                count += 1
+                return count
+            }
+        }
+
+        let recorder = NativeRequestRecorder()
+        let firstResponseGate = AsyncGate()
+        let saveOrder = SaveOrder()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/onboarding/employee":
+                let body = try #require(bodyData(for: request))
+                let employee = try JSONDecoder.slackClaw.decode(OnboardingEmployeeState.self, from: body)
+                let saveIndex = await saveOrder.next()
+
+                if saveIndex == 1 {
+                    await firstResponseGate.wait()
+                } else {
+                    await firstResponseGate.open()
+                }
+
+                let response = OnboardingStateResponse(
+                    firstRun: .init(introCompleted: true, setupCompleted: false),
+                    draft: .init(
+                        currentStep: .employee,
+                        channel: .init(channelId: .wechat, entryId: "wechat:default"),
+                        channelProgress: .init(status: .staged, message: "WeChat is staged."),
+                        employee: employee
+                    ),
+                    config: makeOnboardingStateResponse(step: .employee).config,
+                    summary: .init(),
+                    presetSkillSync: makeOnboardingStateResponse(step: .employee).presetSkillSync
+                )
+                let payload = try JSONEncoder.slackClaw.encode(response)
+                return (jsonResponse(url: url), payload)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(
+            session: session,
+            configurationProvider: { configuration }
+        )
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: SlackClawChatViewModel(transport: FakeChatTransport()),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(appState: appState)
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .employee)
+        viewModel.employeeName = "R"
+        viewModel.employeeJobTitle = "Researcher"
+        viewModel.persistEmployeeDraft()
+
+        try? await Task.sleep(nanoseconds: 320_000_000)
+
+        viewModel.employeeName = "Research Helper"
+        viewModel.employeeJobTitle = "Research Analyst"
+        viewModel.persistEmployeeDraft()
+
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        #expect(viewModel.employeeName == "Research Helper")
+        #expect(viewModel.employeeJobTitle == "Research Analyst")
+    }
+
+    @Test
+    func employeeStepKeepsEditsLocalUntilCreateIsPressed() async throws {
+        let recorder = NativeRequestRecorder()
+        let savedEntry = SavedModelEntry(
+            id: "model-entry-1",
+            label: "MiniMax",
+            providerId: "minimax",
+            modelKey: "minimax/MiniMax-M2.7",
+            agentId: "agent-1",
+            authMethodId: "minimax-api",
+            authModeLabel: "API Key",
+            profileLabel: "Default",
+            isDefault: true,
+            isFallback: false,
+            createdAt: "2026-03-30T00:00:00.000Z",
+            updatedAt: "2026-03-30T00:00:00.000Z"
+        )
+        let savedConfig = ModelConfigOverview(
+            providers: [],
+            models: [],
+            defaultModel: savedEntry.modelKey,
+            configuredModelKeys: [savedEntry.modelKey],
+            savedEntries: [savedEntry],
+            defaultEntryId: savedEntry.id,
+            fallbackEntryIds: []
+        )
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/employee"):
+                let body = try #require(bodyData(for: request))
+                let employee = try JSONDecoder.slackClaw.decode(OnboardingEmployeeState.self, from: body)
+                var state = makeOnboardingStateResponse(step: .employee)
+                state.draft.model = .init(
+                    providerId: savedEntry.providerId,
+                    modelKey: savedEntry.modelKey,
+                    methodId: savedEntry.authMethodId,
+                    entryId: savedEntry.id
+                )
+                state.draft.channel = .init(channelId: .wechat, entryId: "wechat:default")
+                state.draft.channelProgress = .init(status: .staged, message: "WeChat is staged.")
+                state.draft.employee = employee
+                let payload = try JSONEncoder.slackClaw.encode(state)
+                return (jsonResponse(url: url), payload)
+            case ("POST", "/api/onboarding/complete"):
+                let payload = try JSONEncoder.slackClaw.encode(
+                    CompleteOnboardingResponse(
+                        status: "completed",
+                        destination: .chat,
+                        summary: .init(),
+                        overview: makeOverview(setupCompleted: true)
+                    )
+                )
+                return (jsonResponse(url: url), payload)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = SlackClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = SlackClawAPIClient(
+            session: session,
+            configurationProvider: { configuration }
+        )
+        let appState = SlackClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: SlackClawChatViewModel(transport: FakeChatTransport()),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { savedConfig },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.modelConfig = savedConfig
+
+        let viewModel = NativeOnboardingViewModel(appState: appState)
+        var onboardingState = makeOnboardingStateResponse(step: .employee)
+        onboardingState.draft.model = .init(
+            providerId: savedEntry.providerId,
+            modelKey: savedEntry.modelKey,
+            methodId: savedEntry.authMethodId,
+            entryId: savedEntry.id
+        )
+        onboardingState.draft.channel = .init(channelId: .wechat, entryId: "wechat:default")
+        onboardingState.draft.channelProgress = .init(status: .staged, message: "WeChat is staged.")
+        viewModel.onboardingState = onboardingState
+        viewModel.selectedEmployeePresetId = viewModel.employeePresets.first?.id ?? ""
+        viewModel.employeeName = "AI Ryo"
+        viewModel.employeeJobTitle = "Research Analyst"
+        if let presetId = viewModel.employeePresets.last?.id {
+            viewModel.selectEmployeePreset(presetId)
+        }
+
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        #expect(await recorder.recordedURLs().isEmpty)
+
+        await viewModel.createEmployee()
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
+
+        let urls = await recorder.recordedURLs()
+        #expect(urls == [
+            "http://127.0.0.1:4545/api/onboarding/employee",
+            "http://127.0.0.1:4545/api/onboarding/complete"
+        ])
     }
 }
 

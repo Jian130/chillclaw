@@ -158,6 +158,8 @@ final class NativeOnboardingViewModel {
     private var channelSessionTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var daemonEventTask: Task<Void, Never>?
+    private var installProgressAnimationTask: Task<Void, Never>?
+    private var employeeDraftAutosaveRevision = 0
     private var isApplyingDraft = false
 
     var selectedLocaleIdentifier = resolveNativeOnboardingLocaleIdentifier()
@@ -415,8 +417,14 @@ final class NativeOnboardingViewModel {
         applyOnboardingState(state)
     }
 
-    private func saveEmployeeDraftToDaemon(_ employee: OnboardingEmployeeState) async throws {
+    private func saveEmployeeDraftToDaemon(
+        _ employee: OnboardingEmployeeState,
+        autosaveRevision: Int? = nil
+    ) async throws {
         let state = try await appState.client.saveOnboardingEmployee(employee)
+        if let autosaveRevision, autosaveRevision != employeeDraftAutosaveRevision {
+            return
+        }
         applyOnboardingState(state)
     }
 
@@ -559,9 +567,8 @@ final class NativeOnboardingViewModel {
         guard let target = installTarget, target.updateAvailable else { return }
 
         pageError = nil
-        installBusy = true
-        installProgress = .init(phase: .updating, percent: 10, message: nil)
-        defer { installBusy = false }
+        beginInstallProgress(.init(phase: .updating, percent: 10, message: nil))
+        defer { endInstallProgress() }
 
         do {
             let result = try await appState.client.updateOnboardingRuntime()
@@ -613,7 +620,9 @@ final class NativeOnboardingViewModel {
 
     func persistEmployeeDraft() {
         guard currentStep == .employee else { return }
-        scheduleEmployeeDraftPersistence { [employeeName, employeeJobTitle, selectedEmployeePreset, memoryEnabled] in
+        employeeDraftAutosaveRevision += 1
+        let revision = employeeDraftAutosaveRevision
+        scheduleEmployeeDraftPersistence(revision: revision) { [employeeName, employeeJobTitle, selectedEmployeePreset, memoryEnabled] in
             .init(
                 memberId: self.currentDraft.employee?.memberId,
                 name: employeeName,
@@ -633,9 +642,8 @@ final class NativeOnboardingViewModel {
 
     func runInstall() async {
         pageError = nil
-        installBusy = true
-        installProgress = .init(phase: .detecting, percent: 16, message: copy.installStageDetecting)
-        defer { installBusy = false }
+        beginInstallProgress(.init(phase: .detecting, percent: 16, message: copy.installStageDetecting))
+        defer { endInstallProgress() }
 
         do {
             let result = try await appState.client.installOnboardingRuntime()
@@ -813,12 +821,11 @@ final class NativeOnboardingViewModel {
                 memoryEnabled = defaultMemoryEnabled
             }
         }
-        persistEmployeeDraft()
     }
 
     func createEmployee() async {
         guard
-            let selectedBrainEntryId,
+            selectedBrainEntryId != nil,
             let selectedEmployeePreset,
             !employeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             !employeeJobTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -874,6 +881,26 @@ final class NativeOnboardingViewModel {
             await enterDestination(destination)
         } catch {
             if await recoverOnboardingCompletionAfterTimeout(error, destination: destination) {
+                return
+            }
+            presentErrorUnlessCancelled(error)
+        }
+    }
+
+    func skipToDashboard() async {
+        pageError = nil
+
+        do {
+            if showingCompletion {
+                await enterDestination(.dashboard)
+                return
+            }
+
+            let result = try await appState.client.completeOnboarding(.init(destination: .dashboard))
+            appState.overview = result.overview
+            await enterDestination(.dashboard)
+        } catch {
+            if await recoverOnboardingCompletionAfterTimeout(error, destination: .dashboard) {
                 return
             }
             presentErrorUnlessCancelled(error)
@@ -1175,15 +1202,19 @@ final class NativeOnboardingViewModel {
         channelValues[fieldId] = value
     }
 
-    private func scheduleEmployeeDraftPersistence(_ employee: @escaping @MainActor () -> OnboardingEmployeeState) {
+    private func scheduleEmployeeDraftPersistence(
+        revision: Int,
+        _ employee: @escaping @MainActor () -> OnboardingEmployeeState
+    ) {
         guard !isApplyingDraft else { return }
         persistTask?.cancel()
         persistTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard let self, !Task.isCancelled else { return }
             do {
-                try await self.saveEmployeeDraftToDaemon(employee())
+                try await self.saveEmployeeDraftToDaemon(employee(), autosaveRevision: revision)
             } catch {
+                guard revision == self.employeeDraftAutosaveRevision else { return }
                 self.presentErrorUnlessCancelled(error)
             }
         }
@@ -1192,6 +1223,10 @@ final class NativeOnboardingViewModel {
     private func applyDraft(_ draft: OnboardingDraftState) {
         isApplyingDraft = true
         defer { isApplyingDraft = false }
+
+        if draft.currentStep != .install {
+            stopInstallProgressAnimation()
+        }
 
         let resolvedProviderID = resolveOnboardingProviderID(
             currentProviderId: providerId,
@@ -1401,7 +1436,7 @@ final class NativeOnboardingViewModel {
 
     private func applyDaemonEvent(_ event: SlackClawEvent) async {
         if onboardingState?.draft.currentStep == .install, case let .deployProgress(_, _, phase, percent, message) = event {
-            installProgress = .init(phase: phase, percent: percent.map(Double.init), message: message)
+            applyInstallProgressUpdate(phase: phase, percent: percent.map(Double.init), message: message)
         }
 
         switch event {
@@ -1460,6 +1495,59 @@ final class NativeOnboardingViewModel {
         } catch {
             presentErrorUnlessCancelled(error)
         }
+    }
+
+    private func beginInstallProgress(_ snapshot: NativeOnboardingInstallProgressSnapshot) {
+        installBusy = true
+        installProgress = snapshot
+        startInstallProgressAnimationIfNeeded()
+    }
+
+    private func endInstallProgress() {
+        installBusy = false
+        stopInstallProgressAnimation()
+    }
+
+    private func applyInstallProgressUpdate(
+        phase: SlackClawDeployPhase,
+        percent: Double?,
+        message: String?
+    ) {
+        installProgress = mergeNativeOnboardingInstallProgress(
+            current: installProgress,
+            phase: phase,
+            percent: percent,
+            message: message
+        )
+        startInstallProgressAnimationIfNeeded()
+    }
+
+    private func startInstallProgressAnimationIfNeeded() {
+        guard installBusy else { return }
+        guard installProgressAnimationTask == nil else { return }
+
+        installProgressAnimationTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { break }
+                guard self.installBusy else {
+                    self.installProgressAnimationTask = nil
+                    return
+                }
+
+                let nextProgress = advanceNativeOnboardingInstallProgress(self.installProgress)
+                if nextProgress.percent != self.installProgress.percent {
+                    self.installProgress = nextProgress
+                }
+            }
+
+            self?.installProgressAnimationTask = nil
+        }
+    }
+
+    private func stopInstallProgressAnimation() {
+        installProgressAnimationTask?.cancel()
+        installProgressAnimationTask = nil
     }
 
     private func presentErrorUnlessCancelled(_ error: Error) {

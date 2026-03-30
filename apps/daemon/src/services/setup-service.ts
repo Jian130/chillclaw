@@ -42,10 +42,10 @@ export class SetupService {
     this.eventPublisher?.publishDeployProgress({
       correlationId,
       targetId: "managed-local",
-      phase: statusBefore.installed ? "reusing" : "detecting",
+      phase: "detecting",
       percent: 10,
       message: statusBefore.installed
-        ? `Found OpenClaw ${statusBefore.version ?? "installed"} and SlackClaw is preparing to reuse it.`
+        ? `Found OpenClaw ${statusBefore.version ?? "installed"} and SlackClaw is checking whether it can be reused.`
         : "SlackClaw is preparing a managed local OpenClaw install for this Mac."
     });
     steps.push({
@@ -57,7 +57,23 @@ export class SetupService {
         : "No compatible OpenClaw installation was found yet. SlackClaw will deploy a managed local copy for this user."
     });
 
+    this.eventPublisher?.publishDeployProgress({
+      correlationId,
+      targetId: "managed-local",
+      phase: statusBefore.installed ? "reusing" : "installing",
+      percent: statusBefore.installed ? 34 : 46,
+      message: statusBefore.installed
+        ? `SlackClaw is preparing the existing OpenClaw runtime for onboarding.`
+        : "SlackClaw is downloading and installing OpenClaw locally for this Mac."
+    });
     installResult = await this.adapter.instances.install(false, { forceLocal: options?.forceLocal ?? false });
+    this.eventPublisher?.publishDeployProgress({
+      correlationId,
+      targetId: "managed-local",
+      phase: "verifying",
+      percent: 84,
+      message: "SlackClaw is verifying the OpenClaw runtime and refreshing local status."
+    });
     this.eventPublisher?.publishDeployCompleted({
       correlationId,
       targetId: "managed-local",

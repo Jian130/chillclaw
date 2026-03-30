@@ -770,6 +770,60 @@ private func nativeOnboardingInstallProgressFallback(_ phase: SlackClawDeployPha
     }
 }
 
+private func nativeOnboardingInstallProgressCeiling(_ phase: SlackClawDeployPhase?) -> Double {
+    switch phase {
+    case .some(.detecting):
+        return 28
+    case .some(.reusing):
+        return 42
+    case .some(.installing), .some(.updating), .some(.uninstalling):
+        return 76
+    case .some(.verifying):
+        return 90
+    case .some(.restartingGateway):
+        return 96
+    case .none:
+        return 24
+    }
+}
+
+private func nativeOnboardingInstallProgressAnimationStep(_ phase: SlackClawDeployPhase?) -> Double {
+    switch phase {
+    case .some(.detecting):
+        return 0.55
+    case .some(.reusing):
+        return 0.45
+    case .some(.installing), .some(.updating), .some(.uninstalling):
+        return 0.24
+    case .some(.verifying):
+        return 0.36
+    case .some(.restartingGateway):
+        return 0.22
+    case .none:
+        return 0.35
+    }
+}
+
+func mergeNativeOnboardingInstallProgress(
+    current: NativeOnboardingInstallProgressSnapshot,
+    phase: SlackClawDeployPhase,
+    percent: Double?,
+    message: String?
+) -> NativeOnboardingInstallProgressSnapshot {
+    let resolvedPercent = percent ?? nativeOnboardingInstallProgressFallback(phase)
+    let nextPercent = max(current.percent ?? 0, resolvedPercent)
+    return .init(phase: phase, percent: nextPercent, message: message)
+}
+
+func advanceNativeOnboardingInstallProgress(
+    _ progress: NativeOnboardingInstallProgressSnapshot
+) -> NativeOnboardingInstallProgressSnapshot {
+    let basePercent = progress.percent ?? nativeOnboardingInstallProgressFallback(progress.phase)
+    let ceiling = nativeOnboardingInstallProgressCeiling(progress.phase)
+    let nextPercent = min(basePercent + nativeOnboardingInstallProgressAnimationStep(progress.phase), ceiling)
+    return .init(phase: progress.phase, percent: nextPercent, message: progress.message)
+}
+
 private func nativeOnboardingInstallStageLabel(
     progress: NativeOnboardingInstallProgressSnapshot?,
     copy: NativeOnboardingCopy
@@ -940,6 +994,7 @@ struct NativeOnboardingCopy: Sendable {
     let brand: String
     let subtitle: String
     let skip: String
+    let skipDetail: String
     let progressStep: String
     let progressComplete: String
     let stepLabels: [String]
@@ -1016,6 +1071,8 @@ struct NativeOnboardingCopy: Sendable {
     let channelSave: String
     let channelSaveContinue: String
     let channelSessionSubmitInput: String
+    let channelWechatPairingCode: String
+    let channelWechatApprovePairing: String
     let channelWechatStartLogin: String
     let channelWechatStartingLogin: String
     let channelWechatWaitingForQR: String
@@ -1114,6 +1171,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             brand: "ChillClaw",
             subtitle: "几分钟内搭建你的 OpenClaw 数字员工工作区",
             skip: "跳过引导",
+            skipDetail: "立即前往仪表盘，稍后可在配置中完成剩余设置。",
             progressStep: "第 {current} / {total} 步",
             progressComplete: "已完成",
             stepLabels: ["欢迎", "安装", "权限", "模型", "渠道", "AI 员工"],
@@ -1194,6 +1252,8 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelSave: "保存渠道",
             channelSaveContinue: "保存并继续",
             channelSessionSubmitInput: "提交会话输入",
+            channelWechatPairingCode: "配对码",
+            channelWechatApprovePairing: "批准配对",
             channelWechatStartLogin: "开始微信登录",
             channelWechatStartingLogin: "正在启动微信登录",
             channelWechatWaitingForQR: "正在等待二维码",
@@ -1268,6 +1328,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             brand: "ChillClaw",
             subtitle: "数分で OpenClaw ベースのデジタル従業員ワークスペースを構築します",
             skip: "オンボーディングをスキップ",
+            skipDetail: "今すぐダッシュボードへ進み、残りの設定はあとで構成画面から完了できます。",
             progressStep: "ステップ {current} / {total}",
             progressComplete: "完了",
             stepLabels: ["開始", "インストール", "権限", "モデル", "チャネル", "AI 社員"],
@@ -1348,6 +1409,8 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelSave: "チャネルを保存",
             channelSaveContinue: "保存して続行",
             channelSessionSubmitInput: "セッション入力を送信",
+            channelWechatPairingCode: "ペアリングコード",
+            channelWechatApprovePairing: "ペアリングを承認",
             channelWechatStartLogin: "WeChat ログインを開始",
             channelWechatStartingLogin: "WeChat ログインを開始しています",
             channelWechatWaitingForQR: "QRコードを待機中",
@@ -1422,6 +1485,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             brand: "ChillClaw",
             subtitle: "몇 분 안에 OpenClaw 기반 디지털 직원 작업 공간을 만드세요",
             skip: "온보딩 건너뛰기",
+            skipDetail: "지금 대시보드로 이동하고, 남은 설정은 나중에 구성 화면에서 마무리하세요.",
             progressStep: "{current}/{total}단계",
             progressComplete: "완료",
             stepLabels: ["시작", "설치", "권한", "모델", "채널", "AI 직원"],
@@ -1502,6 +1566,8 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelSave: "채널 저장",
             channelSaveContinue: "저장 후 계속",
             channelSessionSubmitInput: "세션 입력 제출",
+            channelWechatPairingCode: "페어링 코드",
+            channelWechatApprovePairing: "페어링 승인",
             channelWechatStartLogin: "WeChat 로그인 시작",
             channelWechatStartingLogin: "WeChat 로그인 시작 중",
             channelWechatWaitingForQR: "QR 코드 대기 중",
@@ -1576,6 +1642,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             brand: "ChillClaw",
             subtitle: "Construye en minutos tu espacio de trabajo de empleados digitales impulsado por OpenClaw",
             skip: "Omitir onboarding",
+            skipDetail: "Ve al panel ahora y termina el resto de la configuración más tarde desde Configuración.",
             progressStep: "Paso {current} de {total}",
             progressComplete: "Completado",
             stepLabels: ["Inicio", "Instalar", "Permisos", "Modelo", "Canal", "Empleado IA"],
@@ -1656,6 +1723,8 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelSave: "Guardar canal",
             channelSaveContinue: "Guardar y continuar",
             channelSessionSubmitInput: "Enviar entrada de sesión",
+            channelWechatPairingCode: "Código de emparejamiento",
+            channelWechatApprovePairing: "Aprobar emparejamiento",
             channelWechatStartLogin: "Iniciar inicio de sesión en WeChat",
             channelWechatStartingLogin: "Iniciando inicio de sesión en WeChat",
             channelWechatWaitingForQR: "Esperando el código QR",
@@ -1730,6 +1799,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             brand: "ChillClaw",
             subtitle: "Build your OpenClaw-powered digital employee workspace in minutes",
             skip: "Skip onboarding",
+            skipDetail: "Go to the Dashboard now and finish the remaining setup later in Configuration.",
             progressStep: "Step {current} of {total}",
             progressComplete: "Complete",
             stepLabels: ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee"],
@@ -1810,6 +1880,8 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             channelSave: "Save channel",
             channelSaveContinue: "Save & Continue",
             channelSessionSubmitInput: "Submit Session Input",
+            channelWechatPairingCode: "Pairing Code",
+            channelWechatApprovePairing: "Approve Pairing",
             channelWechatStartLogin: "Start WeChat Login",
             channelWechatStartingLogin: "Starting WeChat Login",
             channelWechatWaitingForQR: "Waiting for QR Code",

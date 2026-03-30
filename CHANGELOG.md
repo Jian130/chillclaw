@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-03-30 16:51 CST
+
+- rebuilt Configuration across the daemon, React UI, and native macOS app around live OpenClaw truth only, including refreshed Figma-aligned models and channels layouts, redesigned add-model and add-channel workflows, restored remove actions, and live-only pruning of stale saved state
+- improved onboarding across web and native clients with stronger install progress feedback, clearer skip-to-dashboard and advanced-config paths, personal WeChat step 5 staging that defers pairing until final apply, and step 6 AI employee editing that stays local until the final create action
+- fixed AI employee creation and channel binding reliability in the OpenClaw adapter by normalizing runtime WeChat bindings, preserving canonical live model keys, restoring per-agent provider auth from saved secrets for new MiniMax-backed members, and treating plugin-warning-only gateway restarts as non-fatal during finalization
+- polished onboarding and configuration copy and native macOS presentation, including localized install-success wording, onboarding-only primary CTA emphasis, transparent startup/loading treatment, and matching native tab, card, and modal styling for the updated configuration flows
+
 ### 2026-03-29 20:26 CST
 
 - changed Configuration in the daemon, React UI, and native macOS UI to show only models and channels that are currently live in OpenClaw, pruning stale historical model and channel state during refresh while keeping active interactive channel sessions separate from configured entries

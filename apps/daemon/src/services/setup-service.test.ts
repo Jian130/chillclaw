@@ -43,15 +43,23 @@ test("first-run setup publishes deploy progress and completion events", async ()
   const overviewService = new OverviewService(adapter, store);
   const bus = new EventBusService();
   const service = new SetupService(adapter, store, overviewService, new EventPublisher(bus));
-  const events: string[] = [];
+  const events: Array<{ type: string; phase?: string }> = [];
   const unsubscribe = bus.subscribe((event) => {
-    events.push(event.type);
+    events.push({
+      type: event.type,
+      phase: event.type === "deploy.progress" ? event.phase : undefined
+    });
   });
 
   await service.runFirstRunSetup();
   unsubscribe();
 
-  assert.deepEqual(events, ["deploy.progress", "deploy.completed"]);
+  assert.deepEqual(events, [
+    { type: "deploy.progress", phase: "detecting" },
+    { type: "deploy.progress", phase: "reusing" },
+    { type: "deploy.progress", phase: "verifying" },
+    { type: "deploy.completed", phase: undefined }
+  ]);
 });
 
 test("first-run setup ignores onboarding preset skill reconcile work", async () => {

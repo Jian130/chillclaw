@@ -395,7 +395,7 @@ describe("onboarding helpers", () => {
             theme: "minimax",
             platformUrl: "https://platform.minimaxi.com/login",
             tutorialVideoUrl: "https://video.example/minimax",
-            defaultModelKey: "minimax/MiniMax-M2.5",
+            defaultModelKey: "minimax/MiniMax-M2.7",
             authMethods: [{ id: "minimax-api", label: "API Key", kind: "api-key", description: "Paste a MiniMax API key.", interactive: false, fields: [] }]
           },
           {
@@ -493,7 +493,7 @@ describe("onboarding helpers", () => {
             theme: "minimax",
             platformUrl: "https://platform.minimaxi.com/login",
             tutorialVideoUrl: "https://video.example/minimax",
-            defaultModelKey: "minimax/MiniMax-M2.5",
+            defaultModelKey: "minimax/MiniMax-M2.7",
             authMethods: [{ id: "minimax-api", label: "API Key", kind: "api-key", description: "Paste a MiniMax API key.", interactive: false, fields: [] }]
           },
           {
@@ -824,7 +824,7 @@ describe("onboarding helpers", () => {
           description: "MiniMax models for onboarding.",
           theme: "minimax",
           platformUrl: "https://platform.minimaxi.com/login",
-          defaultModelKey: "minimax/MiniMax-M2.5",
+          defaultModelKey: "minimax/MiniMax-M2.7",
           authMethods: []
         },
         provider: {

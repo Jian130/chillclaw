@@ -175,7 +175,7 @@ export class MockAdapter implements EngineAdapter {
       ],
       configured: false,
       modelCount: 1,
-      sampleModels: ["minimax/MiniMax-M2.5"]
+      sampleModels: ["minimax/MiniMax-M2.7"]
     },
     {
       id: "modelstudio",
@@ -386,6 +386,7 @@ export class MockAdapter implements EngineAdapter {
       brain: BrainAssignment;
     }
   >();
+  private primaryMemberAgentId?: string;
   private readonly chatSessions = new Map<string, ChatMessage[]>();
   private readonly chatListeners = new Set<(event: EngineChatLiveEvent) => void>();
   private readonly activeChatTimers = new Map<string, NodeJS.Timeout[]>();
@@ -423,6 +424,8 @@ export class MockAdapter implements EngineAdapter {
     this.aiEmployees = new OpenClawAIEmployeeManager({
       listAIMemberRuntimeCandidates: () => this.listAIMemberRuntimeCandidates(),
       saveAIMemberRuntime: (request) => this.saveAIMemberRuntime(request),
+      getPrimaryAIMemberAgentId: () => this.getPrimaryAIMemberAgentId(),
+      setPrimaryAIMemberAgent: (agentId) => this.setPrimaryAIMemberAgent(agentId),
       getAIMemberBindings: (agentId) => this.getAIMemberBindings(agentId),
       bindAIMemberChannel: (agentId, request) => this.bindAIMemberChannel(agentId, request),
       unbindAIMemberChannel: (agentId, request) => this.unbindAIMemberChannel(agentId, request),
@@ -1259,6 +1262,10 @@ export class MockAdapter implements EngineAdapter {
           secret: request.values.secret ?? ""
         });
       case "wechat":
+        if (request.action === "approve-pairing") {
+          return this.gateway.approvePairing("wechat", { code: request.values.code ?? "" });
+        }
+
         {
           const result = await this.startWechatLogin();
           return {
@@ -1324,6 +1331,18 @@ export class MockAdapter implements EngineAdapter {
     };
   }
 
+  async getPrimaryAIMemberAgentId(): Promise<string | undefined> {
+    return this.primaryMemberAgentId;
+  }
+
+  async setPrimaryAIMemberAgent(agentId: string | undefined): Promise<{ requiresGatewayApply?: boolean }> {
+    this.primaryMemberAgentId = agentId?.trim() || undefined;
+    this.markGatewayApplyPending();
+    return {
+      requiresGatewayApply: true
+    };
+  }
+
   async listAIMemberRuntimeCandidates(): Promise<AIMemberRuntimeCandidate[]> {
     return [...this.memberRuntimeState.values()].map((entry) => ({
       agentId: entry.agentId,
@@ -1348,6 +1367,17 @@ export class MockAdapter implements EngineAdapter {
     const entry = [...this.memberRuntimeState.entries()].find(([, value]) => value.agentId === agentId);
     if (!entry) {
       return { bindings: [] };
+    }
+
+    for (const [memberId, runtime] of this.memberRuntimeState.entries()) {
+      if (memberId === entry[0]) {
+        continue;
+      }
+
+      this.memberRuntimeState.set(memberId, {
+        ...runtime,
+        bindings: runtime.bindings.filter((binding) => binding.target !== request.binding)
+      });
     }
 
     const bindings = entry[1].bindings.some((binding) => binding.target === request.binding)
@@ -1388,13 +1418,23 @@ export class MockAdapter implements EngineAdapter {
     };
   }
 
-  async deleteAIMemberRuntime(agentId: string, _request: DeleteAIMemberRequest): Promise<{ requiresGatewayApply?: boolean }> {
+  async deleteAIMemberRuntime(
+    agentId: string,
+    _request: DeleteAIMemberRequest
+  ): Promise<{ requiresGatewayApply?: boolean; wasPrimary?: boolean }> {
     const entry = [...this.memberRuntimeState.entries()].find(([, value]) => value.agentId === agentId);
+    const wasPrimary = this.primaryMemberAgentId === agentId;
     if (entry) {
       this.memberRuntimeState.delete(entry[0]);
       this.markGatewayApplyPending();
     }
-    return { requiresGatewayApply: true };
+    if (wasPrimary) {
+      this.primaryMemberAgentId = undefined;
+    }
+    return {
+      requiresGatewayApply: true,
+      wasPrimary
+    };
   }
 
   async getChatThreadDetail(request: { agentId: string; threadId: string; sessionKey: string }): Promise<ChatThreadDetail> {
@@ -1679,7 +1719,7 @@ export class MockAdapter implements EngineAdapter {
   }
 
   async approvePairing(
-    channelId: "telegram" | "whatsapp" | "feishu" | "wechat-work",
+    channelId: "telegram" | "whatsapp" | "feishu" | "wechat-work" | "wechat",
     _request: PairingApprovalRequest
   ): Promise<{ message: string; channel: ChannelSetupState }> {
     this.channels[channelId] = {

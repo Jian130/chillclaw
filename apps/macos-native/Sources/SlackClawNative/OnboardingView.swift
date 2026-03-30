@@ -221,11 +221,6 @@ struct NativeOnboardingView: View {
                 }
             }
         }
-        .onChange(of: viewModel.employeeName) { _, _ in viewModel.persistEmployeeDraft() }
-        .onChange(of: viewModel.employeeJobTitle) { _, _ in viewModel.persistEmployeeDraft() }
-        .onChange(of: viewModel.employeeAvatarPresetId) { _, _ in viewModel.persistEmployeeDraft() }
-        .onChange(of: viewModel.selectedEmployeePresetId) { _, _ in viewModel.persistEmployeeDraft() }
-        .onChange(of: viewModel.memoryEnabled) { _, _ in viewModel.persistEmployeeDraft() }
         .alert("ChillClaw", isPresented: Binding(
             get: { viewModel.pageError != nil },
             set: { if !$0 { viewModel.pageError = nil } }
@@ -282,14 +277,22 @@ struct NativeOnboardingView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: headerWidth)
 
-            if viewModel.currentStep == .welcome || viewModel.currentStep == .install || viewModel.currentStep == .model {
-                Button(viewModel.copy.skip) {
-                    Task { await viewModel.complete(destination: .team) }
+            if !viewModel.showingCompletion {
+                VStack(spacing: 6) {
+                    Button(viewModel.copy.skip) {
+                        Task { await viewModel.skipToDashboard() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(nativeOnboardingTextSecondary)
+                    .underline()
+
+                    Text(viewModel.copy.skipDetail)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(nativeOnboardingTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: headerWidth)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(nativeOnboardingTextSecondary)
-                .underline()
             }
         }
         .frame(maxWidth: .infinity)
@@ -1144,7 +1147,7 @@ struct NativeOnboardingView: View {
                         case .wechatGuided?:
                             nativeChannelCredentialCard(
                                 title: "Personal WeChat login",
-                                body: "ChillClaw will run the QR-first WeChat installer and keep the session log here while you scan and confirm the login."
+                                body: "ChillClaw will run the QR-first WeChat installer and keep the session log here while you scan and confirm the login. Once the installer saves the channel, ChillClaw will continue to the AI employee step and finish gateway activation after onboarding."
                             ) {
                                 if let activeSession = viewModel.activeChannelSession {
                                     let sessionLogText = viewModel.displayedChannelSessionQRCodePayload == nil

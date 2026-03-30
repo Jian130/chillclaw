@@ -113,13 +113,13 @@ const CHANNEL_CAPABILITIES: ChannelCapability[] = [
   {
     id: "wechat",
     label: "WeChat",
-    description: "Personal WeChat uses a separate guided login flow.",
+    description: "Personal WeChat uses a QR-first login flow and may ask for a pairing code before it is fully ready.",
     officialSupport: false,
     iconKey: "WX",
-    fieldDefs: [],
-    supportsEdit: false,
-    supportsRemove: false,
-    supportsPairing: false,
+    fieldDefs: [{ id: "code", label: "Pairing code", required: false, placeholder: "Paste pairing code when OpenClaw shows it" }],
+    supportsEdit: true,
+    supportsRemove: true,
+    supportsPairing: true,
     supportsLogin: true,
     guidedSetupKind: "wechat"
   }

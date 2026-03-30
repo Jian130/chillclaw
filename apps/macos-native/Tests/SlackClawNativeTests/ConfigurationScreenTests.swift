@@ -53,10 +53,10 @@ struct ConfigurationScreenTests {
             officialSupport: false,
             iconKey: "wechat",
             docsUrl: nil,
-            fieldDefs: [],
-            supportsEdit: false,
-            supportsRemove: false,
-            supportsPairing: false,
+            fieldDefs: [.init(id: "code", label: "Pairing code", required: false, kind: nil, secret: false, placeholder: nil, options: nil)],
+            supportsEdit: true,
+            supportsRemove: true,
+            supportsPairing: true,
             supportsLogin: true,
             guidedSetupKind: "wechat"
         )
@@ -79,7 +79,7 @@ struct ConfigurationScreenTests {
                     lastUpdatedAt: nil
                 ),
                 capability: personalWechatCapability
-            ) == .init(primaryAction: .continueSetup, showApproveAction: false)
+            ) == .init(primaryAction: .continueSetup, showApproveAction: true)
         )
     }
 
@@ -98,6 +98,13 @@ struct ConfigurationScreenTests {
         #expect(request.action == "approve-pairing")
         #expect(request.values["accountName"] == "Support Bot")
         #expect(request.values["code"] == "123456")
+    }
+
+    @Test
+    func configurationChannelSheetCloseBehaviorMatchesWebFlow() {
+        #expect(shouldCloseNativeConfigurationChannelSheetAfterAction(action: .approvePairing, channelId: .telegram, hasSession: false))
+        #expect(!shouldCloseNativeConfigurationChannelSheetAfterAction(action: .save, channelId: .whatsapp, hasSession: true))
+        #expect(!shouldCloseNativeConfigurationChannelSheetAfterAction(action: .login, channelId: .telegram, hasSession: false))
     }
 
     @Test
@@ -135,6 +142,104 @@ struct ConfigurationScreenTests {
         #expect(source.contains("providerId = existingEntry.providerId"))
         #expect(source.contains("label = existingEntry.label"))
         #expect(source.contains("modelKey = existingEntry.modelKey"))
+    }
+
+    @Test
+    func configurationScreenUsesCardStyleTabsForModelsAndChannels() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("private struct NativeConfigurationTabButton: View"))
+        #expect(source.contains("title: \"AI Models\""))
+        #expect(source.contains("title: \"Channels\""))
+        #expect(source.contains("subtitle: liveModelCount > 0 ? \"Live runtime models\" : \"No live runtime models yet\""))
+        #expect(source.contains("subtitle: liveChannelCount > 0 ? \"Configured live channels\" : \"No live channels yet\""))
+        #expect(source.contains("private var configurationQuickActions: some View"))
+        #expect(source.contains("configurationQuickActions"))
+        #expect(source.contains("if selectedTab == 0 {"))
+        #expect(!source.contains(".pickerStyle(.segmented)"))
+    }
+
+    @Test
+    func modelEntrySheetUsesProviderFirstWorkflowAndInteractiveAuthHooks() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("Choose a provider, model, and authentication for this saved AI model entry."))
+        #expect(source.contains("if providerId.isEmpty"))
+        #expect(source.contains("Change Provider"))
+        #expect(source.contains("Authentication Method"))
+        #expect(source.contains("Authentication progress"))
+        #expect(source.contains("Refresh providers"))
+        #expect(source.contains("submitModelAuthInput"))
+        #expect(source.contains("fetchModelAuthSession"))
+        #expect(source.contains("private enum NativeConfigurationModelSheetBusyState: Equatable"))
+    }
+
+    @Test
+    func modelEntrySheetKeepsRemoveActionForExistingEntries() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("if let existingEntry {"))
+        #expect(source.contains("ActionButton(\"Remove\", variant: .destructive, isBusy: busyState == .remove"))
+        #expect(source.contains("private func remove(entry: SavedModelEntry) async"))
+        #expect(source.contains("deleteModelEntry(entryId: entry.id)"))
+    }
+
+    @Test
+    func runtimeOnlyModelCardsKeepRemoveAction() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("func nativeRuntimeDerivedModelEntry(_ modelConfig: ModelConfigOverview?, modelKey: String) -> SavedModelEntry?"))
+        #expect(source.contains("let runtimeEntry = nativeRuntimeDerivedModelEntry(appState.modelConfig, modelKey: model.key)"))
+        #expect(source.contains("runtimeOnlyModelBody(model: model, provider: provider, palette: palette, fallbackTag: fallbackTag, runtimeEntry: runtimeEntry)"))
+        #expect(source.contains("This model is currently coming from the active OpenClaw runtime without a managed ChillClaw entry."))
+    }
+
+    @Test
+    func channelEntrySheetUsesChooserWorkflowAndStyledActionFooter() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/SlackClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("Choose a communication channel, review the setup guidance, and save the account through ChillClaw."))
+        #expect(source.contains("Change Channel"))
+        #expect(source.contains("Start Login"))
+        #expect(source.contains("Save Channel"))
+        #expect(source.contains("Approve Pairing"))
+        #expect(source.contains("private struct NativeConfigurationChannelMark: View"))
+        #expect(source.contains("shouldCloseNativeConfigurationChannelSheetAfterAction"))
     }
 
     @Test

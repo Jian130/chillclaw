@@ -42,7 +42,7 @@ export function Navigation() {
             </a>
             <a
               className="flex items-center gap-2 rounded-xl bg-[#5eb3b8] px-6 py-2.5 text-white shadow-md transition-all hover:bg-[#4da0a5] hover:shadow-lg"
-              href={websiteLinks.releases}
+              href={websiteLinks.downloadMac}
               rel="noreferrer"
               target="_blank"
             >
@@ -102,7 +102,7 @@ export function Navigation() {
             </a>
             <a
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#5eb3b8] px-6 py-2.5 text-white shadow-md transition-all hover:bg-[#4da0a5]"
-              href={websiteLinks.releases}
+              href={websiteLinks.downloadMac}
               onClick={() => setMobileMenuOpen(false)}
               rel="noreferrer"
               target="_blank"

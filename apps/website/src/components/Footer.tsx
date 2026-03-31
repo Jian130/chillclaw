@@ -32,7 +32,7 @@ export function Footer() {
                 </a>
               </li>
               <li>
-                <a className="transition-colors hover:text-[#5eb3b8]" href={websiteLinks.releases} rel="noreferrer" target="_blank">
+                <a className="transition-colors hover:text-[#5eb3b8]" href={websiteLinks.downloadMac} rel="noreferrer" target="_blank">
                   {t.footer.download}
                 </a>
               </li>

@@ -51,7 +51,7 @@ export function CTA() {
             <div className="flex flex-col gap-4 sm:flex-row">
               <a
                 className="group inline-flex items-center justify-center rounded-2xl bg-white px-8 py-4 text-[#5eb3b8] shadow-lg transition-all hover:-translate-y-0.5 hover:bg-gray-100 hover:shadow-2xl"
-                href={websiteLinks.releases}
+                href={websiteLinks.downloadMac}
                 rel="noreferrer"
                 target="_blank"
               >

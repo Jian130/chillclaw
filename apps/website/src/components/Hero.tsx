@@ -40,7 +40,7 @@ export function Hero() {
             <div className="flex flex-col gap-4 sm:flex-row">
               <a
                 className="group inline-flex items-center justify-center rounded-2xl bg-[#5eb3b8] px-8 py-4 text-white shadow-lg transition-all hover:-translate-y-0.5 hover:bg-[#4da0a5] hover:shadow-xl"
-                href={websiteLinks.releases}
+                href={websiteLinks.downloadMac}
                 rel="noreferrer"
                 target="_blank"
               >

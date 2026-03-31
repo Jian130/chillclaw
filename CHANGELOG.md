@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-03-31 21:15 CST
+
+- changed the website download buttons in the hero, navigation, CTA, and footer to point directly at the published macOS installer asset instead of the GitHub releases index, with regression coverage to keep the direct-download target wired correctly
+
 ### 2026-03-31 20:19 CST
 
 - sped up the final onboarding handoff by returning as soon as the AI employee, channel binding, and gateway setup are ready, while moving preset-skill verification and memory indexing into a persisted background warm-up task with live progress updates

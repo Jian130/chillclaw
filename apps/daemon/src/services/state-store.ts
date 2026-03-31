@@ -84,12 +84,28 @@ export interface OnboardingState {
   draft: OnboardingDraftState;
 }
 
+export interface OnboardingWarmupState {
+  taskId: string;
+  memberId: string;
+  agentId: string;
+  presetSkillIds: string[];
+  targetMode: PresetSkillTargetMode;
+  status: "pending" | "running" | "completed" | "failed";
+  lastMessage: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  failedAt?: string;
+  lastError?: string;
+}
+
 export interface AppState {
   selectedProfileId?: string;
   tasks: EngineTaskResult[];
   introCompletedAt?: string;
   setupCompletedAt?: string;
   onboarding?: OnboardingState;
+  onboardingWarmups?: Record<string, OnboardingWarmupState>;
   channelOnboarding?: ChannelOnboardingState;
   aiTeam?: AITeamState;
   skills?: SkillState;

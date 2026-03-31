@@ -8,27 +8,50 @@ import type { OnboardingStateResponse } from "@chillclaw/contracts";
 import { MockAdapter } from "../engine/mock-adapter.js";
 import { AITeamService } from "./ai-team-service.js";
 import { ChannelSetupService } from "./channel-setup-service.js";
+import { EventBusService } from "./event-bus-service.js";
+import { EventPublisher } from "./event-publisher.js";
 import { OnboardingService } from "./onboarding-service.js";
 import { OverviewService } from "./overview-service.js";
 import { PresetSkillService } from "./preset-skill-service.js";
 import { StateStore } from "./state-store.js";
 
-function createService(testName: string) {
+function createService(testName: string, options?: { withEvents?: boolean }) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
   const adapter = new MockAdapter();
   const store = new StateStore(filePath);
+  const bus = options?.withEvents ? new EventBusService() : undefined;
+  const eventPublisher = bus ? new EventPublisher(bus) : undefined;
   const overviewService = new OverviewService(adapter, store);
   const channelSetupService = new ChannelSetupService(adapter, store);
-  const presetSkillService = new PresetSkillService(adapter, store);
-  const aiTeamService = new AITeamService(adapter, store, undefined, presetSkillService);
+  const presetSkillService = new PresetSkillService(adapter, store, eventPublisher);
+  const aiTeamService = new AITeamService(adapter, store, eventPublisher, presetSkillService);
 
   return {
     adapter,
     store,
+    bus,
     aiTeamService,
     presetSkillService,
-    service: new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService)
+    service: new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService, eventPublisher)
   };
+}
+
+async function waitForCondition(
+  predicate: () => Promise<boolean> | boolean,
+  timeoutMs = 250,
+  intervalMs = 10
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (await predicate()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  assert.fail(`Condition was not met within ${timeoutMs}ms.`);
 }
 
 test("onboarding service persists draft progress and uses full completion as the route gate", async () => {
@@ -101,6 +124,53 @@ test("saving the employee draft stays lightweight once the channel draft is alre
   assert.equal(result.draft.employee?.name, "Alex Morgan");
   assert.equal(result.draft.employee?.jobTitle, "Research Analyst");
   assert.equal(result.summary.channel?.entryId, "wechat:default");
+});
+
+test("saving the employee draft reuses the staged model snapshot without refetching model config", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-employee-model-lightweight-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  let modelConfigCalls = 0;
+  const originalGetModelConfig = adapter.config.getModelConfig.bind(adapter.config);
+  adapter.config.getModelConfig = async () => {
+    modelConfigCalls += 1;
+    return originalGetModelConfig();
+  };
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store);
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
+
+  await store.update((current) => ({
+    ...current,
+    onboarding: {
+      draft: {
+        currentStep: "employee",
+        model: {
+          providerId: "openai",
+          modelKey: "openai/gpt-4o-mini",
+          entryId: "mock-openai-gpt-4o-mini"
+        },
+        channel: {
+          channelId: "wechat",
+          entryId: "wechat:default"
+        },
+        channelProgress: {
+          status: "staged",
+          message: "WeChat is staged."
+        }
+      }
+    }
+  }));
+
+  const result = await service.saveEmployeeDraft({
+    name: "Alex Morgan",
+    jobTitle: "Research Analyst",
+    avatarPresetId: "onboarding-analyst"
+  });
+
+  assert.equal(modelConfigCalls, 0);
+  assert.equal(result.summary.model?.entryId, "mock-openai-gpt-4o-mini");
 });
 
 test("saving the employee draft preserves in-progress spaces while typing", async () => {
@@ -199,7 +269,7 @@ test("saving the employee draft promotes a deferred personal WeChat handoff even
   assert.equal(result.summary.channel?.entryId, "wechat:default");
 });
 
-test("saving the employee draft remaps stale model entry ids to the live saved model entry", async () => {
+test("saving the employee draft keeps the staged model snapshot untouched until final completion", async () => {
   const { service, store } = createService("onboarding-service-employee-model-remap");
 
   await store.update((current) => ({
@@ -230,8 +300,8 @@ test("saving the employee draft remaps stale model entry ids to the live saved m
     avatarPresetId: "onboarding-analyst"
   });
 
-  assert.equal(result.draft.model?.entryId, "mock-openai-gpt-4o-mini");
-  assert.equal(result.summary.model?.entryId, "mock-openai-gpt-4o-mini");
+  assert.equal(result.draft.model?.entryId, "stale-openai-entry");
+  assert.equal(result.summary.model?.entryId, "stale-openai-entry");
 });
 
 test("completed personal WeChat login advances onboarding once the installer saves the channel", async () => {
@@ -546,6 +616,7 @@ test("onboarding completion clears the draft, marks setup completed, and returns
   });
 
   const result = await service.complete({ destination: "chat" });
+  await waitForCondition(async () => Boolean((await store.read()).setupCompletedAt));
   const state = await store.read();
 
   assert.equal(result.status, "completed");
@@ -710,6 +781,149 @@ test("onboarding completion binds the selected channel to the created AI employe
   const member = team.members.find((entry) => entry.id === "member-bind");
 
   assert.equal(member?.bindings.some((binding) => binding.target === "telegram:default"), true);
+});
+
+test("onboarding completion accepts the final employee payload inline and returns before warmup settles", async () => {
+  const { bus, presetSkillService, service } = createService("onboarding-service-fast-handoff", { withEvents: true });
+  const events: Array<{ taskId: string; status: string; message: string }> = [];
+  bus?.subscribe((event) => {
+    if (event.type === "task.progress") {
+      events.push({
+        taskId: event.taskId,
+        status: event.status,
+        message: event.message
+      });
+    }
+  });
+
+  let releaseWarmup!: () => void;
+  const warmupGate = new Promise<void>((resolveWarmup) => {
+    releaseWarmup = resolveWarmup;
+  });
+  const originalSetDesiredPresetSkillIds = presetSkillService.setDesiredPresetSkillIds.bind(presetSkillService);
+  presetSkillService.setDesiredPresetSkillIds = async (...args) => {
+    await warmupGate;
+    return originalSetDesiredPresetSkillIds(...args);
+  };
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "telegram",
+      entryId: "telegram:default"
+    },
+    channelProgress: {
+      status: "staged",
+      requiresGatewayApply: true
+    }
+  });
+
+  const result = await Promise.race([
+    service.complete({
+      destination: "chat",
+      employee: {
+        name: "Ryo-AI",
+        jobTitle: "Research Analyst",
+        avatarPresetId: "onboarding-analyst",
+        presetId: "research-analyst",
+        presetSkillIds: ["research-brief", "status-writer"],
+        knowledgePackIds: ["company-handbook"],
+        workStyles: ["Analytical"],
+        memoryEnabled: true
+      }
+    }).then((response) => ({ kind: "result" as const, response })),
+    new Promise<{ kind: "timeout" }>((resolveTimeout) => setTimeout(() => resolveTimeout({ kind: "timeout" }), 40))
+  ]);
+
+  assert.equal(result.kind, "result");
+  assert.ok(result.response.warmupTaskId);
+  assert.equal(result.response.summary.employee?.name, "Ryo-AI");
+  assert.equal(events.some((event) => event.message === "Creating your AI employee"), true);
+  assert.equal(events.some((event) => event.taskId === result.response.warmupTaskId), true);
+
+  releaseWarmup();
+});
+
+test("onboarding warmup failures keep onboarding completed and mark the created member for repair", async () => {
+  const { bus, presetSkillService, service, store } = createService("onboarding-service-warmup-failure", { withEvents: true });
+  const taskStatuses: string[] = [];
+  bus?.subscribe((event) => {
+    if (event.type === "task.progress") {
+      taskStatuses.push(`${event.status}:${event.message}`);
+    }
+  });
+
+  presetSkillService.setDesiredPresetSkillIds = async () => {
+    throw new Error("Preset skill verification failed.");
+  };
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "telegram",
+      entryId: "telegram:default"
+    },
+    channelProgress: {
+      status: "staged",
+      requiresGatewayApply: true
+    }
+  });
+
+  const result = await service.complete({
+    destination: "team",
+    employee: {
+      name: "Ryo-AI",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: ["research-brief", "status-writer"],
+      knowledgePackIds: ["company-handbook"],
+      workStyles: ["Analytical"],
+      memoryEnabled: true
+    }
+  });
+
+  await waitForCondition(async () => {
+    const persisted = await store.read();
+    const member = Object.values(persisted.aiTeam?.members ?? {}).find((entry) => entry.name === "Ryo-AI");
+    return Boolean(member) && taskStatuses.some((entry) => entry.startsWith("failed:"));
+  });
+
+  const persisted = await store.read();
+  const member = Object.values(persisted.aiTeam?.members ?? {}).find((entry) => entry.name === "Ryo-AI");
+
+  assert.equal(result.status, "completed");
+  assert.equal(persisted.onboarding, undefined);
+  assert.match(member?.currentStatus ?? "", /repair|finish setup/i);
+  assert.equal(taskStatuses.some((entry) => entry.startsWith("failed:")), true);
 });
 
 test("onboarding completion trusts installed deployment targets when status temporarily reports not installed", async () => {
@@ -1520,7 +1734,7 @@ test("onboarding service does not reconcile preset skills while editing the empl
   assert.equal(updated.presetSkillSync?.summary, "No preset skills selected.");
 });
 
-test("onboarding completion reconciles staged preset skills during finalize", async () => {
+test("onboarding completion schedules staged preset skills during background warmup", async () => {
   const { presetSkillService, service } = createService("onboarding-service-finalize-preset-sync");
 
   const reconcileCalls: Array<{
@@ -1576,6 +1790,10 @@ test("onboarding completion reconciles staged preset skills during finalize", as
   assert.equal(reconcileCalls.length, 0);
 
   await service.complete({ destination: "chat" });
+
+  for (let attempt = 0; attempt < 20 && reconcileCalls.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 
   assert.equal(reconcileCalls.length, 1);
   assert.deepEqual(reconcileCalls[0], {

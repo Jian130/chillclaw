@@ -194,6 +194,9 @@ final class NativeOnboardingViewModel {
     var employeeBusy = false
     var completionBusy: OnboardingDestination?
     var completedOnboarding: CompleteOnboardingResponse?
+    var completionWarmupTaskID: String?
+    var completionWarmupStatus: ChillClawTaskProgressStatus?
+    var completionWarmupMessage: String?
     var channelMessage: String?
     var channelRequiresApply = false
     var channelSessionInput = ""
@@ -416,6 +419,8 @@ final class NativeOnboardingViewModel {
     }
 
     private func applyOnboardingState(_ state: OnboardingStateResponse) {
+        completedOnboarding = nil
+        clearCompletionWarmupState()
         onboardingState = state
         applyDraft(state.draft)
     }
@@ -441,9 +446,27 @@ final class NativeOnboardingViewModel {
         applyOnboardingState(state)
     }
 
-    private func enterDestination(_ destination: OnboardingDestination) async {
+    private func applyCompletedOnboarding(_ result: CompleteOnboardingResponse) {
+        appState.overview = result.overview
+        completedOnboarding = result
+        completionWarmupTaskID = result.warmupTaskId
+        completionWarmupStatus = result.warmupTaskId == nil ? nil : .running
+        completionWarmupMessage = result.warmupTaskId == nil ? nil : "Finishing workspace setup in the background."
+    }
+
+    private func clearCompletionWarmupState() {
+        completionWarmupTaskID = nil
+        completionWarmupStatus = nil
+        completionWarmupMessage = nil
+    }
+
+    private func enterDestination(_ destination: OnboardingDestination, refreshAll: Bool = false) async {
         appState.selectedSection = onboardingDestinationSection(destination)
-        await appState.refreshAll()
+        if refreshAll {
+            await appState.refreshAll()
+        } else if (destination == .team || destination == .chat), appState.aiTeamOverview == nil {
+            _ = try? await readFreshAITeamOverview()
+        }
         if destination == .chat {
             await appState.chatViewModel.start()
         }
@@ -484,6 +507,7 @@ final class NativeOnboardingViewModel {
         pageLoading = true
         pageError = nil
         completedOnboarding = nil
+        clearCompletionWarmupState()
 
         do {
             if appState.overview == nil {
@@ -882,11 +906,8 @@ final class NativeOnboardingViewModel {
         )
 
         do {
-            try await saveEmployeeDraftToDaemon(employeeState)
-            let result = try await appState.client.completeOnboarding(.init())
-            appState.overview = result.overview
-            completedOnboarding = result
-            refreshAITeamOverviewInBackground()
+            let result = try await appState.client.completeOnboarding(.init(employee: employeeState))
+            applyCompletedOnboarding(result)
         } catch {
             if await recoverOnboardingCompletionAfterTimeout(error, destination: nil) {
                 return
@@ -908,7 +929,7 @@ final class NativeOnboardingViewModel {
 
             let result = try await appState.client.completeOnboarding(.init(destination: destination))
             appState.overview = result.overview
-            await enterDestination(destination)
+            await enterDestination(destination, refreshAll: false)
         } catch {
             if await recoverOnboardingCompletionAfterTimeout(error, destination: destination) {
                 return
@@ -928,7 +949,7 @@ final class NativeOnboardingViewModel {
 
             let result = try await appState.client.completeOnboarding(.init(destination: .dashboard))
             appState.overview = result.overview
-            await enterDestination(.dashboard)
+            await enterDestination(.dashboard, refreshAll: false)
         } catch {
             if await recoverOnboardingCompletionAfterTimeout(error, destination: .dashboard) {
                 return
@@ -1432,13 +1453,6 @@ final class NativeOnboardingViewModel {
         return overview
     }
 
-    private func refreshAITeamOverviewInBackground() {
-        Task { [weak self] in
-            guard let self else { return }
-            _ = try? await self.readFreshAITeamOverview()
-        }
-    }
-
     private func recoverOnboardingCompletionAfterTimeout(
         _ error: Error,
         destination: OnboardingDestination?
@@ -1456,13 +1470,12 @@ final class NativeOnboardingViewModel {
                     summary: completionSummary,
                     overview: overview
                 )
-                appState.overview = overview
+                applyCompletedOnboarding(recovered)
 
                 if let destination {
-                    await enterDestination(destination)
+                    await enterDestination(destination, refreshAll: false)
                 } else {
                     completedOnboarding = recovered
-                    refreshAITeamOverviewInBackground()
                 }
 
                 return true
@@ -1526,7 +1539,12 @@ final class NativeOnboardingViewModel {
                     presetSkillSync: snapshot.data
                 )
             }
-        case .skillCatalogUpdated, .pluginConfigUpdated, .deployProgress, .deployCompleted, .gatewayStatus, .taskProgress, .chatStream, .configApplied:
+        case let .taskProgress(taskID, status, message):
+            if taskID == completionWarmupTaskID {
+                completionWarmupStatus = status
+                completionWarmupMessage = message
+            }
+        case .skillCatalogUpdated, .pluginConfigUpdated, .deployProgress, .deployCompleted, .gatewayStatus, .chatStream, .configApplied:
             break
         }
 

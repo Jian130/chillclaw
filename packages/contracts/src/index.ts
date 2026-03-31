@@ -385,6 +385,7 @@ export interface UpdateOnboardingStateRequest {
 
 export interface CompleteOnboardingRequest {
   destination?: OnboardingDestination;
+  employee?: OnboardingEmployeeState;
 }
 
 export interface CompleteOnboardingResponse {
@@ -392,6 +393,7 @@ export interface CompleteOnboardingResponse {
   destination?: OnboardingDestination;
   summary: OnboardingCompletionSummary;
   overview: ProductOverview;
+  warmupTaskId?: string;
 }
 
 export interface OnboardingStepNavigationRequest {

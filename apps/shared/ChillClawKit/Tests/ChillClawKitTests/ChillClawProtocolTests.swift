@@ -361,6 +361,77 @@ struct ChillClawProtocolTests {
     }
 
     @Test
+    func completeOnboardingResponseDecodesWarmupTaskIdentifier() throws {
+        let data = """
+        {
+          "status": "completed",
+          "destination": "dashboard",
+          "warmupTaskId": "onboarding-warmup-task-1",
+          "summary": {},
+          "overview": {
+            "appName": "ChillClaw",
+            "appVersion": "0.1.2",
+            "platformTarget": "macOS first",
+            "firstRun": {
+              "introCompleted": true,
+              "setupCompleted": true
+            },
+            "appService": {
+              "mode": "launchagent",
+              "installed": true,
+              "running": true,
+              "managedAtLogin": true,
+              "summary": "Running",
+              "detail": "Loaded"
+            },
+            "engine": {
+              "engine": "openclaw",
+              "installed": true,
+              "running": true,
+              "version": "2026.3.13",
+              "summary": "Ready",
+              "lastCheckedAt": "2026-03-20T00:00:00.000Z"
+            },
+            "installSpec": {
+              "engine": "openclaw",
+              "desiredVersion": "latest",
+              "installSource": "npm-local",
+              "prerequisites": ["macOS"]
+            },
+            "capabilities": {
+              "engine": "openclaw",
+              "supportsInstall": true,
+              "supportsUpdate": true,
+              "supportsRecovery": true,
+              "supportsStreaming": true,
+              "runtimeModes": ["gateway"],
+              "supportedChannels": ["telegram"],
+              "starterSkillCategories": ["communication"],
+              "futureLocalModelFamilies": ["qwen"]
+            },
+            "installChecks": [],
+            "channelSetup": {
+              "baseOnboardingCompleted": true,
+              "channels": [],
+              "gatewayStarted": true,
+              "gatewaySummary": "Running"
+            },
+            "profiles": [],
+            "templates": [],
+            "healthChecks": [],
+            "recoveryActions": [],
+            "recentTasks": []
+          }
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder.chillClaw.decode(CompleteOnboardingResponse.self, from: data)
+
+        #expect(response.destination == .dashboard)
+        #expect(response.warmupTaskId == "onboarding-warmup-task-1")
+    }
+
+    @Test
     func productOverviewDecodesPendingGatewayApply() throws {
         let data = """
         {

@@ -121,6 +121,12 @@ export interface AIMemberRuntimeRequest {
   brain: BrainAssignment;
 }
 
+export interface SaveAIMemberRuntimeOptions {
+  performMemoryIndex?: boolean;
+  markGatewayApplyPending?: boolean;
+  ensurePrimaryAgent?: boolean;
+}
+
 export interface AIMemberRuntimeState {
   agentId: string;
   agentDir: string;
@@ -222,7 +228,10 @@ export interface ConfigManager {
 
 export interface AIEmployeeManager {
   listAIMemberRuntimeCandidates(): Promise<AIMemberRuntimeCandidate[]>;
-  saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }>;
+  saveAIMemberRuntime(
+    request: AIMemberRuntimeRequest,
+    options?: SaveAIMemberRuntimeOptions
+  ): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }>;
   getPrimaryAIMemberAgentId(): Promise<string | undefined>;
   setPrimaryAIMemberAgent(agentId: string | undefined): Promise<{ requiresGatewayApply?: boolean }>;
   getAIMemberBindings(agentId: string): Promise<MemberBindingSummary[]>;

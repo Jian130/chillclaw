@@ -1654,6 +1654,23 @@ struct NativeOnboardingView: View {
                 summaryCard(title: viewModel.copy.completionEmployee, value: viewModel.completionSummary.employee?.name ?? "Not created")
             }
 
+            if let warmupMessage = viewModel.completionWarmupMessage, viewModel.completionWarmupTaskID != nil {
+                InfoBanner(
+                    title: viewModel.completionWarmupStatus == .failed
+                        ? "Repair needed"
+                        : viewModel.completionWarmupStatus == .completed
+                            ? "Workspace ready"
+                            : "Finishing workspace setup",
+                    description: warmupMessage,
+                    icon: viewModel.completionWarmupStatus == .failed ? "exclamationmark.triangle.fill" : "sparkles",
+                    accent: viewModel.completionWarmupStatus == .failed
+                        ? .red
+                        : viewModel.completionWarmupStatus == .completed
+                            ? .green
+                            : .blue
+                )
+            }
+
             HStack(spacing: 16) {
                 destinationCard(title: viewModel.copy.goTeam, subtitle: "Manage AI employees and teams", destination: .team)
                 destinationCard(title: viewModel.copy.goDashboard, subtitle: "Open the workspace overview", destination: .dashboard)

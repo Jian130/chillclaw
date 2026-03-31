@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-03-31 20:19 CST
+
+- sped up the final onboarding handoff by returning as soon as the AI employee, channel binding, and gateway setup are ready, while moving preset-skill verification and memory indexing into a persisted background warm-up task with live progress updates
+- made onboarding completion atomic across daemon, web, and native macOS by sending the final employee draft inline with `/api/onboarding/complete`, returning a `warmupTaskId`, removing the extra completion-time employee save round trip, and reducing unnecessary post-complete refresh churn
+- kept employee-step autosave lightweight by reusing already-staged model and channel draft state instead of repeatedly rebuilding full onboarding config during normal typing
+
 ### 2026-03-31 20:14 CST
 
 - refreshed the public `apps/website` landing page to match the latest approved Figma Make structure more closely, including the added open-source section, updated hero and footer content, real ChillClaw repo/docs/releases links, and the website-local agent rules for future Figma copy refreshes

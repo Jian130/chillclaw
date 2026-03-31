@@ -49,4 +49,11 @@ describe("OnboardingPage CTA styling", () => {
     expect(source).toContain("--onboarding-auth-method-count");
     expect(source).not.toContain("onboarding-auth-method-grid--single");
   });
+
+  it("submits the final employee draft through onboarding completion instead of a separate save round trip", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain("const result = await completeOnboarding({ employee: draft });");
+    expect(source).not.toContain("await saveEmployeeDraftToDaemon(draft);");
+  });
 });

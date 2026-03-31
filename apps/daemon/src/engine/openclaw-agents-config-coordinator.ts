@@ -19,7 +19,8 @@ import { resolveReadableMemberAgentId } from "./member-agent-id.js";
 import type {
   AIMemberRuntimeCandidate,
   AIMemberRuntimeRequest,
-  AIMemberRuntimeState
+  AIMemberRuntimeState,
+  SaveAIMemberRuntimeOptions
 } from "./adapter.js";
 
 const PERSONAL_WECHAT_RUNTIME_CHANNEL_KEY = "openclaw-weixin";
@@ -365,7 +366,10 @@ export class AgentsConfigCoordinator {
     return this.access.setPrimaryAIMemberAgent(agentId);
   }
 
-  async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
+  async saveAIMemberRuntime(
+    request: AIMemberRuntimeRequest,
+    options?: SaveAIMemberRuntimeOptions
+  ): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
     const modelState = await this.access.readResolvedSavedModelState();
     const sourceEntry =
       modelState.modelEntries?.find((entry) => entry.id === request.brain.entryId) ??
@@ -402,8 +406,12 @@ export class AgentsConfigCoordinator {
     await rm(`${workspaceDir}/knowledge`, { recursive: true, force: true }).catch(() => undefined);
     await this.access.writeMemberWorkspaceFiles(request, workspaceDir, { createBootstrap: created });
     await this.syncMemberBrain({ ...request, brain: resolvedBrain }, agentId, agentDir, workspaceDir);
-    await this.access.runOpenClaw(["memory", "index", "--agent", agentId, "--force"], { allowFailure: true });
-    await this.access.markGatewayApplyPending();
+    if (options?.performMemoryIndex !== false) {
+      await this.access.runOpenClaw(["memory", "index", "--agent", agentId, "--force"], { allowFailure: true });
+    }
+    if (options?.markGatewayApplyPending !== false) {
+      await this.access.markGatewayApplyPending();
+    }
     this.access.invalidateReadCaches(["skills", "ai-members"], agentId);
 
     const agents = await this.access.listOpenClawAgents();
@@ -411,7 +419,7 @@ export class AgentsConfigCoordinator {
       throw new Error(`ChillClaw could not verify the AI member agent ${agentId}.`);
     }
 
-    if (!(await this.access.getPrimaryAIMemberAgentId())) {
+    if (options?.ensurePrimaryAgent !== false && !(await this.access.getPrimaryAIMemberAgentId())) {
       await this.access.setPrimaryAIMemberAgent(agentId);
     }
 
@@ -420,7 +428,7 @@ export class AgentsConfigCoordinator {
       agentDir,
       workspaceDir,
       bindings: await this.readMemberBindings(agentId),
-      requiresGatewayApply: true
+      requiresGatewayApply: options?.markGatewayApplyPending !== false
     };
   }
 

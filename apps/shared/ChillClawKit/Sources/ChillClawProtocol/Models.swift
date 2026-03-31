@@ -389,17 +389,20 @@ public struct CompleteOnboardingResponse: Codable, Sendable {
     public var destination: OnboardingDestination?
     public var summary: OnboardingCompletionSummary
     public var overview: ProductOverview
+    public var warmupTaskId: String?
 
     public init(
         status: String,
         destination: OnboardingDestination? = nil,
         summary: OnboardingCompletionSummary,
-        overview: ProductOverview
+        overview: ProductOverview,
+        warmupTaskId: String? = nil
     ) {
         self.status = status
         self.destination = destination
         self.summary = summary
         self.overview = overview
+        self.warmupTaskId = warmupTaskId
     }
 }
 

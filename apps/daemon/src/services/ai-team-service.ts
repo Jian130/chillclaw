@@ -17,7 +17,11 @@ import type {
   TeamDetail
 } from "@chillclaw/contracts";
 import type { EngineAdapter } from "../engine/adapter.js";
-import type { AIMemberRuntimeCandidate, SkillRuntimeCatalog } from "../engine/adapter.js";
+import type {
+  AIMemberRuntimeCandidate,
+  SaveAIMemberRuntimeOptions,
+  SkillRuntimeCatalog
+} from "../engine/adapter.js";
 import { aiMemberPresets, defaultAIMemberSkillOptions, normalizePresetSkillIds } from "../config/ai-member-presets.js";
 import { EventPublisher } from "./event-publisher.js";
 import { fallbackMutationSyncMeta } from "./mutation-sync.js";
@@ -274,6 +278,13 @@ function buildRuntimeSkillOptions(runtimeSkills: SkillRuntimeCatalog): SkillOpti
     );
 }
 
+interface PersistMemberOptions {
+  deferPresetSkillResolution?: boolean;
+  runtimeSave?: SaveAIMemberRuntimeOptions;
+  currentStatus?: string;
+  activityDescription?: string;
+}
+
 export class AITeamService {
   constructor(
     private readonly adapter: EngineAdapter,
@@ -369,9 +380,22 @@ export class AITeamService {
 
   async saveMemberForOnboarding(
     memberId: string | undefined,
-    request: SaveAIMemberRequest
+    request: SaveAIMemberRequest,
+    options?: { deferWarmup?: boolean }
   ): Promise<{ member: AIMemberDetail; requiresGatewayApply?: boolean }> {
-    const { member, requiresGatewayApply } = await this.persistMember(memberId, request);
+    const { member, requiresGatewayApply } = await this.persistMember(memberId, request, {
+      deferPresetSkillResolution: options?.deferWarmup,
+      currentStatus: options?.deferWarmup ? "Finishing workspace setup in the background." : "Ready for new assignments.",
+      activityDescription: options?.deferWarmup
+        ? `${request.name.trim()} is ready to open and will finish workspace setup in the background.`
+        : `${request.name.trim()} is ready and mapped to an OpenClaw agent.`,
+      runtimeSave: options?.deferWarmup
+        ? {
+            performMemoryIndex: false,
+            ensurePrimaryAgent: false
+          }
+        : undefined
+    });
     return {
       member,
       requiresGatewayApply
@@ -380,7 +404,8 @@ export class AITeamService {
 
   private async persistMember(
     memberId: string | undefined,
-    request: SaveAIMemberRequest
+    request: SaveAIMemberRequest,
+    options?: PersistMemberOptions
   ): Promise<{ current: AIMemberDetail | undefined; member: AIMemberDetail; requiresGatewayApply?: boolean }> {
     if (!request.name.trim()) {
       throw new Error("AI member name is required.");
@@ -399,32 +424,40 @@ export class AITeamService {
     const normalizedPresetSkillIds = normalizePresetSkillIds(request.presetSkillIds);
     const brain = buildBrainAssignment(modelConfig.savedEntries, request.brainEntryId);
     const knowledgePacks = DEFAULT_KNOWLEDGE_PACKS.filter((pack) => request.knowledgePackIds.includes(pack.id));
-    const requestedSkillIds = normalizedPresetSkillIds.length
-      ? await this.resolvePresetSkillRequest(normalizedPresetSkillIds)
-      : [...new Set(request.skillIds)];
+    const requestedSkillIds =
+      options?.deferPresetSkillResolution && normalizedPresetSkillIds.length > 0
+        ? [...new Set(request.skillIds)]
+        : normalizedPresetSkillIds.length
+          ? await this.resolvePresetSkillRequest(normalizedPresetSkillIds)
+          : [...new Set(request.skillIds)];
     const selectedSkills = mergeSkillOptions(buildRuntimeSkillOptions(runtimeSkills)).filter((skill) => requestedSkillIds.includes(skill.id));
-    const selectedSkillIds = selectedSkills.map((skill) => skill.id);
-    const missingSkillIds = requestedSkillIds.filter((skillId) => !selectedSkillIds.includes(skillId));
-    if (missingSkillIds.length > 0) {
+    const selectedSkillIds = options?.deferPresetSkillResolution ? requestedSkillIds : selectedSkills.map((skill) => skill.id);
+    const missingSkillIds = options?.deferPresetSkillResolution
+      ? []
+      : requestedSkillIds.filter((skillId) => !selectedSkillIds.includes(skillId));
+    if (!options?.deferPresetSkillResolution && missingSkillIds.length > 0) {
       throw new Error(
         `Selected skills are not verified in the active OpenClaw runtime: ${missingSkillIds.join(", ")}. Repair the runtime skills and try again.`
       );
     }
-    const runtime = await this.adapter.aiEmployees.saveAIMemberRuntime({
-      memberId: id,
-      existingAgentId: current?.agentId,
-      name: request.name.trim(),
-      jobTitle: request.jobTitle.trim(),
-      avatar: request.avatar,
-      personality: request.personality.trim(),
-      soul: request.soul.trim(),
-      workStyles: request.workStyles,
-      skillIds: selectedSkillIds,
-      selectedSkills,
-      capabilitySettings: request.capabilitySettings,
-      knowledgePacks,
-      brain
-    });
+    const runtime = await this.adapter.aiEmployees.saveAIMemberRuntime(
+      {
+        memberId: id,
+        existingAgentId: current?.agentId,
+        name: request.name.trim(),
+        jobTitle: request.jobTitle.trim(),
+        avatar: request.avatar,
+        personality: request.personality.trim(),
+        soul: request.soul.trim(),
+        workStyles: request.workStyles,
+        skillIds: selectedSkillIds,
+        selectedSkills,
+        capabilitySettings: request.capabilitySettings,
+        knowledgePacks,
+        brain
+      },
+      options?.runtimeSave
+    );
     const nextMember: AIMemberDetail = {
       id,
       agentId: runtime.agentId,
@@ -433,7 +466,7 @@ export class AITeamService {
       name: request.name.trim(),
       jobTitle: request.jobTitle.trim(),
       status: "ready" as const,
-      currentStatus: "Ready for new assignments.",
+      currentStatus: options?.currentStatus?.trim() || "Ready for new assignments.",
       activeTaskCount: current?.activeTaskCount ?? 0,
       avatar: request.avatar,
       brain,
@@ -467,9 +500,10 @@ export class AITeamService {
               id,
               nextMember.name,
               current ? "Updated AI member" : "Created AI member",
-              current
-                ? `${nextMember.name} was updated and synced to OpenClaw.`
-                : `${nextMember.name} is ready and mapped to an OpenClaw agent.`,
+              options?.activityDescription?.trim() ||
+                (current
+                  ? `${nextMember.name} was updated and synced to OpenClaw.`
+                  : `${nextMember.name} is ready and mapped to an OpenClaw agent.`),
               current ? "updated" : "assigned"
             ),
             ...currentState.activity
@@ -483,6 +517,112 @@ export class AITeamService {
       member: nextMember,
       requiresGatewayApply: runtime.requiresGatewayApply
     };
+  }
+
+  async markOnboardingWarmupProgress(memberId: string, currentStatus: string, activityDescription?: string): Promise<void> {
+    await this.updateStoredMember(memberId, {
+      currentStatus,
+      activityAction: "Continuing setup",
+      activityDescription,
+      activityTone: "started"
+    });
+  }
+
+  async finalizeOnboardingWarmup(memberId: string): Promise<AIMemberDetail> {
+    const state = await this.store.read();
+    const aiTeam = state.aiTeam ?? defaultAITeamState();
+    const member = aiTeam.members[memberId];
+
+    if (!member) {
+      throw new Error("The AI employee is missing from ChillClaw.");
+    }
+
+    if (!member.brain) {
+      throw new Error("The AI employee is missing its saved model assignment.");
+    }
+
+    const runtimeSkills = await this.adapter.config.getSkillRuntimeCatalog();
+    const requestedSkillIds = member.presetSkillIds?.length
+      ? await this.resolvePresetSkillRequest(member.presetSkillIds)
+      : [...new Set(member.skillIds)];
+    const selectedSkills = mergeSkillOptions(buildRuntimeSkillOptions(runtimeSkills)).filter((skill) => requestedSkillIds.includes(skill.id));
+    const selectedSkillIds = selectedSkills.map((skill) => skill.id);
+    const missingSkillIds = requestedSkillIds.filter((skillId) => !selectedSkillIds.includes(skillId));
+    if (missingSkillIds.length > 0) {
+      throw new Error(
+        `Selected skills are not verified in the active OpenClaw runtime: ${missingSkillIds.join(", ")}. Repair the runtime skills and try again.`
+      );
+    }
+
+    const runtime = await this.adapter.aiEmployees.saveAIMemberRuntime(
+      {
+        memberId: member.id,
+        existingAgentId: member.agentId,
+        name: member.name,
+        jobTitle: member.jobTitle,
+        avatar: member.avatar,
+        personality: member.personality,
+        soul: member.soul,
+        workStyles: member.workStyles,
+        skillIds: selectedSkillIds,
+        selectedSkills,
+        capabilitySettings: member.capabilitySettings,
+        knowledgePacks: DEFAULT_KNOWLEDGE_PACKS.filter((pack) => member.knowledgePackIds.includes(pack.id)),
+        brain: member.brain
+      },
+      {
+        markGatewayApplyPending: false,
+        ensurePrimaryAgent: false
+      }
+    );
+
+    const updatedMember: AIMemberDetail = {
+      ...member,
+      agentId: runtime.agentId,
+      bindingCount: runtime.bindings.length,
+      bindings: runtime.bindings,
+      skillIds: selectedSkillIds,
+      currentStatus: "Ready for new assignments.",
+      lastUpdatedAt: new Date().toISOString(),
+      agentDir: runtime.agentDir,
+      workspaceDir: runtime.workspaceDir
+    };
+
+    await this.store.update((current) => {
+      const currentState = current.aiTeam ?? defaultAITeamState();
+      return {
+        ...current,
+        aiTeam: {
+          ...currentState,
+          members: {
+            ...currentState.members,
+            [memberId]: updatedMember
+          },
+          activity: [
+            activityItem(
+              memberId,
+              updatedMember.name,
+              "Workspace ready",
+              `${updatedMember.name} finished workspace setup and is ready for new assignments.`,
+              "completed"
+            ),
+            ...currentState.activity
+          ].slice(0, 20)
+        }
+      };
+    });
+
+    await this.publishAITeamSnapshot();
+    return updatedMember;
+  }
+
+  async markOnboardingWarmupFailed(memberId: string, message: string): Promise<void> {
+    await this.updateStoredMember(memberId, {
+      currentStatus: `Finish setup needs repair: ${message}`,
+      activityAction: "Finish setup needs repair",
+      activityDescription: message,
+      activityTone: "updated"
+    });
   }
 
   async deleteMember(memberId: string, request: DeleteAIMemberRequest): Promise<AITeamActionResponse> {
@@ -807,5 +947,70 @@ export class AITeamService {
     }
 
     throw new Error("Preset skills cannot be resolved because preset skill sync is unavailable.");
+  }
+
+  private async updateStoredMember(
+    memberId: string,
+    options: {
+      currentStatus: string;
+      activityAction?: string;
+      activityDescription?: string;
+      activityTone?: AITeamActivityItem["tone"];
+    }
+  ): Promise<void> {
+    let memberName: string | undefined;
+
+    await this.store.update((current) => {
+      const currentState = current.aiTeam ?? defaultAITeamState();
+      const member = currentState.members[memberId];
+
+      if (!member) {
+        return current;
+      }
+
+      memberName = member.name;
+      const nextMember = {
+        ...member,
+        currentStatus: options.currentStatus,
+        lastUpdatedAt: new Date().toISOString()
+      };
+
+      return {
+        ...current,
+        aiTeam: {
+          ...currentState,
+          members: {
+            ...currentState.members,
+            [memberId]: nextMember
+          },
+          activity: options.activityDescription
+            ? [
+                activityItem(
+                  memberId,
+                  member.name,
+                  options.activityAction ?? "Updated AI member",
+                  options.activityDescription,
+                  options.activityTone ?? "updated"
+                ),
+                ...currentState.activity
+              ].slice(0, 20)
+            : currentState.activity
+        }
+      };
+    });
+
+    if (!memberName) {
+      return;
+    }
+
+    await this.publishAITeamSnapshot();
+  }
+
+  private async publishAITeamSnapshot(): Promise<void> {
+    if (!this.eventPublisher) {
+      return;
+    }
+
+    this.eventPublisher.publishAITeamUpdated(await this.getOverview());
   }
 }

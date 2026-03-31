@@ -78,6 +78,7 @@ import type {
   ManagedSkillInstallRequest,
   ManagedSkillInstallResult,
   ConfigManager,
+  SaveAIMemberRuntimeOptions,
   SkillRuntimeCatalog,
   SkillRuntimeEntry
 } from "./adapter.js";
@@ -423,7 +424,7 @@ export class MockAdapter implements EngineAdapter {
     });
     this.aiEmployees = new OpenClawAIEmployeeManager({
       listAIMemberRuntimeCandidates: () => this.listAIMemberRuntimeCandidates(),
-      saveAIMemberRuntime: (request) => this.saveAIMemberRuntime(request),
+      saveAIMemberRuntime: (request, options) => this.saveAIMemberRuntime(request, options),
       getPrimaryAIMemberAgentId: () => this.getPrimaryAIMemberAgentId(),
       setPrimaryAIMemberAgent: (agentId) => this.setPrimaryAIMemberAgent(agentId),
       getAIMemberBindings: (agentId) => this.getAIMemberBindings(agentId),
@@ -1296,7 +1297,10 @@ export class MockAdapter implements EngineAdapter {
     };
   }
 
-  private async saveAIMemberRuntime(request: AIMemberRuntimeRequest): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
+  private async saveAIMemberRuntime(
+    request: AIMemberRuntimeRequest,
+    options?: SaveAIMemberRuntimeOptions
+  ): Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }> {
     const agentId =
       request.existingAgentId ??
       resolveReadableMemberAgentId(
@@ -1323,11 +1327,13 @@ export class MockAdapter implements EngineAdapter {
       knowledgePacks: request.knowledgePacks,
       brain: request.brain
     });
-    this.markGatewayApplyPending();
+    if (options?.markGatewayApplyPending !== false) {
+      this.markGatewayApplyPending();
+    }
 
     return {
       ...runtime,
-      requiresGatewayApply: true
+      requiresGatewayApply: options?.markGatewayApplyPending !== false
     };
   }
 

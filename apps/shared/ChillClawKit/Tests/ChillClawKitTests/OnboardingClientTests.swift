@@ -576,6 +576,7 @@ struct OnboardingClientTests {
             {
               "status": "completed",
               "destination": "chat",
+              "warmupTaskId": "onboarding-warmup-task-1",
               "summary": {},
               "overview": {
                 "appName": "ChillClaw",
@@ -644,9 +645,23 @@ struct OnboardingClientTests {
             }
         )
 
-        let response = try await client.completeOnboarding(.init(destination: .chat))
+        let employee = OnboardingEmployeeState(
+            memberId: nil,
+            name: "Ryo-AI",
+            jobTitle: "Research Analyst",
+            avatarPresetId: "onboarding-analyst",
+            presetId: "research-analyst",
+            personalityTraits: [],
+            presetSkillIds: ["research-brief", "status-writer"],
+            knowledgePackIds: ["company-handbook"],
+            workStyles: ["Analytical"],
+            memoryEnabled: true
+        )
+
+        let response = try await client.completeOnboarding(.init(destination: .chat, employee: employee))
 
         #expect(response.destination == .chat)
+        #expect(response.warmupTaskId == "onboarding-warmup-task-1")
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/complete")
@@ -654,6 +669,8 @@ struct OnboardingClientTests {
         let body = try #require(readRequestBody(request))
         let payload = try JSONDecoder.chillClaw.decode(CompleteOnboardingRequest.self, from: body)
         #expect(payload.destination == .chat)
+        #expect(payload.employee?.name == "Ryo-AI")
+        #expect(payload.employee?.presetSkillIds == ["research-brief", "status-writer"])
     }
 
     @Test

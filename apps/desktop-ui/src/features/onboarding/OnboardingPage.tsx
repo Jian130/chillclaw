@@ -237,6 +237,9 @@ export default function OnboardingPage() {
   const [employeeBusy, setEmployeeBusy] = useState(false);
   const [completionBusy, setCompletionBusy] = useState<"" | "team" | "dashboard" | "chat">("");
   const [completedOnboarding, setCompletedOnboarding] = useState<CompleteOnboardingResponse>();
+  const [completionWarmupTaskId, setCompletionWarmupTaskId] = useState("");
+  const [completionWarmupStatus, setCompletionWarmupStatus] = useState<"" | "pending" | "running" | "completed" | "failed">("");
+  const [completionWarmupMessage, setCompletionWarmupMessage] = useState("");
 
   const currentDraft = onboardingState?.draft ?? { currentStep: "welcome" as const };
   const currentStep = currentDraft.currentStep;
@@ -416,6 +419,9 @@ export default function OnboardingPage() {
 
   async function goToStep(step: OnboardingStateResponse["draft"]["currentStep"]) {
     setCompletedOnboarding(undefined);
+    setCompletionWarmupTaskId("");
+    setCompletionWarmupStatus("");
+    setCompletionWarmupMessage("");
     return applyOnboardingState(await navigateOnboardingStep({ step }));
   }
 
@@ -431,6 +437,9 @@ export default function OnboardingPage() {
 
   async function saveEmployeeDraftToDaemon(employee: NonNullable<OnboardingStateResponse["draft"]["employee"]>) {
     setCompletedOnboarding(undefined);
+    setCompletionWarmupTaskId("");
+    setCompletionWarmupStatus("");
+    setCompletionWarmupMessage("");
     return applyOnboardingState(await saveOnboardingEmployeeDraft(employee));
   }
 
@@ -590,6 +599,9 @@ export default function OnboardingPage() {
         setTeamOverview(event.snapshot.data);
       } else if (event.type === "preset-skill-sync.updated") {
         setOnboardingState((current) => applyPresetSkillSyncToOnboardingState(current, event.snapshot.data));
+      } else if (event.type === "task.progress" && completionWarmupTaskId && event.taskId === completionWarmupTaskId) {
+        setCompletionWarmupStatus(event.status);
+        setCompletionWarmupMessage(event.message);
       }
 
       const resource = onboardingRefreshResourceForEvent(currentStep, event);
@@ -621,7 +633,7 @@ export default function OnboardingPage() {
         }
       })();
     });
-  }, [currentStep, refresh]);
+  }, [completionWarmupTaskId, currentStep, refresh]);
 
   useEffect(() => {
     const channels = resolveOnboardingChannelPresentations(onboardingState);
@@ -1112,11 +1124,12 @@ export default function OnboardingPage() {
         workStyles: selectedEmployeePreset.workStyles,
         memoryEnabled
       };
-      await saveEmployeeDraftToDaemon(draft);
-      const result = await completeOnboarding({});
+      const result = await completeOnboarding({ employee: draft });
       setOverview(result.overview);
       setCompletedOnboarding(result);
-      void readFreshAITeamOverview().catch(() => undefined);
+      setCompletionWarmupTaskId(result.warmupTaskId ?? "");
+      setCompletionWarmupStatus(result.warmupTaskId ? "running" : "");
+      setCompletionWarmupMessage(result.warmupTaskId ? "Finishing workspace setup in the background." : "");
     } catch (actionError) {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not finish onboarding.");
     } finally {
@@ -2149,6 +2162,26 @@ export default function OnboardingPage() {
                     <span>{completionSummary?.employee?.name ?? "Not created"}</span>
                   </div>
                 </div>
+
+                {completionWarmupTaskId ? (
+                  <div className={`onboarding-install-status onboarding-install-status--${completionWarmupStatus === "failed" ? "warning" : "success"}`}>
+                    <div className="onboarding-install-status__icon">
+                      {completionWarmupStatus === "failed" ? <AlertCircle size={28} /> : <LoaderCircle size={28} />}
+                    </div>
+                    <div className="onboarding-install-status__copy">
+                      <strong>
+                        <StatusBadge tone={completionWarmupStatus === "failed" ? "danger" : completionWarmupStatus === "completed" ? "success" : "info"}>
+                          {completionWarmupStatus === "failed"
+                            ? "Repair needed"
+                            : completionWarmupStatus === "completed"
+                              ? "Ready"
+                              : "Setting up"}
+                        </StatusBadge>
+                      </strong>
+                      <p>{completionWarmupMessage}</p>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="onboarding-destination-grid">
                   <button

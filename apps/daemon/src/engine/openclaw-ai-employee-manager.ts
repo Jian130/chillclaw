@@ -8,12 +8,16 @@ import type {
   AIEmployeeManager,
   AIMemberRuntimeCandidate,
   AIMemberRuntimeRequest,
-  AIMemberRuntimeState
+  AIMemberRuntimeState,
+  SaveAIMemberRuntimeOptions
 } from "./adapter.js";
 
 type AIEmployeeAccess = {
   listAIMemberRuntimeCandidates: () => Promise<AIMemberRuntimeCandidate[]>;
-  saveAIMemberRuntime: (request: AIMemberRuntimeRequest) => Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }>;
+  saveAIMemberRuntime: (
+    request: AIMemberRuntimeRequest,
+    options?: SaveAIMemberRuntimeOptions
+  ) => Promise<AIMemberRuntimeState & { requiresGatewayApply?: boolean }>;
   getPrimaryAIMemberAgentId: () => Promise<string | undefined>;
   setPrimaryAIMemberAgent: (agentId: string | undefined) => Promise<{ requiresGatewayApply?: boolean }>;
   getAIMemberBindings: (agentId: string) => Promise<MemberBindingSummary[]>;
@@ -38,8 +42,8 @@ export class OpenClawAIEmployeeManager implements AIEmployeeManager {
     return this.access.listAIMemberRuntimeCandidates();
   }
 
-  saveAIMemberRuntime(request: AIMemberRuntimeRequest) {
-    return this.access.saveAIMemberRuntime(request);
+  saveAIMemberRuntime(request: AIMemberRuntimeRequest, options?: SaveAIMemberRuntimeOptions) {
+    return this.access.saveAIMemberRuntime(request, options);
   }
 
   getPrimaryAIMemberAgentId() {

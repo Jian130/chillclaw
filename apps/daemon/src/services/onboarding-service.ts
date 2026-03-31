@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   ChannelConfigActionResponse,
   ChannelSessionInputRequest,
@@ -29,10 +31,11 @@ import type { OverviewService } from "./overview-service.js";
 import type { PresetSkillService } from "./preset-skill-service.js";
 import { SetupService } from "./setup-service.js";
 import { AITeamService } from "./ai-team-service.js";
-import { StateStore, defaultOnboardingDraftState } from "./state-store.js";
+import { StateStore, defaultOnboardingDraftState, type OnboardingWarmupState } from "./state-store.js";
 
 const onboardingUiConfig = resolveOnboardingUiConfig();
 const ONBOARDING_STEP_ORDER: OnboardingStep[] = ["welcome", "install", "permissions", "model", "channel", "employee"];
+const ONBOARDING_WARMUP_TASK_PREFIX = "onboarding-warmup";
 
 const AVATAR_PRESET_DETAILS: Record<string, { accent: string; emoji: string; theme: string }> = {
   operator: { accent: "var(--avatar-1)", emoji: "🦊", theme: "sunrise" },
@@ -188,6 +191,8 @@ function buildOnboardingMemberRequest(
 }
 
 export class OnboardingService {
+  private readonly warmupJobs = new Map<string, Promise<void>>();
+
   constructor(
     private readonly adapter: EngineAdapter,
     private readonly store: StateStore,
@@ -196,7 +201,9 @@ export class OnboardingService {
     private readonly aiTeamService: AITeamService,
     private readonly presetSkillService?: PresetSkillService,
     private readonly eventPublisher?: EventPublisher
-  ) {}
+  ) {
+    void this.resumePendingWarmups();
+  }
 
   async getState(): Promise<OnboardingStateResponse> {
     const { state } = await this.readResolvedDraftState();
@@ -487,31 +494,11 @@ export class OnboardingService {
       }
     }
 
-    let nextModel = draft.model;
-    if (draft.model) {
-      const modelConfig = await this.adapter.config.getModelConfig();
-      const matchedEntry = resolveSavedModelEntry(modelConfig.savedEntries, {
-        entryId: draft.model.entryId,
-        providerId: draft.model.providerId,
-        modelKey: draft.model.modelKey,
-        preferDefault: true
-      });
-
-      if (matchedEntry) {
-        nextModel = {
-          providerId: matchedEntry.providerId,
-          modelKey: matchedEntry.modelKey,
-          methodId: matchedEntry.authMethodId ?? draft.model.methodId,
-          entryId: matchedEntry.id
-        };
-      }
-    }
-
     // Employee autosave should stay lightweight and rely on the already-staged draft state.
     return this.updateState(
       {
         currentStep: "employee",
-        model: nextModel,
+        model: draft.model,
         channel: resolvedChannel,
         channelProgress: canTreatChannelAsStaged
           ? {
@@ -545,34 +532,38 @@ export class OnboardingService {
 
   async complete(request: CompleteOnboardingRequest): Promise<CompleteOnboardingResponse> {
     const { draft } = await this.readResolvedDraftState();
+    const completionDraft = {
+      ...draft,
+      employee: normalizedEmployeeState(request.employee ?? draft.employee)
+    };
     const skipToDashboard = request.destination === "dashboard";
-    const summary = skipToDashboard ? await this.buildSummary(draft) : await this.buildFinalizeSummary(draft);
+    const summary = skipToDashboard ? await this.buildSummary(completionDraft) : await this.buildFinalizeSummary(completionDraft);
     let finalSummary = summary;
+    let warmupTaskId: string | undefined;
+    let pendingWarmup: OnboardingWarmupState | undefined;
 
     if (!skipToDashboard) {
-      this.assertReadyForFinalize(draft, summary);
+      this.assertReadyForFinalize(completionDraft, summary);
 
-      const employee = normalizedEmployeeState(draft.employee);
+      const employee = completionDraft.employee;
       if (!employee) {
         throw new Error("Enter the AI employee profile before finishing onboarding.");
       }
 
-      const brainEntryId = summary.model?.entryId ?? draft.model?.entryId;
+      const brainEntryId = summary.model?.entryId ?? completionDraft.model?.entryId;
       if (!brainEntryId) {
         throw new Error("Save the first model before creating the AI employee.");
       }
 
       const presetSkillIds = resolvePresetSkillIds(employee);
-      if (this.presetSkillService) {
-        await this.presetSkillService.setDesiredPresetSkillIds("onboarding", presetSkillIds, {
-          targetMode: onboardingTargetMode(draft.install),
-          waitForReconcile: true
-        });
-      }
+      const warmupTargetMode = onboardingTargetMode(completionDraft.install);
+      warmupTaskId = this.createWarmupTaskId();
+      this.publishWarmupProgress(warmupTaskId, "running", "Creating your AI employee");
 
       const memberResult = await this.aiTeamService.saveMemberForOnboarding(
         employee.memberId,
-        buildOnboardingMemberRequest(employee, brainEntryId)
+        buildOnboardingMemberRequest(employee, brainEntryId),
+        { deferWarmup: true }
       );
       const createdMember = memberResult.member;
 
@@ -580,11 +571,12 @@ export class OnboardingService {
         throw new Error("ChillClaw could not verify the staged AI employee after creation.");
       }
 
-      const channelBinding = summary.channel?.entryId ?? draft.channel?.entryId;
+      const channelBinding = summary.channel?.entryId ?? completionDraft.channel?.entryId;
       if (channelBinding && !createdMember.bindings.some((binding) => binding.target === channelBinding)) {
         await this.aiTeamService.bindMemberChannelForOnboarding(createdMember.id, { binding: channelBinding });
       }
       await this.adapter.aiEmployees.setPrimaryAIMemberAgent(createdMember.agentId);
+      this.publishWarmupProgress(warmupTaskId, "running", "Applying gateway changes");
 
       await this.store.update((existing) => ({
         ...existing,
@@ -623,22 +615,196 @@ export class OnboardingService {
           memoryEnabled: employee.memoryEnabled
         }
       };
+
       await this.adapter.gateway.finalizeOnboardingSetup();
+
+      const warmupTimestamp = new Date().toISOString();
+      pendingWarmup = {
+        taskId: warmupTaskId,
+        memberId: createdMember.id,
+        agentId: createdMember.agentId,
+        presetSkillIds,
+        targetMode: warmupTargetMode,
+        status: "pending",
+        lastMessage: "Finishing workspace setup in the background.",
+        createdAt: warmupTimestamp,
+        updatedAt: warmupTimestamp
+      };
     }
 
     await this.store.update((existing) => ({
       ...existing,
       introCompletedAt: existing.introCompletedAt ?? new Date().toISOString(),
       setupCompletedAt: existing.setupCompletedAt ?? new Date().toISOString(),
-      onboarding: undefined
+      onboarding: undefined,
+      onboardingWarmups:
+        pendingWarmup && warmupTaskId
+          ? {
+              ...(existing.onboardingWarmups ?? {}),
+              [warmupTaskId]: pendingWarmup
+            }
+          : existing.onboardingWarmups
     }));
+
+    if (warmupTaskId) {
+      this.startOnboardingWarmup(warmupTaskId);
+    }
 
     return {
       status: "completed",
       destination: request.destination,
       summary: finalSummary,
-      overview: await this.overviewService.getOverview()
+      overview: await this.overviewService.getOverview(),
+      warmupTaskId
     };
+  }
+
+  private createWarmupTaskId(): string {
+    return `${ONBOARDING_WARMUP_TASK_PREFIX}:${randomUUID()}`;
+  }
+
+  private publishWarmupProgress(
+    taskId: string | undefined,
+    status: "pending" | "running" | "completed" | "failed",
+    message: string
+  ): void {
+    if (!taskId) {
+      return;
+    }
+
+    this.eventPublisher?.publishTaskProgress({
+      taskId,
+      status,
+      message
+    });
+  }
+
+  private async readOnboardingWarmup(taskId: string): Promise<OnboardingWarmupState | undefined> {
+    const state = await this.store.read();
+    return state.onboardingWarmups?.[taskId];
+  }
+
+  private async updateOnboardingWarmup(
+    taskId: string,
+    patch: Partial<OnboardingWarmupState>
+  ): Promise<OnboardingWarmupState | undefined> {
+    let nextWarmup: OnboardingWarmupState | undefined;
+    await this.store.update((current) => {
+      const existingWarmup = current.onboardingWarmups?.[taskId];
+      if (!existingWarmup) {
+        return current;
+      }
+
+      nextWarmup = {
+        ...existingWarmup,
+        ...patch
+      };
+
+      return {
+        ...current,
+        onboardingWarmups: {
+          ...(current.onboardingWarmups ?? {}),
+          [taskId]: nextWarmup
+        }
+      };
+    });
+
+    return nextWarmup;
+  }
+
+  private startOnboardingWarmup(taskId: string): void {
+    if (this.warmupJobs.has(taskId)) {
+      return;
+    }
+
+    const job = this.runOnboardingWarmup(taskId).finally(() => {
+      this.warmupJobs.delete(taskId);
+    });
+    this.warmupJobs.set(taskId, job);
+    void job;
+  }
+
+  private async resumePendingWarmups(): Promise<void> {
+    const state = await this.store.read();
+    const pendingWarmups = Object.values(state.onboardingWarmups ?? {}).filter(
+      (warmup) => warmup.status === "pending" || warmup.status === "running"
+    );
+
+    for (const warmup of pendingWarmups) {
+      this.startOnboardingWarmup(warmup.taskId);
+    }
+  }
+
+  private async runOnboardingWarmup(taskId: string): Promise<void> {
+    const warmup = await this.readOnboardingWarmup(taskId);
+    if (!warmup || warmup.status === "completed") {
+      return;
+    }
+
+    const verificationMessage = "Verifying preset skills";
+    const indexingMessage = "Indexing memory";
+    const readyMessage = "Workspace ready";
+
+    try {
+      await this.updateOnboardingWarmup(taskId, {
+        status: "running",
+        lastMessage: verificationMessage,
+        updatedAt: new Date().toISOString(),
+        lastError: undefined,
+        failedAt: undefined
+      });
+      await this.aiTeamService.markOnboardingWarmupProgress(
+        warmup.memberId,
+        verificationMessage,
+        warmup.presetSkillIds.length > 0
+          ? "ChillClaw is verifying the preset skills for this AI employee."
+          : "ChillClaw is checking the workspace before final indexing."
+      );
+      this.publishWarmupProgress(taskId, "running", verificationMessage);
+
+      if (this.presetSkillService && warmup.presetSkillIds.length > 0) {
+        await this.presetSkillService.setDesiredPresetSkillIds("onboarding", warmup.presetSkillIds, {
+          targetMode: warmup.targetMode,
+          waitForReconcile: true
+        });
+      }
+
+      await this.updateOnboardingWarmup(taskId, {
+        status: "running",
+        lastMessage: indexingMessage,
+        updatedAt: new Date().toISOString()
+      });
+      await this.aiTeamService.markOnboardingWarmupProgress(
+        warmup.memberId,
+        indexingMessage,
+        "ChillClaw is indexing memory so the workspace is ready for the first task."
+      );
+      this.publishWarmupProgress(taskId, "running", indexingMessage);
+
+      await this.aiTeamService.finalizeOnboardingWarmup(warmup.memberId);
+
+      const completedAt = new Date().toISOString();
+      await this.updateOnboardingWarmup(taskId, {
+        status: "completed",
+        lastMessage: readyMessage,
+        updatedAt: completedAt,
+        completedAt,
+        lastError: undefined
+      });
+      this.publishWarmupProgress(taskId, "completed", readyMessage);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ChillClaw could not finish workspace setup.";
+      const failedAt = new Date().toISOString();
+      await this.updateOnboardingWarmup(taskId, {
+        status: "failed",
+        lastMessage: message,
+        updatedAt: failedAt,
+        failedAt,
+        lastError: message
+      });
+      await this.aiTeamService.markOnboardingWarmupFailed(warmup.memberId, message);
+      this.publishWarmupProgress(taskId, "failed", message);
+    }
   }
 
   private async clearOnboardingFallbackModels(result: ModelConfigActionResponse): Promise<ModelConfigActionResponse> {

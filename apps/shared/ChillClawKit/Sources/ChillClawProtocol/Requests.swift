@@ -58,9 +58,11 @@ public struct UpdateOnboardingStateRequest: Codable, Sendable {
 
 public struct CompleteOnboardingRequest: Codable, Sendable {
     public var destination: OnboardingDestination?
+    public var employee: OnboardingEmployeeState?
 
-    public init(destination: OnboardingDestination? = nil) {
+    public init(destination: OnboardingDestination? = nil, employee: OnboardingEmployeeState? = nil) {
         self.destination = destination
+        self.employee = employee
     }
 }
 

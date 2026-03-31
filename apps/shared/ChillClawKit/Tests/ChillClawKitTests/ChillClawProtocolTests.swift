@@ -96,10 +96,10 @@ struct ChillClawProtocolTests {
                 "defaultModelKey": "minimax/MiniMax-M2.5",
                 "authMethods": [
                   {
-                    "id": "minimax-api-key",
-                    "label": "API Key",
+                    "id": "minimax-api",
+                    "label": "MiniMax API Key (Global)",
                     "kind": "api-key",
-                    "description": "Paste a MiniMax API key.",
+                    "description": "Paste a MiniMax API key for the international endpoint at api.minimax.io.",
                     "interactive": false,
                     "fields": [
                       {
@@ -110,6 +110,29 @@ struct ChillClawProtocolTests {
                         "placeholder": "Paste your API key here"
                       }
                     ]
+                  },
+                  {
+                    "id": "minimax-api-key-cn",
+                    "label": "MiniMax API Key (China)",
+                    "kind": "api-key",
+                    "description": "Paste a MiniMax API key for the China endpoint at api.minimaxi.com.",
+                    "interactive": false,
+                    "fields": [
+                      {
+                        "id": "apiKey",
+                        "label": "API Key",
+                        "required": true,
+                        "secret": true
+                      }
+                    ]
+                  },
+                  {
+                    "id": "minimax-portal",
+                    "label": "MiniMax OAuth",
+                    "kind": "oauth",
+                    "description": "Run the MiniMax Coding Plan OAuth flow and choose the Global or China endpoint during setup.",
+                    "interactive": true,
+                    "fields": []
                   }
                 ]
               },
@@ -122,18 +145,62 @@ struct ChillClawProtocolTests {
                 "defaultModelKey": "modelstudio/qwen3.5-plus",
                 "authMethods": [
                   {
-                    "id": "modelstudio-api-key-cn",
-                    "label": "API Key",
+                    "id": "modelstudio-standard-api-key-cn",
+                    "label": "Standard API Key (China)",
                     "kind": "api-key",
-                    "description": "Paste a Model Studio API key.",
+                    "description": "Use a pay-as-you-go Model Studio API key against the China endpoint.",
                     "interactive": false,
                     "fields": [
                       {
                         "id": "apiKey",
                         "label": "API Key",
                         "required": true,
-                        "secret": true,
-                        "placeholder": "Paste your API key here"
+                        "secret": true
+                      }
+                    ]
+                  },
+                  {
+                    "id": "modelstudio-standard-api-key",
+                    "label": "Standard API Key (Global)",
+                    "kind": "api-key",
+                    "description": "Use a pay-as-you-go Model Studio API key against the global endpoint.",
+                    "interactive": false,
+                    "fields": [
+                      {
+                        "id": "apiKey",
+                        "label": "API Key",
+                        "required": true,
+                        "secret": true
+                      }
+                    ]
+                  },
+                  {
+                    "id": "modelstudio-api-key-cn",
+                    "label": "Coding Plan API Key (China)",
+                    "kind": "api-key",
+                    "description": "Use a Model Studio Coding Plan key against the China endpoint.",
+                    "interactive": false,
+                    "fields": [
+                      {
+                        "id": "apiKey",
+                        "label": "API Key",
+                        "required": true,
+                        "secret": true
+                      }
+                    ]
+                  },
+                  {
+                    "id": "modelstudio-api-key",
+                    "label": "Coding Plan API Key (Global)",
+                    "kind": "api-key",
+                    "description": "Use a Model Studio Coding Plan key against the global endpoint.",
+                    "interactive": false,
+                    "fields": [
+                      {
+                        "id": "apiKey",
+                        "label": "API Key",
+                        "required": true,
+                        "secret": true
                       }
                     ]
                   }
@@ -165,9 +232,9 @@ struct ChillClawProtocolTests {
                   },
                   {
                     "id": "openai-codex",
-                    "label": "OAuth",
+                    "label": "OpenAI Codex OAuth",
                     "kind": "oauth",
-                    "description": "Connect securely with your account.",
+                    "description": "Run the OpenAI Codex login flow.",
                     "interactive": true,
                     "fields": []
                   }
@@ -265,7 +332,14 @@ struct ChillClawProtocolTests {
         #expect(response.config.modelProviders[0].platformUrl == "https://platform.minimaxi.com/login")
         #expect(response.config.modelProviders[0].tutorialVideoUrl == "https://video.example/minimax")
         #expect(response.config.modelProviders[1].defaultModelKey == "modelstudio/qwen3.5-plus")
-        #expect(response.config.modelProviders[1].authMethods.map(\.id) == ["modelstudio-api-key-cn"])
+        #expect(
+            response.config.modelProviders[1].authMethods.map(\.id) == [
+                "modelstudio-standard-api-key-cn",
+                "modelstudio-standard-api-key",
+                "modelstudio-api-key-cn",
+                "modelstudio-api-key",
+            ]
+        )
         #expect(response.config.modelProviders[2].authMethods.map(\.id) == ["openai-api-key", "openai-codex"])
         #expect(response.config.channels.map(\.id) == [.wechatWork, .wechat, .feishu, .telegram])
         #expect(response.config.channels.map(\.setupKind) == [.wechatWorkGuided, .wechatGuided, .feishuGuided, .telegramGuided])

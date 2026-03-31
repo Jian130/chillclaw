@@ -741,41 +741,43 @@ struct NativeOnboardingView: View {
                                         .font(.system(size: 20, weight: .semibold))
                                         .foregroundStyle(nativeOnboardingTextPrimary)
 
-                                    let columns = (authMethods.count <= 1)
-                                        ? [GridItem(.fixed(320), spacing: 16)]
-                                        : [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+                                    let cardWidth = authMethods.count <= 1 ? 320.0 : 260.0
 
-                                    LazyVGrid(columns: columns, spacing: 16) {
-                                        ForEach(authMethods) { method in
-                                            OnboardingSelectCard(selected: viewModel.methodId == method.id) {
-                                                viewModel.methodId = method.id
-                                                viewModel.modelSession = nil
-                                                viewModel.modelSessionInput = ""
-                                            } content: {
-                                                VStack(spacing: 10) {
-                                                    ZStack {
-                                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
-                                                            .fill(Color(red: 0.93, green: 0.96, blue: 1.0))
-                                                            .frame(width: 42, height: 42)
-                                                        Image(systemName: onboardingAuthMethodSymbol(method))
-                                                            .font(.system(size: 18, weight: .semibold))
-                                                            .foregroundStyle(Color(red: 0.24, green: 0.41, blue: 0.95))
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 16) {
+                                            ForEach(authMethods) { method in
+                                                OnboardingSelectCard(selected: viewModel.methodId == method.id) {
+                                                    viewModel.methodId = method.id
+                                                    viewModel.modelSession = nil
+                                                    viewModel.modelSessionInput = ""
+                                                } content: {
+                                                    VStack(spacing: 10) {
+                                                        ZStack {
+                                                            RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
+                                                                .fill(Color(red: 0.93, green: 0.96, blue: 1.0))
+                                                                .frame(width: 42, height: 42)
+                                                            Image(systemName: onboardingAuthMethodSymbol(method))
+                                                                .font(.system(size: 18, weight: .semibold))
+                                                                .foregroundStyle(Color(red: 0.24, green: 0.41, blue: 0.95))
+                                                        }
+
+                                                        Text(nativeOnboardingAuthMethodLabel(method, copy: viewModel.copy))
+                                                            .font(.system(size: 20, weight: .semibold))
+                                                            .foregroundStyle(nativeOnboardingTextPrimary)
+                                                            .multilineTextAlignment(.center)
+
+                                                        Text(nativeOnboardingAuthMethodBody(method, copy: viewModel.copy))
+                                                            .font(.system(size: 14, weight: .regular))
+                                                            .lineSpacing(4)
+                                                            .foregroundStyle(nativeOnboardingTextSecondary)
+                                                            .multilineTextAlignment(.center)
+                                                            .fixedSize(horizontal: false, vertical: true)
                                                     }
-
-                                                    Text(nativeOnboardingAuthMethodLabel(method, copy: viewModel.copy))
-                                                        .font(.system(size: 20, weight: .semibold))
-                                                        .foregroundStyle(nativeOnboardingTextPrimary)
-                                                        .multilineTextAlignment(.center)
-
-                                                    Text(nativeOnboardingAuthMethodBody(method, copy: viewModel.copy))
-                                                        .font(.system(size: 14, weight: .regular))
-                                                        .lineSpacing(4)
-                                                        .foregroundStyle(nativeOnboardingTextSecondary)
-                                                        .multilineTextAlignment(.center)
-                                                        .fixedSize(horizontal: false, vertical: true)
                                                 }
+                                                .frame(width: cardWidth)
                                             }
                                         }
+                                        .padding(.vertical, 2)
                                     }
                                 }
                             }
@@ -786,15 +788,6 @@ struct NativeOnboardingView: View {
                                         Text(message)
                                             .font(.system(size: 14, weight: .regular))
                                             .foregroundStyle(nativeOnboardingTextSecondary)
-                                    }
-
-                                    if !curatedProvider.platformUrl.isEmpty {
-                                        NativeOnboardingActionButton(variant: .secondary) {
-                                            viewModel.openModelDocs()
-                                        } label: {
-                                            Label(viewModel.copy.modelGetApiKey, systemImage: "arrow.up.right.square")
-                                                .font(.system(size: 15, weight: .semibold))
-                                        }
                                     }
 
                                     if viewModel.modelSession?.launchUrl != nil {

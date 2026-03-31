@@ -708,8 +708,15 @@ struct OnboardingTests {
 
         #expect(viewModel.curatedModelProviders.map(\.id) == ["minimax", "modelstudio", "openai"])
         #expect(viewModel.curatedModelProviders.map(\.curated.label) == ["MiniMax", "Qwen (通义千问)", "ChatGPT"])
-        #expect(viewModel.curatedModelProviders[0].curated.authMethods.map(\.id) == ["minimax-api", "minimax-api-key-cn"])
-        #expect(viewModel.curatedModelProviders[1].curated.authMethods.map(\.id) == ["modelstudio-api-key-cn"])
+        #expect(viewModel.curatedModelProviders[0].curated.authMethods.map(\.id) == ["minimax-api", "minimax-api-key-cn", "minimax-portal"])
+        #expect(
+            viewModel.curatedModelProviders[1].curated.authMethods.map(\.id) == [
+                "modelstudio-standard-api-key-cn",
+                "modelstudio-standard-api-key",
+                "modelstudio-api-key-cn",
+                "modelstudio-api-key",
+            ]
+        )
         #expect(viewModel.curatedModelProviders[2].curated.authMethods.map(\.id) == ["openai-api-key", "openai-codex"])
     }
 
@@ -1224,6 +1231,45 @@ struct OnboardingTests {
     }
 
     @Test
+    func nativeModelAuthMethodsStayInSingleHorizontalRow() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingView.swift"),
+            encoding: .utf8
+        )
+        let authChooser = try #require(
+            source.components(separatedBy: "if shouldShowAuthMethodChooser {").dropFirst().first?
+                .components(separatedBy: "if setupVariant == .oauth {").first
+        )
+
+        #expect(authChooser.contains("ScrollView(.horizontal, showsIndicators: false)"))
+        #expect(authChooser.contains("HStack(spacing: 16)"))
+        #expect(!authChooser.contains("LazyVGrid(columns: columns"))
+    }
+
+    @Test
+    func nativeOAuthSetupUsesOpenClawAuthWindowInsteadOfApiKeyDocsCTA() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingView.swift"),
+            encoding: .utf8
+        )
+        let oauthSection = try #require(
+            source.components(separatedBy: "if setupVariant == .oauth {").dropFirst().first?
+                .components(separatedBy: "} else if setupVariant == .guidedMiniMaxAPIKey {").first
+        )
+
+        #expect(oauthSection.contains("viewModel.copy.openAuthWindow"))
+        #expect(!oauthSection.contains("viewModel.copy.modelGetApiKey"))
+    }
+
+    @Test
     func cancelledDraftPersistenceDoesNotSurfaceUserError() async throws {
         let recorder = NativeRequestRecorder()
         let session = await recorder.session { request in
@@ -1320,7 +1366,7 @@ struct OnboardingTests {
         let recordedPaths = await recorder.recordedURLs()
         #expect(recordedPaths == ["http://127.0.0.1:4545/api/onboarding/state?fresh=1"])
         #expect(viewModel.providerId == "modelstudio")
-        #expect(viewModel.methodId == "modelstudio-api-key-cn")
+        #expect(viewModel.methodId == "modelstudio-standard-api-key-cn")
         #expect(viewModel.modelKey == "modelstudio/qwen3.5-plus")
     }
 
@@ -1415,6 +1461,100 @@ struct OnboardingTests {
         #expect(viewModel.currentStep == OnboardingStep.channel)
         #expect(viewModel.currentDraft.model?.entryId == savedEntry.id)
         #expect(viewModel.modelBusy.isEmpty)
+    }
+
+    @Test
+    func savingOAuthModelOpensTheOpenClawAuthLaunchURL() async throws {
+        let recorder = NativeRequestRecorder()
+        let openedURLs = OpenedURLRecorder()
+        let authSession = ModelAuthSession(
+            id: "auth-session-1",
+            providerId: "openai",
+            methodId: "openai-codex",
+            status: "running",
+            message: "Complete OpenAI authentication in your browser.",
+            logs: [],
+            launchUrl: "https://auth.openai.example/authorize",
+            inputPrompt: nil
+        )
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/model/entries"):
+                let body = try JSONEncoder.chillClaw.encode(
+                    ModelConfigActionResponse(
+                        status: "interactive",
+                        message: "Authentication required.",
+                        modelConfig: emptyModelConfig(),
+                        authSession: authSession,
+                        requiresGatewayApply: false,
+                        onboarding: makeOnboardingStateResponse(step: .model)
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/onboarding/model/auth/session/auth-session-1"):
+                let body = try JSONEncoder.chillClaw.encode(
+                    ModelAuthSessionResponse(
+                        session: .init(
+                            id: authSession.id,
+                            providerId: authSession.providerId,
+                            methodId: authSession.methodId,
+                            status: "completed",
+                            message: "Authentication complete.",
+                            logs: [],
+                            launchUrl: authSession.launchUrl,
+                            inputPrompt: nil
+                        ),
+                        modelConfig: emptyModelConfig(),
+                        onboarding: makeOnboardingStateResponse(step: .channel)
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: ChillClawChatViewModel(transport: FakeChatTransport()),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } },
+            openURL: { url in
+                Task {
+                    await openedURLs.record(url)
+                }
+            }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .model)
+        viewModel.selectProvider(try #require(viewModel.modelPickerProviders.first(where: { $0.id == "openai" })))
+        viewModel.methodId = "openai-codex"
+
+        await viewModel.saveModel()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await openedURLs.urls() == ["https://auth.openai.example/authorize"])
     }
 
     @Test
@@ -3045,8 +3185,9 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     tutorialVideoUrl: "https://video.example/minimax",
                     defaultModelKey: "minimax/MiniMax-M2.5",
                     authMethods: [
-                        .init(id: "minimax-api", label: "Global API Key", kind: "api-key", description: "Use the international MiniMax endpoint (api.minimax.io).", interactive: false, fields: []),
-                        .init(id: "minimax-api-key-cn", label: "China API Key", kind: "api-key", description: "Use the China MiniMax endpoint (api.minimaxi.com).", interactive: false, fields: [])
+                        .init(id: "minimax-api", label: "MiniMax API Key (Global)", kind: "api-key", description: "Paste a MiniMax API key for the international endpoint at api.minimax.io.", interactive: false, fields: []),
+                        .init(id: "minimax-api-key-cn", label: "MiniMax API Key (China)", kind: "api-key", description: "Paste a MiniMax API key for the China endpoint at api.minimaxi.com.", interactive: false, fields: []),
+                        .init(id: "minimax-portal", label: "MiniMax OAuth", kind: "oauth", description: "Run the MiniMax Coding Plan OAuth flow and choose the Global or China endpoint during setup.", interactive: true, fields: [])
                     ]
                 ),
                 .init(
@@ -3057,7 +3198,10 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     platformUrl: "https://www.alibabacloud.com/help/en/model-studio/get-api-key",
                     defaultModelKey: "modelstudio/qwen3.5-plus",
                     authMethods: [
-                        .init(id: "modelstudio-api-key-cn", label: "API Key", kind: "api-key", description: "Paste a Model Studio API key.", interactive: false, fields: [])
+                        .init(id: "modelstudio-standard-api-key-cn", label: "Standard API Key (China)", kind: "api-key", description: "Use a pay-as-you-go Model Studio API key against the China endpoint.", interactive: false, fields: []),
+                        .init(id: "modelstudio-standard-api-key", label: "Standard API Key (Global)", kind: "api-key", description: "Use a pay-as-you-go Model Studio API key against the global endpoint.", interactive: false, fields: []),
+                        .init(id: "modelstudio-api-key-cn", label: "Coding Plan API Key (China)", kind: "api-key", description: "Use a Model Studio Coding Plan key against the China endpoint.", interactive: false, fields: []),
+                        .init(id: "modelstudio-api-key", label: "Coding Plan API Key (Global)", kind: "api-key", description: "Use a Model Studio Coding Plan key against the global endpoint.", interactive: false, fields: [])
                     ]
                 ),
                 .init(
@@ -3069,7 +3213,7 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     defaultModelKey: "openai/gpt-5.1-codex",
                     authMethods: [
                         .init(id: "openai-api-key", label: "API Key", kind: "api-key", description: "Paste an OpenAI API key.", interactive: false, fields: []),
-                        .init(id: "openai-codex", label: "OAuth", kind: "oauth", description: "Connect securely with your account.", interactive: true, fields: [])
+                        .init(id: "openai-codex", label: "OpenAI Codex OAuth", kind: "oauth", description: "Run the OpenAI Codex login flow.", interactive: true, fields: [])
                     ]
                 ),
             ],
@@ -3237,6 +3381,18 @@ private actor NativeLoadRecorder {
     }
 
     func events() -> [String] {
+        recorded
+    }
+}
+
+private actor OpenedURLRecorder {
+    private var recorded: [String] = []
+
+    func record(_ url: URL) {
+        recorded.append(url.absoluteString)
+    }
+
+    func urls() -> [String] {
         recorded
     }
 }

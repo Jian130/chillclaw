@@ -151,9 +151,11 @@ func isRecoverableOnboardingCompletionTimeout(_ error: Error) -> Bool {
 @Observable
 final class NativeOnboardingViewModel {
     typealias DaemonEventStreamFactory = @Sendable () -> AsyncStream<ChillClawEvent>
+    typealias URLOpener = @Sendable (URL) -> Void
 
     private let appState: ChillClawAppState
     private let daemonEventStreamFactory: DaemonEventStreamFactory
+    private let openURL: URLOpener
     private var modelSessionTask: Task<Void, Never>?
     private var channelSessionTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
@@ -216,9 +218,16 @@ final class NativeOnboardingViewModel {
     var selectedEmployeePresetId = ""
     var memoryEnabled = true
 
-    init(appState: ChillClawAppState, daemonEventStreamFactory: DaemonEventStreamFactory? = nil) {
+    init(
+        appState: ChillClawAppState,
+        daemonEventStreamFactory: DaemonEventStreamFactory? = nil,
+        openURL: URLOpener? = nil
+    ) {
         self.appState = appState
         self.daemonEventStreamFactory = daemonEventStreamFactory ?? { appState.client.daemonEvents() }
+        self.openURL = openURL ?? { url in
+            NSWorkspace.shared.open(url)
+        }
     }
 
     var copy: NativeOnboardingCopy {
@@ -683,6 +692,9 @@ final class NativeOnboardingViewModel {
             let result = try await appState.client.saveOnboardingModelEntry(request)
             appState.modelConfig = result.modelConfig
             modelSession = result.authSession
+            if selectedMethod?.kind == "oauth" {
+                openModelAuthWindow()
+            }
             if let onboarding = result.onboarding {
                 applyOnboardingState(onboarding)
             }
@@ -909,7 +921,7 @@ final class NativeOnboardingViewModel {
 
     func openModelAuthWindow() {
         guard let launchUrl = modelSession?.launchUrl, let url = URL(string: launchUrl) else { return }
-        NSWorkspace.shared.open(url)
+        openURL(url)
     }
 
     func openModelTutorial() {
@@ -923,17 +935,17 @@ final class NativeOnboardingViewModel {
 
     func openModelDocs() {
         guard let platformUrl = selectedCuratedProvider?.platformUrl, let url = URL(string: platformUrl) else { return }
-        NSWorkspace.shared.open(url)
+        openURL(url)
     }
 
     func openChannelDocs() {
         guard let docsUrl = selectedChannelPresentation?.docsUrl, let url = URL(string: docsUrl) else { return }
-        NSWorkspace.shared.open(url)
+        openURL(url)
     }
 
     func openChannelPlatform() {
         guard let platformUrl = selectedChannelPresentation?.platformUrl, let url = URL(string: platformUrl) else { return }
-        NSWorkspace.shared.open(url)
+        openURL(url)
     }
 
     func openChannelTutorial() {

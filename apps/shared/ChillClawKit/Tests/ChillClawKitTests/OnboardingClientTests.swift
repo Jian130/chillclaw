@@ -32,9 +32,9 @@ struct OnboardingClientTests {
                     "authMethods": [
                       {
                         "id": "minimax-api",
-                        "label": "API Key",
+                        "label": "MiniMax API Key (Global)",
                         "kind": "api-key",
-                        "description": "Paste a MiniMax API key.",
+                        "description": "Paste a MiniMax API key for the international endpoint at api.minimax.io.",
                         "interactive": false,
                         "fields": [
                           {
@@ -45,6 +45,29 @@ struct OnboardingClientTests {
                             "placeholder": "Paste your API key here"
                           }
                         ]
+                      },
+                      {
+                        "id": "minimax-api-key-cn",
+                        "label": "MiniMax API Key (China)",
+                        "kind": "api-key",
+                        "description": "Paste a MiniMax API key for the China endpoint at api.minimaxi.com.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "minimax-portal",
+                        "label": "MiniMax OAuth",
+                        "kind": "oauth",
+                        "description": "Run the MiniMax Coding Plan OAuth flow and choose the Global or China endpoint during setup.",
+                        "interactive": true,
+                        "fields": []
                       }
                     ]
                   },
@@ -57,18 +80,62 @@ struct OnboardingClientTests {
                     "defaultModelKey": "modelstudio/qwen3.5-plus",
                     "authMethods": [
                       {
-                        "id": "modelstudio-api-key-cn",
-                        "label": "API Key",
+                        "id": "modelstudio-standard-api-key-cn",
+                        "label": "Standard API Key (China)",
                         "kind": "api-key",
-                        "description": "Paste a Model Studio API key.",
+                        "description": "Use a pay-as-you-go Model Studio API key against the China endpoint.",
                         "interactive": false,
                         "fields": [
                           {
                             "id": "apiKey",
                             "label": "API Key",
                             "required": true,
-                            "secret": true,
-                            "placeholder": "Paste your API key here"
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "modelstudio-standard-api-key",
+                        "label": "Standard API Key (Global)",
+                        "kind": "api-key",
+                        "description": "Use a pay-as-you-go Model Studio API key against the global endpoint.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "modelstudio-api-key-cn",
+                        "label": "Coding Plan API Key (China)",
+                        "kind": "api-key",
+                        "description": "Use a Model Studio Coding Plan key against the China endpoint.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "modelstudio-api-key",
+                        "label": "Coding Plan API Key (Global)",
+                        "kind": "api-key",
+                        "description": "Use a Model Studio Coding Plan key against the global endpoint.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
                           }
                         ]
                       }
@@ -100,9 +167,9 @@ struct OnboardingClientTests {
                       },
                       {
                         "id": "openai-codex",
-                        "label": "OAuth",
+                        "label": "OpenAI Codex OAuth",
                         "kind": "oauth",
-                        "description": "Connect securely with your account.",
+                        "description": "Run the OpenAI Codex login flow.",
                         "interactive": true,
                         "fields": []
                       }
@@ -220,9 +287,9 @@ struct OnboardingClientTests {
                     "authMethods": [
                       {
                         "id": "minimax-api",
-                        "label": "API Key",
+                        "label": "MiniMax API Key (Global)",
                         "kind": "api-key",
-                        "description": "Paste a MiniMax API key.",
+                        "description": "Paste a MiniMax API key for the international endpoint at api.minimax.io.",
                         "interactive": false,
                         "fields": [
                           {
@@ -233,6 +300,29 @@ struct OnboardingClientTests {
                             "placeholder": "Paste your API key here"
                           }
                         ]
+                      },
+                      {
+                        "id": "minimax-api-key-cn",
+                        "label": "MiniMax API Key (China)",
+                        "kind": "api-key",
+                        "description": "Paste a MiniMax API key for the China endpoint at api.minimaxi.com.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "minimax-portal",
+                        "label": "MiniMax OAuth",
+                        "kind": "oauth",
+                        "description": "Run the MiniMax Coding Plan OAuth flow and choose the Global or China endpoint during setup.",
+                        "interactive": true,
+                        "fields": []
                       }
                     ]
                   },
@@ -245,18 +335,62 @@ struct OnboardingClientTests {
                     "defaultModelKey": "modelstudio/qwen3.5-plus",
                     "authMethods": [
                       {
-                        "id": "modelstudio-api-key-cn",
-                        "label": "API Key",
+                        "id": "modelstudio-standard-api-key-cn",
+                        "label": "Standard API Key (China)",
                         "kind": "api-key",
-                        "description": "Paste a Model Studio API key.",
+                        "description": "Use a pay-as-you-go Model Studio API key against the China endpoint.",
                         "interactive": false,
                         "fields": [
                           {
                             "id": "apiKey",
                             "label": "API Key",
                             "required": true,
-                            "secret": true,
-                            "placeholder": "Paste your API key here"
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "modelstudio-standard-api-key",
+                        "label": "Standard API Key (Global)",
+                        "kind": "api-key",
+                        "description": "Use a pay-as-you-go Model Studio API key against the global endpoint.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "modelstudio-api-key-cn",
+                        "label": "Coding Plan API Key (China)",
+                        "kind": "api-key",
+                        "description": "Use a Model Studio Coding Plan key against the China endpoint.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
+                          }
+                        ]
+                      },
+                      {
+                        "id": "modelstudio-api-key",
+                        "label": "Coding Plan API Key (Global)",
+                        "kind": "api-key",
+                        "description": "Use a Model Studio Coding Plan key against the global endpoint.",
+                        "interactive": false,
+                        "fields": [
+                          {
+                            "id": "apiKey",
+                            "label": "API Key",
+                            "required": true,
+                            "secret": true
                           }
                         ]
                       }
@@ -288,9 +422,9 @@ struct OnboardingClientTests {
                       },
                       {
                         "id": "openai-codex",
-                        "label": "OAuth",
+                        "label": "OpenAI Codex OAuth",
                         "kind": "oauth",
-                        "description": "Connect securely with your account.",
+                        "description": "Run the OpenAI Codex login flow.",
                         "interactive": true,
                         "fields": []
                       }

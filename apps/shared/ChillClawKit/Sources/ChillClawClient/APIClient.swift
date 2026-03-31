@@ -143,7 +143,7 @@ public final class ChillClawAPIClient: @unchecked Sendable {
     }
 
     public func saveOnboardingModelEntry(_ request: SaveModelEntryRequest) async throws -> ModelConfigActionResponse {
-        try await post("/api/onboarding/model/entries", body: request)
+        try await post("/api/onboarding/model/entries", body: request, timeout: RequestTimeout.longRunning)
     }
 
     public func resetOnboardingModelDraft() async throws -> OnboardingStateResponse {

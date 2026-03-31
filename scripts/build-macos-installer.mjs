@@ -28,6 +28,7 @@ const APP_NATIVE_EXECUTABLE = resolve(APP_MACOS, APP_NAME);
 const PKG_OUTPUT = resolve(DIST_DIR, `${APP_NAME}-macOS.pkg`);
 const LAUNCH_AGENT_LABEL = "ai.chillclaw.daemon";
 const SCRIPT_LABEL = "ChillClaw installer";
+const PACKAGED_APP_BUILD_WORKSPACES = ["@chillclaw/contracts", "@chillclaw/daemon", "@chillclaw/desktop-ui"];
 
 function parseArgs(argv) {
   return {
@@ -87,7 +88,9 @@ function capture(command, args) {
 
 async function ensureBuild(skipBuild) {
   if (!skipBuild) {
-    await run("npm", ["run", "build"]);
+    for (const workspace of PACKAGED_APP_BUILD_WORKSPACES) {
+      await run("npm", ["run", "build", "--workspace", workspace]);
+    }
   }
 }
 

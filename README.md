@@ -362,6 +362,14 @@ Build a distributable macOS app bundle and installer package with:
 
 `npm run build:mac-installer`
 
+This installer build only compiles the packaged app prerequisites:
+
+- `@chillclaw/contracts`
+- `@chillclaw/daemon`
+- `@chillclaw/desktop-ui`
+
+It intentionally excludes the public `apps/website` marketing site.
+
 Build only the native macOS client executable with:
 
 `npm run build:mac-native`

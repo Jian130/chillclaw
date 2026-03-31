@@ -65,12 +65,48 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+function isSensitiveCommandFlag(flag: string): boolean {
+  const normalized = flag.trim().toLowerCase();
+  if (normalized === "-w") {
+    return true;
+  }
+
+  return /^--(?:[a-z0-9-]*api-key|[a-z0-9-]*secret|[a-z0-9-]*password|gateway-token|token)$/u.test(normalized);
+}
+
+function redactSensitiveCommandArgs(args: string[]): string[] {
+  const redactedArgs: string[] = [];
+  let expectingSensitiveValue = false;
+
+  for (const arg of args) {
+    if (expectingSensitiveValue) {
+      redactedArgs.push("[REDACTED]");
+      expectingSensitiveValue = false;
+      continue;
+    }
+
+    const equalsIndex = arg.indexOf("=");
+    if (equalsIndex > 0) {
+      const flag = arg.slice(0, equalsIndex);
+      if (isSensitiveCommandFlag(flag)) {
+        redactedArgs.push(`${flag}=[REDACTED]`);
+        continue;
+      }
+    }
+
+    redactedArgs.push(arg);
+    expectingSensitiveValue = isSensitiveCommandFlag(arg);
+  }
+
+  return redactedArgs;
+}
+
 export function logDevelopmentCommand(scope: string, command: string, args: string[] = []): void {
   if (!shouldLogDevelopmentCommands()) {
     return;
   }
 
-  const renderedArgs = args.map((arg) => shellQuote(arg)).join(" ");
+  const renderedArgs = redactSensitiveCommandArgs(args).map((arg) => shellQuote(arg)).join(" ");
   console.log(
     formatConsoleLine(`${command}${args.length > 0 ? ` ${renderedArgs}` : ""}`, {
       component: DEFAULT_COMPONENT,

@@ -754,6 +754,77 @@ struct OnboardingClientTests {
     }
 
     @Test
+    func saveOnboardingModelEntryUsesExtendedTimeout() async throws {
+        let recorder = RequestRecorder()
+        let session = await recorder.session(
+            statusCode: 200,
+            body: """
+            {
+              "status": "completed",
+              "message": "MiniMax API key was saved for OpenClaw.",
+              "requiresGatewayApply": true,
+              "modelConfig": {
+                "providers": [],
+                "models": [],
+                "defaultModel": null,
+                "configuredModelKeys": [],
+                "savedEntries": [],
+                "defaultEntryId": null,
+                "fallbackEntryIds": []
+              },
+              "onboarding": {
+                "firstRun": {
+                  "introCompleted": true,
+                  "setupCompleted": false
+                },
+                "draft": {
+                  "currentStep": "model",
+                  "model": {
+                    "providerId": "minimax",
+                    "modelKey": "minimax/MiniMax-M2.7",
+                    "methodId": "minimax-api",
+                    "entryId": "entry-1"
+                  }
+                },
+                "config": {
+                  "modelProviders": [],
+                  "channels": [],
+                  "employeePresets": []
+                },
+                "summary": {}
+              }
+            }
+            """
+        )
+        let client = ChillClawAPIClient(
+            session: session,
+            configurationProvider: {
+                .init(
+                    daemonURL: URL(string: "http://127.0.0.1:4545")!,
+                    fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+                )
+            }
+        )
+
+        _ = try await client.saveOnboardingModelEntry(
+            .init(
+                label: "MiniMax MiniMax-M2.7",
+                providerId: "minimax",
+                methodId: "minimax-api",
+                modelKey: "minimax/MiniMax-M2.7",
+                values: ["apiKey": "sk-test-minimax"],
+                makeDefault: true,
+                useAsFallback: false
+            )
+        )
+
+        let request = try #require(await recorder.lastRequest())
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/model/entries")
+        #expect(request.timeoutInterval == 300)
+    }
+
+    @Test
     func chatEventsAreDerivedFromDaemonEvents() async throws {
         let session = URLSession(configuration: .ephemeral)
         let client = ChillClawAPIClient(

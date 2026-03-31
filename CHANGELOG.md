@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-03-31 19:23 CST
+
+- redacted API keys, tokens, passwords, and other secret-bearing values from development command echo logs so onboarding and runtime diagnostics stay observable without printing credentials into the console
+- extended the native onboarding model-save request timeout in `ChillClawKit` so longer OpenClaw provider setup calls can finish without the macOS client timing out too early
+
+### 2026-03-31 19:15 CST
+
+- changed the macOS installer build to compile only the packaged app prerequisites (`@chillclaw/contracts`, `@chillclaw/daemon`, and `@chillclaw/desktop-ui`) so public website assets are excluded from native macOS packaging
+
 ### 2026-03-31 19:11 CST
 
 - fixed the macOS GitHub release workflow for Swift 6.2 packages by moving the runner to `macos-26`, selecting the latest stable Xcode toolchain explicitly, upgrading `actions/checkout` and `actions/setup-node` to `v5`, and logging the active Xcode, Swift, Node, and npm versions before packaging

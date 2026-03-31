@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-03-31 16:20 CST
+
+- changed the GitHub Pages website deployment workflow to publish from `main` instead of `dev` so the repo can align with the current `github-pages` environment branch protections
+
 ### 2026-03-31 16:02 CST
 
 - added a separate static `apps/website` marketing site with GitHub Pages deployment workflow support, root build and test wiring, bundled assets, and updated repo guidance in `README.md` and `AGENTS.md`

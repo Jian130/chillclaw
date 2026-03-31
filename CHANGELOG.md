@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-03-31 19:11 CST
+
+- fixed the macOS GitHub release workflow for Swift 6.2 packages by moving the runner to `macos-26`, selecting the latest stable Xcode toolchain explicitly, upgrading `actions/checkout` and `actions/setup-node` to `v5`, and logging the active Xcode, Swift, Node, and npm versions before packaging
+
 ### 2026-03-31 18:22 CST
 
 - fixed the React onboarding build blocker by typing the `--onboarding-auth-method-count` CSS variable explicitly, so clean desktop UI production builds no longer fail during packaging

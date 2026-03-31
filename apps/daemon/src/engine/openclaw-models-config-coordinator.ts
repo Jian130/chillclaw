@@ -162,6 +162,7 @@ type ModelsConfigAccess = {
   setRuntimeModelAuthSession: (sessionId: string, session: RuntimeModelAuthSessionLike) => void;
   resolveOpenClawCommand: () => Promise<string | undefined>;
   buildModelsCommandArgs: (args: string[], agentId?: string) => string[];
+  logExternalCommand: (command: string, args: string[]) => void;
   spawnInteractiveCommand: (
     command: string,
     args: string[],
@@ -501,6 +502,8 @@ export class ModelsConfigCoordinator {
       agentDir: pendingEntry?.agentDir,
       pendingEntry
     };
+
+    this.access.logExternalCommand(command, args);
 
     const child = this.access.spawnInteractiveCommand(command, args, envOverrides);
     session.child = child;

@@ -147,6 +147,10 @@ func isRecoverableOnboardingCompletionTimeout(_ error: Error) -> Bool {
     return message.contains("timed out") || message.contains("timeout")
 }
 
+func isRecoverableOnboardingPollingTimeout(_ error: Error) -> Bool {
+    isRecoverableOnboardingCompletionTimeout(error)
+}
+
 @MainActor
 @Observable
 final class NativeOnboardingViewModel {
@@ -510,13 +514,21 @@ final class NativeOnboardingViewModel {
             }
 
             if let sessionId = state.draft.activeModelAuthSessionId, !sessionId.isEmpty {
-                let next = try await appState.client.fetchOnboardingModelAuthSession(sessionId: sessionId)
-                appState.modelConfig = next.modelConfig
-                modelSession = next.session.status == "completed" || next.session.status == "failed" ? nil : next.session
-                if let onboarding = next.onboarding {
-                    applyOnboardingState(onboarding)
+                do {
+                    let next = try await appState.client.fetchOnboardingModelAuthSession(sessionId: sessionId)
+                    appState.modelConfig = next.modelConfig
+                    modelSession = next.session.status == "completed" || next.session.status == "failed" ? nil : next.session
+                    if let onboarding = next.onboarding {
+                        applyOnboardingState(onboarding)
+                    }
+                    if let activeSession = modelSession {
+                        startModelSessionPolling(sessionId: activeSession.id)
+                    }
+                } catch {
+                    if !(await handleMissingOnboardingModelSession(error)) {
+                        throw error
+                    }
                 }
-                startModelSessionPolling(sessionId: sessionId)
             }
 
             if currentStep == .model && modelPickerProviders.isEmpty {
@@ -730,6 +742,9 @@ final class NativeOnboardingViewModel {
                 applyOnboardingState(onboarding)
             }
         } catch {
+            if await handleMissingOnboardingModelSession(error) {
+                return
+            }
             presentErrorUnlessCancelled(error)
         }
     }
@@ -1102,29 +1117,33 @@ final class NativeOnboardingViewModel {
                         return
                     }
                 } catch let sessionError {
-                    do {
-                        _ = try await self.readFreshChannelConfig()
-                        if try await self.maybeAdvanceCompletedChannelSetupIfNeeded(
-                            channelId: channelId,
-                            preferredEntryId: preferredEntryId
-                        ) {
+                    if isRecoverableOnboardingPollingTimeout(sessionError) {
+                        self.pageError = nil
+                    } else {
+                        do {
+                            _ = try await self.readFreshChannelConfig()
+                            if try await self.maybeAdvanceCompletedChannelSetupIfNeeded(
+                                channelId: channelId,
+                                preferredEntryId: preferredEntryId
+                            ) {
+                                self.channelSessionTask = nil
+                                return
+                            }
+                        } catch let refreshError {
+                            self.presentErrorUnlessCancelled(refreshError)
                             self.channelSessionTask = nil
                             return
                         }
-                    } catch let refreshError {
-                        self.presentErrorUnlessCancelled(refreshError)
+
+                        if await self.handleMissingOnboardingChannelSession(sessionError) {
+                            self.channelSessionTask = nil
+                            return
+                        }
+
+                        self.presentErrorUnlessCancelled(sessionError)
                         self.channelSessionTask = nil
                         return
                     }
-
-                    if await self.handleMissingOnboardingChannelSession(sessionError) {
-                        self.channelSessionTask = nil
-                        return
-                    }
-
-                    self.presentErrorUnlessCancelled(sessionError)
-                    self.channelSessionTask = nil
-                    return
                 }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -1320,6 +1339,9 @@ final class NativeOnboardingViewModel {
                         return
                     }
                 } catch {
+                    if await self.handleMissingOnboardingModelSession(error) {
+                        return
+                    }
                     guard self.modelSession?.id == sessionId else { return }
                     self.presentErrorUnlessCancelled(error)
                     return
@@ -1357,6 +1379,23 @@ final class NativeOnboardingViewModel {
         }
 
         channelMessage = message
+        if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+            applyOnboardingState(next)
+        }
+        return true
+    }
+
+    private func handleMissingOnboardingModelSession(_ error: Error) async -> Bool {
+        let message = error.localizedDescription
+        guard message.localizedCaseInsensitiveContains("auth session not found")
+            || message.localizedCaseInsensitiveContains("provider sign-in session ended")
+        else {
+            return false
+        }
+
+        clearModelAuthSessionState()
+        pageError = nil
+        _ = try? await readFreshModelConfig()
         if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
             applyOnboardingState(next)
         }

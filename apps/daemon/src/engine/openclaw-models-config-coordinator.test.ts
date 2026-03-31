@@ -40,6 +40,12 @@ function createCoordinatorTestHarness(overrides: Partial<ModelsConfigAccess> = {
       input?: string;
     };
   }> = [];
+  const interactiveCalls: Array<{
+    command: string;
+    args: string[];
+    envOverrides?: Record<string, string | undefined>;
+  }> = [];
+  const loggedCommands: Array<{ command: string; args: string[] }> = [];
 
   let adapterState: {
     modelEntries?: Array<{
@@ -88,8 +94,18 @@ function createCoordinatorTestHarness(overrides: Partial<ModelsConfigAccess> = {
     setRuntimeModelAuthSession: () => undefined,
     resolveOpenClawCommand: async () => "openclaw",
     buildModelsCommandArgs: (args) => args,
-    spawnInteractiveCommand: () => {
-      throw new Error("not used");
+    logExternalCommand: (command, args) => {
+      loggedCommands.push({ command, args });
+    },
+    spawnInteractiveCommand: (command, args, envOverrides) => {
+      interactiveCalls.push({ command, args, envOverrides });
+      return {
+        stdout: { on: () => undefined },
+        stderr: { on: () => undefined },
+        stdin: { write: () => undefined, destroyed: false },
+        on: () => undefined,
+        exitCode: null
+      };
     },
     appendAuthSessionOutput: () => undefined,
     writeErrorLog: async () => undefined,
@@ -131,6 +147,8 @@ function createCoordinatorTestHarness(overrides: Partial<ModelsConfigAccess> = {
 
   return {
     coordinator: new ModelsConfigCoordinator(access),
+    interactiveCalls,
+    loggedCommands,
     runCalls,
     getAdapterState: () => adapterState,
     setAdapterState: (state: typeof adapterState) => {
@@ -188,6 +206,56 @@ test("createSavedModelEntry uses OpenClaw onboarding for MiniMax global API keys
   assert.ok(runCalls[0]?.options?.envOverrides?.OPENCLAW_AGENT_DIR);
   assert.equal(getAdapterState().modelEntries?.[0]?.providerId, "minimax");
   assert.equal(getAdapterState().modelEntries?.[0]?.authMethodId, "minimax-api");
+});
+
+test("authenticateModelProvider starts MiniMax global OAuth with an explicit method and logs the interactive command", async () => {
+  const { coordinator, interactiveCalls, loggedCommands } = createCoordinatorTestHarness();
+  const request: ModelAuthRequest = {
+    providerId: "minimax",
+    methodId: "minimax-portal",
+    values: {}
+  };
+
+  const result = await coordinator.authenticateModelProvider(request);
+
+  assert.equal(result.status, "interactive");
+  assert.equal(interactiveCalls.length, 1);
+  assert.deepEqual(interactiveCalls[0], {
+    command: "openclaw",
+    args: ["models", "auth", "login", "--provider", "minimax-portal", "--method", "oauth"],
+    envOverrides: undefined
+  });
+  assert.deepEqual(loggedCommands, [
+    {
+      command: "openclaw",
+      args: ["models", "auth", "login", "--provider", "minimax-portal", "--method", "oauth"]
+    }
+  ]);
+});
+
+test("authenticateModelProvider starts MiniMax China OAuth with an explicit method", async () => {
+  const { coordinator, interactiveCalls, loggedCommands } = createCoordinatorTestHarness();
+  const request: ModelAuthRequest = {
+    providerId: "minimax",
+    methodId: "minimax-portal-cn",
+    values: {}
+  };
+
+  const result = await coordinator.authenticateModelProvider(request);
+
+  assert.equal(result.status, "interactive");
+  assert.equal(interactiveCalls.length, 1);
+  assert.deepEqual(interactiveCalls[0], {
+    command: "openclaw",
+    args: ["models", "auth", "login", "--provider", "minimax-portal", "--method", "oauth-cn"],
+    envOverrides: undefined
+  });
+  assert.deepEqual(loggedCommands, [
+    {
+      command: "openclaw",
+      args: ["models", "auth", "login", "--provider", "minimax-portal", "--method", "oauth-cn"]
+    }
+  ]);
 });
 
 test("removeSavedModelEntry removes a runtime-derived default entry through coordinator-owned runtime cleanup", async () => {

@@ -871,6 +871,41 @@ test("missing onboarding channel sessions clear the stale session id before surf
   assert.equal(persisted.onboarding?.draft.channelProgress?.status, "idle");
 });
 
+test("missing onboarding model auth sessions clear the stale session id and preserve saved model progress", async () => {
+  const { service, store, adapter } = createService("onboarding-service-missing-model-session");
+  Object.assign(adapter.config, {
+    async getModelAuthSession() {
+      throw new Error("Auth session not found.");
+    }
+  });
+
+  await service.updateState({
+    currentStep: "model",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    activeModelAuthSessionId: "auth-session-1"
+  });
+
+  await assert.rejects(() => service.getModelAuthSession("auth-session-1"), /sign-in session ended/i);
+
+  const persisted = await store.read();
+  assert.equal(persisted.onboarding?.draft.activeModelAuthSessionId, undefined);
+  assert.equal(persisted.onboarding?.draft.model?.entryId, "mock-openai-gpt-4o-mini");
+  assert.equal(persisted.onboarding?.draft.currentStep, "channel");
+});
+
 test("onboarding completion runs the dedicated runtime finalization step before marking setup complete", async () => {
   class FinalizingAdapter extends MockAdapter {
     gatewayFinalizeCalls = 0;
@@ -1354,7 +1389,7 @@ test("onboarding state exposes the curated model providers for step 3", async ()
   assert.equal(state.config?.modelProviders?.[0]?.defaultModelKey, "minimax/MiniMax-M2.7");
   assert.deepEqual(
     state.config?.modelProviders?.[0]?.authMethods.map((method) => method.id),
-    ["minimax-api", "minimax-api-key-cn", "minimax-portal"]
+    ["minimax-api", "minimax-api-key-cn", "minimax-portal", "minimax-portal-cn"]
   );
   assert.equal(state.config?.modelProviders?.[1]?.defaultModelKey, "modelstudio/qwen3.5-plus");
   assert.deepEqual(

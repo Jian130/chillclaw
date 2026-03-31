@@ -708,7 +708,7 @@ struct OnboardingTests {
 
         #expect(viewModel.curatedModelProviders.map(\.id) == ["minimax", "modelstudio", "openai"])
         #expect(viewModel.curatedModelProviders.map(\.curated.label) == ["MiniMax", "Qwen (通义千问)", "ChatGPT"])
-        #expect(viewModel.curatedModelProviders[0].curated.authMethods.map(\.id) == ["minimax-api", "minimax-api-key-cn", "minimax-portal"])
+        #expect(viewModel.curatedModelProviders[0].curated.authMethods.map(\.id) == ["minimax-api", "minimax-api-key-cn", "minimax-portal", "minimax-portal-cn"])
         #expect(
             viewModel.curatedModelProviders[1].curated.authMethods.map(\.id) == [
                 "modelstudio-standard-api-key-cn",
@@ -1885,6 +1885,175 @@ struct OnboardingTests {
     }
 
     @Test
+    func savingPersonalWechatChannelRecoversAfterTransientPollTimeout() async throws {
+        actor ChannelSessionPollAttemptCounter {
+            private var count = 0
+
+            func next() -> Int {
+                count += 1
+                return count
+            }
+        }
+
+        let recorder = NativeRequestRecorder()
+        let pollAttemptCounter = ChannelSessionPollAttemptCounter()
+        let sessionId = "wechat:default:login"
+        let awaitingEntry = ConfiguredChannelEntry(
+            id: "wechat:default",
+            channelId: .wechat,
+            label: "WeChat",
+            status: "awaiting-pairing",
+            summary: "Saved for final gateway activation.",
+            detail: "ChillClaw will finish gateway activation after onboarding.",
+            maskedConfigSummary: [],
+            editableValues: [:],
+            pairingRequired: false,
+            lastUpdatedAt: "2026-03-28T00:00:05.000Z"
+        )
+        let completedEntry = ConfiguredChannelEntry(
+            id: "wechat:default",
+            channelId: .wechat,
+            label: "WeChat",
+            status: "configured",
+            summary: "Ready after onboarding.",
+            detail: "Apply the staged gateway changes to finish activation.",
+            maskedConfigSummary: [],
+            editableValues: [:],
+            pairingRequired: false,
+            lastUpdatedAt: "2026-03-28T00:00:05.000Z"
+        )
+        let initialConfig = ChannelConfigOverview(
+            baseOnboardingCompleted: true,
+            capabilities: [],
+            entries: [awaitingEntry],
+            activeSession: .init(
+                id: sessionId,
+                channelId: .wechat,
+                entryId: awaitingEntry.id,
+                status: "running",
+                message: "WeChat login is waiting for QR confirmation.",
+                logs: ["Starting the personal WeChat installer."],
+                launchUrl: nil,
+                inputPrompt: nil
+            ),
+            gatewaySummary: "Gateway ready"
+        )
+        let completedConfig = ChannelConfigOverview(
+            baseOnboardingCompleted: true,
+            capabilities: [],
+            entries: [completedEntry],
+            activeSession: nil,
+            gatewaySummary: "Gateway ready"
+        )
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/channel/entries"):
+                var nextState = makeOnboardingStateResponse(step: .channel)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: awaitingEntry.id)
+                nextState.draft.activeChannelSessionId = sessionId
+                nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
+                let body = try JSONEncoder.chillClaw.encode(
+                    ChannelConfigActionResponse(
+                        status: "interactive",
+                        message: "Started WeChat login",
+                        channelConfig: initialConfig,
+                        session: initialConfig.activeSession,
+                        requiresGatewayApply: false,
+                        onboarding: nextState
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/onboarding/channel/session/wechat:default:login"):
+                if await pollAttemptCounter.next() == 1 {
+                    throw URLError(.timedOut)
+                }
+
+                var nextState = makeOnboardingStateResponse(step: .employee)
+                nextState.draft.channel = .init(channelId: .wechat, entryId: completedEntry.id)
+                nextState.draft.channelProgress = .init(status: .staged, sessionId: sessionId, message: "WeChat login is waiting for QR confirmation.", requiresGatewayApply: false)
+                let body = try JSONEncoder.chillClaw.encode(
+                    ChannelSessionResponse(
+                        session: .init(
+                            id: sessionId,
+                            channelId: .wechat,
+                            entryId: awaitingEntry.id,
+                            status: "running",
+                            message: "WeChat login is waiting for QR confirmation.",
+                            logs: [
+                                "Starting the personal WeChat installer.",
+                                "QR code ready. Scan with WeChat to continue."
+                            ],
+                            launchUrl: nil,
+                            inputPrompt: nil
+                        ),
+                        channelConfig: completedConfig,
+                        onboarding: nextState
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = ChillClawChatViewModel(transport: FakeChatTransport())
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .channel)
+        viewModel.updateSelectedChannel(.wechat)
+
+        await viewModel.saveChannel()
+
+        for _ in 0 ..< 200 {
+            if await recorder.recordedURLs().count >= 3,
+               viewModel.currentStep == .employee,
+               viewModel.currentDraft.activeChannelSessionId == nil
+            {
+                break
+            }
+
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let urls = await recorder.recordedURLs()
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/entries"))
+        #expect(urls.filter { $0 == "http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)?fresh=1" }.count == 2)
+        #expect(viewModel.currentStep == .employee)
+        #expect(viewModel.currentDraft.channel?.entryId == completedEntry.id)
+        #expect(viewModel.currentDraft.activeChannelSessionId == nil)
+        #expect(viewModel.pageError == nil)
+        #expect(viewModel.channelBusy == false)
+    }
+
+    @Test
     func completedPersonalWechatSessionAdvancesToEmployeeWithoutPairingApproval() async throws {
         let recorder = NativeRequestRecorder()
         let sessionId = "wechat:default:login"
@@ -2789,7 +2958,7 @@ struct OnboardingTests {
 
         #expect(onboardingRefreshResourceForEvent(.install, installEvent) == .installContext)
         #expect(onboardingRefreshResourceForEvent(.model, modelEvent) == nil)
-        #expect(onboardingRefreshResourceForEvent(.channel, channelEvent) == .channel)
+        #expect(onboardingRefreshResourceForEvent(.channel, channelEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.employee, employeeEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.employee, presetSyncEvent) == nil)
         #expect(onboardingRefreshResourceForEvent(.welcome, unrelatedEvent) == nil)
@@ -2941,6 +3110,91 @@ struct OnboardingTests {
         #expect(urls.filter { $0.contains("/api/channels/config") }.count == 1)
         #expect(urls.filter { $0.contains("/api/models/config") }.isEmpty)
         #expect(urls.filter { $0.contains("/api/ai-team/overview") }.isEmpty)
+    }
+
+    @Test
+    func onboardingBootstrapSuppressesMissingModelAuthSessionErrors() async throws {
+        actor OnboardingStateCallCounter {
+            private var count = 0
+
+            func next() -> Int {
+                count += 1
+                return count
+            }
+        }
+
+        let recorder = NativeRequestRecorder()
+        let callCounter = OnboardingStateCallCounter()
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/onboarding/state":
+                var state = makeOnboardingStateResponse(step: .model)
+                state.draft.model = .init(
+                    providerId: "openai",
+                    modelKey: "openai/gpt-4o-mini",
+                    methodId: "openai-codex",
+                    entryId: "entry-1"
+                )
+                if await callCounter.next() == 1 {
+                    state.draft.activeModelAuthSessionId = "auth-session-1"
+                }
+                return (jsonResponse(url: url), try JSONEncoder.chillClaw.encode(state))
+            case "/api/models/config":
+                return (jsonResponse(url: url), try JSONEncoder.chillClaw.encode(emptyModelConfig()))
+            case "/api/onboarding/model/auth/session/auth-session-1":
+                let response = HTTPURLResponse(
+                    url: url,
+                    statusCode: 500,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data(#"{"error":"The provider sign-in session ended. Start sign-in again."}"#.utf8))
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(
+            session: session,
+            configurationProvider: { configuration }
+        )
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: ChillClawChatViewModel(transport: FakeChatTransport()),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false)
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+
+        await viewModel.bootstrap()
+
+        let urls = await recorder.recordedURLs()
+        #expect(viewModel.pageError == nil)
+        #expect(viewModel.modelSession == nil)
+        #expect(viewModel.onboardingState?.draft.activeModelAuthSessionId == nil)
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/model/auth/session/auth-session-1?fresh=1"))
+        #expect(urls.filter { $0 == "http://127.0.0.1:4545/api/onboarding/state?fresh=1" }.count == 2)
     }
 
     @Test
@@ -3278,7 +3532,8 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
                     authMethods: [
                         .init(id: "minimax-api", label: "MiniMax API Key (Global)", kind: "api-key", description: "Paste a MiniMax API key for the international endpoint at api.minimax.io.", interactive: false, fields: []),
                         .init(id: "minimax-api-key-cn", label: "MiniMax API Key (China)", kind: "api-key", description: "Paste a MiniMax API key for the China endpoint at api.minimaxi.com.", interactive: false, fields: []),
-                        .init(id: "minimax-portal", label: "MiniMax OAuth", kind: "oauth", description: "Run the MiniMax Coding Plan OAuth flow and choose the Global or China endpoint during setup.", interactive: true, fields: [])
+                        .init(id: "minimax-portal", label: "MiniMax OAuth (Global)", kind: "oauth", description: "Run the MiniMax Coding Plan OAuth flow for the international endpoint at api.minimax.io.", interactive: true, fields: []),
+                        .init(id: "minimax-portal-cn", label: "MiniMax OAuth (China)", kind: "oauth", description: "Run the MiniMax Coding Plan OAuth flow for the China endpoint at api.minimaxi.com.", interactive: true, fields: [])
                     ]
                 ),
                 .init(

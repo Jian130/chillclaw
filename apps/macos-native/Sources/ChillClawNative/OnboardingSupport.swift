@@ -723,7 +723,7 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
     case .channel:
         switch event {
         case .channelSessionUpdated:
-            return .channel
+            return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
              .chatStream, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil

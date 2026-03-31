@@ -3130,6 +3130,7 @@ export class OpenClawAdapter implements EngineAdapter {
       },
       resolveOpenClawCommand,
       buildModelsCommandArgs,
+      logExternalCommand,
       spawnInteractiveCommand: (command, args, envOverrides) => spawnInteractiveCommand(command, args, envOverrides),
       appendAuthSessionOutput: (session, chunk) => appendAuthSessionOutput(session as RuntimeModelAuthSession, chunk),
       writeErrorLog,

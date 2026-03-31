@@ -377,7 +377,12 @@ export class OnboardingService {
   }
 
   async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
-    const response = await this.clearOnboardingFallbacksFromSession(await this.adapter.config.getModelAuthSession(sessionId));
+    let response: ModelAuthSessionResponse;
+    try {
+      response = await this.clearOnboardingFallbacksFromSession(await this.adapter.config.getModelAuthSession(sessionId));
+    } catch (error) {
+      throw await this.recoverMissingModelSession(sessionId, error);
+    }
     const onboarding = await this.updateState(this.modelDraftPatchFromSession(response));
 
     return {
@@ -390,9 +395,14 @@ export class OnboardingService {
     sessionId: string,
     request: ModelAuthSessionInputRequest
   ): Promise<ModelAuthSessionResponse> {
-    const response = await this.clearOnboardingFallbacksFromSession(
-      await this.adapter.config.submitModelAuthSessionInput(sessionId, request)
-    );
+    let response: ModelAuthSessionResponse;
+    try {
+      response = await this.clearOnboardingFallbacksFromSession(
+        await this.adapter.config.submitModelAuthSessionInput(sessionId, request)
+      );
+    } catch (error) {
+      throw await this.recoverMissingModelSession(sessionId, error);
+    }
     const onboarding = await this.updateState(this.modelDraftPatchFromSession(response));
 
     return {
@@ -867,6 +877,27 @@ export class OnboardingService {
     }
 
     return stepIsAtOrAfter(draft.currentStep, "employee");
+  }
+
+  private async recoverMissingModelSession(sessionId: string, error: unknown): Promise<Error> {
+    if (!(error instanceof Error) || !/auth session not found/i.test(error.message)) {
+      return error instanceof Error ? error : new Error(String(error));
+    }
+
+    const state = await this.store.read();
+    const draft = state.onboarding?.draft ?? defaultOnboardingDraftState();
+    if (draft.activeModelAuthSessionId === sessionId) {
+      const summary = await this.buildSummary(draft);
+      const resolvedModel = summary.model ?? draft.model;
+
+      await this.updateState({
+        currentStep: resolvedModel?.entryId ? "channel" : "model",
+        model: resolvedModel,
+        activeModelAuthSessionId: ""
+      });
+    }
+
+    return new Error("The provider sign-in session ended. Start sign-in again.");
   }
 
   private async recoverMissingChannelSession(sessionId: string, error: unknown): Promise<Error> {

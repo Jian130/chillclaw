@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-03-31 18:15 CST
+
+- fixed onboarding model sign-in recovery so stale provider auth sessions no longer surface raw macOS popups and the draft falls back cleanly to the next valid state when the daemon reports the session ended
+- fixed MiniMax onboarding auth so the daemon now launches explicit Global and China OAuth methods for OpenClaw, logs the interactive command path, and keeps the shared onboarding metadata aligned across daemon, shared Swift contracts, and native macOS tests
+- fixed personal WeChat onboarding on native macOS by treating transient channel-session poll timeouts as recoverable, avoiding redundant full channel refreshes during QR login progress updates, and adding matching native and web onboarding regression coverage
+
 ### 2026-03-31 17:03 CST
 
 - fixed the GitHub Pages website workflow custom-domain override by passing `VITE_BASE_PATH=/` during the Pages build, so website assets resolve correctly when the site is served from a custom domain instead of the repository subpath

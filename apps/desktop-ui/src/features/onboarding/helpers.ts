@@ -529,7 +529,7 @@ export function onboardingRefreshResourceForEvent(
     case "model":
       return undefined;
     case "channel":
-      return event.type === "channel.session.updated" ? "channel" : undefined;
+      return undefined;
     case "employee":
       return undefined;
     case "welcome":

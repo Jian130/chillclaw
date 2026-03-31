@@ -128,9 +128,17 @@ struct ChillClawProtocolTests {
                   },
                   {
                     "id": "minimax-portal",
-                    "label": "MiniMax OAuth",
+                    "label": "MiniMax OAuth (Global)",
                     "kind": "oauth",
-                    "description": "Run the MiniMax Coding Plan OAuth flow and choose the Global or China endpoint during setup.",
+                    "description": "Run the MiniMax Coding Plan OAuth flow for the international endpoint at api.minimax.io.",
+                    "interactive": true,
+                    "fields": []
+                  },
+                  {
+                    "id": "minimax-portal-cn",
+                    "label": "MiniMax OAuth (China)",
+                    "kind": "oauth",
+                    "description": "Run the MiniMax Coding Plan OAuth flow for the China endpoint at api.minimaxi.com.",
                     "interactive": true,
                     "fields": []
                   }

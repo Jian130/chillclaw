@@ -17,7 +17,8 @@ struct SettingsPresentationTests {
                 checkedAt: "2026-04-04T11:00:00.000Z",
                 summary: "ChillClaw 0.1.4 is available.",
                 detail: "Download the latest signed installer."
-            )
+            ),
+            localeIdentifier: "en"
         )
 
         #expect(presentation.badge == "Update Available")

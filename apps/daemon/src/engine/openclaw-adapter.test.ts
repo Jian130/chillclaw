@@ -808,10 +808,17 @@ elif [ "$1" = "agents" ] && [ "$2" = "bindings" ]; then
       if [ "$first" -eq 0 ]; then
         printf ','
       fi
-      if [ "${bindingsUseMatchShape ? "1" : "0"}" = "1" ] && [[ "$bound_target" == *:* ]]; then
-        bound_channel="${"$"}{bound_target%%:*}"
-        bound_account="${"$"}{bound_target#*:}"
-        printf '{"agentId":"%s","match":{"channel":"%s","accountId":"%s"},"description":"%s accountId=%s"}' "$bound_agent" "$bound_channel" "$bound_account" "$bound_channel" "$bound_account"
+      if [ "${bindingsUseMatchShape ? "1" : "0"}" = "1" ]; then
+        case "$bound_target" in
+          *:*)
+            bound_channel="${"$"}{bound_target%%:*}"
+            bound_account="${"$"}{bound_target#*:}"
+            printf '{"agentId":"%s","match":{"channel":"%s","accountId":"%s"},"description":"%s accountId=%s"}' "$bound_agent" "$bound_channel" "$bound_account" "$bound_channel" "$bound_account"
+            ;;
+          *)
+            printf '{"id":"%s","target":"%s"}' "$bound_target" "$bound_target"
+            ;;
+        esac
       else
         printf '{"id":"%s","target":"%s"}' "$bound_target" "$bound_target"
       fi

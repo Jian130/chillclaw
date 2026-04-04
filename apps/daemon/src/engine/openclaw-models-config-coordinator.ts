@@ -43,8 +43,8 @@ type ModelSnapshotLike = {
     configPath?: string;
     agentDir?: string;
     aliases?: Record<string, string>;
-    resolvedDefault?: string;
-    defaultModel?: string;
+    resolvedDefault?: string | null;
+    defaultModel?: string | null;
     allowed?: string[];
   };
   supplemental: {
@@ -127,7 +127,20 @@ type OpenClawConfigSnapshotLike = {
         model?: string | { primary?: string; fallbacks?: string[] };
       }>;
     };
-    [key: string]: unknown;
+    channels?: Record<string, unknown>;
+    gateway?: {
+      mode?: string;
+      bind?: string;
+      auth?: {
+        mode?: string;
+        token?: string;
+        password?: string;
+      };
+      remote?: Record<string, unknown>;
+    };
+    plugins?: {
+      entries?: Record<string, { enabled?: boolean; config?: Record<string, unknown> }>;
+    };
   };
   status?: {
     agentDir?: string;

@@ -391,7 +391,9 @@ interface OpenClawAuthProfileStoreJson {
   lastGood?: Record<string, string>;
 }
 
-const OPENCLAW_STATE_PATH = resolve(getDataDir(), "openclaw-state.json");
+function getOpenClawStatePath(): string {
+  return resolve(getDataDir(), "openclaw-state.json");
+}
 const OPENCLAW_VERSION_OVERRIDE = process.env.CHILLCLAW_OPENCLAW_VERSION?.trim() || undefined;
 const OPENCLAW_INSTALL_TARGET = OPENCLAW_VERSION_OVERRIDE ?? "latest";
 const OPENCLAW_PACKAGE_SPEC = OPENCLAW_VERSION_OVERRIDE ? `openclaw@${OPENCLAW_VERSION_OVERRIDE}` : "openclaw@latest";
@@ -1850,7 +1852,7 @@ function gatewayReachabilitySummary(snapshot: EngineReadSnapshot): string {
 
 async function readAdapterState(): Promise<OpenClawAdapterState> {
   try {
-    const raw = await readFile(OPENCLAW_STATE_PATH, "utf8");
+    const raw = await readFile(getOpenClawStatePath(), "utf8");
     return JSON.parse(raw) as OpenClawAdapterState;
   } catch {
     return {};
@@ -1859,7 +1861,7 @@ async function readAdapterState(): Promise<OpenClawAdapterState> {
 
 async function writeAdapterState(nextState: OpenClawAdapterState): Promise<void> {
   await mkdir(getDataDir(), { recursive: true });
-  await writeFile(OPENCLAW_STATE_PATH, JSON.stringify(nextState, null, 2));
+  await writeFile(getOpenClawStatePath(), JSON.stringify(nextState, null, 2));
 }
 
 async function readModelCatalog(all = false, options?: { fresh?: boolean }): Promise<ModelCatalogEntry[]> {
@@ -3133,7 +3135,7 @@ export class OpenClawAdapter implements EngineAdapter {
       buildEntryLabel: (label, providerId, modelKey) => this.buildEntryLabel(label, providerId, modelKey),
       readAdapterState,
       writeAdapterState: (state) => writeAdapterState(state as OpenClawAdapterState),
-      ensureSavedModelState: () => this.ensureSavedModelState(),
+      ensureSavedModelState: (snapshot) => this.ensureSavedModelState(snapshot as ModelReadSnapshot | undefined),
       reconcileSavedModelState: (state, configuredModels, defaultModel) =>
         this.reconcileSavedModelState(
           state as OpenClawAdapterState,
@@ -3777,22 +3779,22 @@ export class OpenClawAdapter implements EngineAdapter {
     return provider ? `${provider.label} ${modelName}` : modelName;
   }
 
-  private async ensureSavedModelState(): Promise<OpenClawAdapterState> {
+  private async ensureSavedModelState(snapshot?: ModelReadSnapshot): Promise<OpenClawAdapterState> {
     const state = this.normalizeStateFlags(await readAdapterState());
     if ((state.modelEntries?.length ?? 0) > 0) {
       if ((state.modelEntries ?? []).some((entry) => isImplicitMainAgentId(entry.agentId))) {
-        const snapshot = await readModelSnapshot();
-        const completeConfiguredModels = mergeModelCatalogEntries(snapshot.configuredModels, snapshot.supplemental.refs, {
+        const resolvedSnapshot = snapshot ?? await readModelSnapshot();
+        const completeConfiguredModels = mergeModelCatalogEntries(resolvedSnapshot.configuredModels, resolvedSnapshot.supplemental.refs, {
           available: true,
-          defaultModel: snapshot.supplemental.defaultModel
+          defaultModel: resolvedSnapshot.supplemental.defaultModel
         });
-        return this.reconcileSavedModelState(state, completeConfiguredModels, snapshot.supplemental.defaultModel);
+        return this.reconcileSavedModelState(state, completeConfiguredModels, resolvedSnapshot.supplemental.defaultModel);
       }
 
       return state;
     }
 
-    const migration = await this.seedSavedModelEntriesFromCurrentConfig(state);
+    const migration = await this.seedSavedModelEntriesFromCurrentConfig(state, snapshot);
     const normalized = this.normalizeStateFlags(migration);
     await writeAdapterState(normalized);
     return normalized;
@@ -3832,12 +3834,15 @@ export class OpenClawAdapter implements EngineAdapter {
     );
   }
 
-  private async seedSavedModelEntriesFromCurrentConfig(state: OpenClawAdapterState): Promise<OpenClawAdapterState> {
-    const snapshot = await this.readOpenClawConfigSnapshot();
+  private async seedSavedModelEntriesFromCurrentConfig(
+    state: OpenClawAdapterState,
+    snapshot?: ModelReadSnapshot
+  ): Promise<OpenClawAdapterState> {
+    const status = snapshot?.status ?? (await this.readOpenClawConfigSnapshot()).status;
     const modelKey =
-      resolveModelRef(snapshot.status?.resolvedDefault, undefined, snapshot.status?.aliases ?? {}) ??
-      resolveModelRef(snapshot.status?.defaultModel, undefined, snapshot.status?.aliases ?? {}) ??
-      snapshot.status?.allowed?.[0];
+      resolveModelRef(status?.resolvedDefault, undefined, status?.aliases ?? {}) ??
+      resolveModelRef(status?.defaultModel, undefined, status?.aliases ?? {}) ??
+      status?.allowed?.[0];
 
     if (!modelKey) {
       return {
@@ -3850,7 +3855,7 @@ export class OpenClawAdapter implements EngineAdapter {
 
     const provider = providerDefinitionByModelKey(modelKey);
     const createdAt = new Date().toISOString();
-    const agentDir = snapshot.status?.agentDir ?? getMainOpenClawAgentDir();
+    const agentDir = status?.agentDir ?? getMainOpenClawAgentDir();
     const summary = await this.modelsConfigCoordinator.readEntryAuthSummary(agentDir, provider?.id);
     const runtimeEntryId = runtimeEntryIdForModelKey(modelKey);
 

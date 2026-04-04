@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { resolveCommandFromPath, runCommand } from "./cli-runner.js";
 
 test("runCommand captures stdout and stderr and allows non-zero exits when requested", async () => {
-  const tempDir = await mkdtemp(resolve(process.cwd(), "apps/daemon/.data/cli-runner-test-"));
+  const tempDir = await mkdtemp(resolve(tmpdir(), "chillclaw-cli-runner-test-"));
   const scriptPath = join(tempDir, "command.sh");
 
   await writeFile(
@@ -31,7 +32,7 @@ exit 7
 });
 
 test("resolveCommandFromPath respects the provided PATH", async () => {
-  const tempDir = await mkdtemp(resolve(process.cwd(), "apps/daemon/.data/cli-runner-path-test-"));
+  const tempDir = await mkdtemp(resolve(tmpdir(), "chillclaw-cli-runner-path-test-"));
   const commandPath = join(tempDir, "fake-command");
 
   await writeFile(

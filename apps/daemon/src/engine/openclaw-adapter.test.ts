@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import type { ModelCatalogEntry } from "@chillclaw/contracts";
@@ -428,7 +429,7 @@ test("summarizeTargetUpdateStatus prefers registry latest version when update lo
 let fakeOpenClawLock: Promise<void> = Promise.resolve();
 
 async function withFakeOpenClaw(
-  fn: (context: { adapter: OpenClawAdapter; logPath: string; configPath: string }) => Promise<void>,
+  fn: (context: { adapter: OpenClawAdapter; logPath: string; configPath: string; dataDir: string }) => Promise<void>,
   options?: {
     updateNoChange?: boolean;
     updatePackageManager?: "npm" | "pnpm" | "bun";
@@ -462,7 +463,7 @@ async function withFakeOpenClaw(
   });
   await previousLock;
 
-  const tempDir = await mkdtemp(resolve(process.cwd(), "apps/daemon/.data/openclaw-cache-test-"));
+  const tempDir = await mkdtemp(resolve(tmpdir(), "chillclaw-openclaw-cache-test-"));
   const logPath = join(tempDir, "openclaw.log");
   const configPath = join(tempDir, "openclaw.json");
   const versionPath = join(tempDir, "version.txt");
@@ -852,7 +853,7 @@ fi
   adapter.invalidateReadCaches();
 
   try {
-    await fn({ adapter, logPath, configPath });
+    await fn({ adapter, logPath, configPath, dataDir });
   } finally {
     await new Promise((resolve) => setTimeout(resolve, options?.longRunningWechatInstaller ? 2200 : 150));
     adapter.invalidateReadCaches();
@@ -965,8 +966,8 @@ test("fresh model invalidation reuses an in-flight model snapshot instead of sta
 });
 
 test("OpenClaw model config clears stale configured models when the live runtime is clean", async () => {
-  await withFakeOpenClaw(async ({ adapter }) => {
-    const statePath = resolve(process.cwd(), "apps/daemon/.data", "openclaw-state.json");
+  await withFakeOpenClaw(async ({ adapter, dataDir }) => {
+    const statePath = resolve(dataDir, "openclaw-state.json");
     const previousState = await readFile(statePath, "utf8").catch(() => undefined);
 
     try {
@@ -1056,8 +1057,8 @@ test("creating a normal OAuth saved model entry authenticates through models aut
 });
 
 test("updating a token-auth runtime model without reusable credentials requires entering the token again", async () => {
-  await withFakeOpenClaw(async ({ adapter }) => {
-    const statePath = resolve(process.env.CHILLCLAW_DATA_DIR ?? "", "openclaw-state.json");
+  await withFakeOpenClaw(async ({ adapter, dataDir }) => {
+    const statePath = resolve(dataDir, "openclaw-state.json");
     await writeFile(
       statePath,
       JSON.stringify(
@@ -1728,11 +1729,11 @@ test("saveAIMemberRuntime prefers the canonical saved model key over stale clien
 });
 
 test("saveAIMemberRuntime upgrades stale MiniMax entries, avoids inherited fallbacks, and restores provider auth from saved secrets", async () => {
-  await withFakeOpenClaw(async ({ configPath }) => {
+  await withFakeOpenClaw(async ({ configPath, dataDir }) => {
     const secrets = new InMemorySecretsAdapter();
     await secrets.set(modelAuthSecretName("minimax", "minimax-api", "apiKey"), "sk-minimax");
     const adapter = new OpenClawAdapter(secrets);
-    const statePath = resolve(process.env.CHILLCLAW_DATA_DIR ?? "", "openclaw-state.json");
+    const statePath = resolve(dataDir, "openclaw-state.json");
     await writeFile(
       statePath,
       JSON.stringify(
@@ -1961,7 +1962,7 @@ test("install refreshes managed-local command resolution after npm creates the r
   });
   await previousLock;
 
-  const tempDir = await mkdtemp(resolve(process.cwd(), "apps/daemon/.data/openclaw-managed-install-test-"));
+  const tempDir = await mkdtemp(resolve(tmpdir(), "chillclaw-openclaw-managed-install-test-"));
   const dataDir = join(tempDir, "data");
   const binDir = join(tempDir, "bin");
   const npmPath = join(binDir, "npm");
@@ -2047,7 +2048,7 @@ test("install normalizes reused OpenClaw gateway config to ChillClaw's local bas
   });
   await previousLock;
 
-  const tempDir = await mkdtemp(resolve(process.cwd(), "apps/daemon/.data/openclaw-config-normalize-test-"));
+  const tempDir = await mkdtemp(resolve(tmpdir(), "chillclaw-openclaw-config-normalize-test-"));
   const dataDir = join(tempDir, "data");
   const managedBinDir = join(dataDir, "openclaw-runtime", "node_modules", ".bin");
   const managedBinary = join(managedBinDir, "openclaw");
@@ -2186,8 +2187,8 @@ test("restartGateway issues one gateway restart and reports success when the gat
 });
 
 test("finalizeOnboardingSetup is a no-op when the gateway is already installed and reachable", async () => {
-  await withFakeOpenClaw(async ({ adapter, logPath }) => {
-    const statePath = resolve(process.cwd(), "apps/daemon/.data", "openclaw-state.json");
+  await withFakeOpenClaw(async ({ adapter, logPath, dataDir }) => {
+    const statePath = resolve(dataDir, "openclaw-state.json");
     const previousState = await readFile(statePath, "utf8").catch(() => undefined);
     if (previousState !== undefined) {
       await rm(statePath, { force: true });

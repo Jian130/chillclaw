@@ -37,7 +37,16 @@ type SavedModelEntryLike = SavedModelEntry & {
 type ModelSnapshotLike = {
   allModels: ModelCatalogEntry[];
   configuredModels: ModelCatalogEntry[];
+  activeConfig?: OpenClawConfigSnapshotLike["config"];
   configuredAuthProviders: Set<string>;
+  status?: {
+    configPath?: string;
+    agentDir?: string;
+    aliases?: Record<string, string>;
+    resolvedDefault?: string;
+    defaultModel?: string;
+    allowed?: string[];
+  };
   supplemental: {
     refs?: Iterable<string>;
     defaultModel?: string | null;
@@ -150,7 +159,7 @@ type ModelsConfigAccess = {
   ) => ModelConfigOverview;
   readAdapterState: () => Promise<AdapterModelState>;
   writeAdapterState: (state: AdapterModelState) => Promise<void>;
-  ensureSavedModelState: () => Promise<AdapterModelState>;
+  ensureSavedModelState: (snapshot?: ModelSnapshotLike) => Promise<AdapterModelState>;
   reconcileSavedModelState: (
     state: AdapterModelState,
     configuredModels: ModelCatalogEntry[],
@@ -437,7 +446,7 @@ export class ModelsConfigCoordinator {
       return this.access.buildModelConfigOverview([], [], new Set<string>(), [], undefined, [], undefined);
     }
 
-    const adapterState = await this.access.ensureSavedModelState();
+    const adapterState = await this.access.ensureSavedModelState(snapshot);
     const completeAllModels = this.access.mergeModelCatalogEntries(snapshot.allModels, snapshot.supplemental.refs, {
       available: true,
       defaultModel: snapshot.supplemental.defaultModel

@@ -266,6 +266,7 @@ final class ChillClawAppState {
         do {
             let response = try await client.checkAppUpdate()
             overview = response.overview
+            syncChatSendBlockReason()
             bannerMessage = response.appUpdate.summary
             errorMessage = nil
         } catch {
@@ -310,6 +311,7 @@ final class ChillClawAppState {
         switch event {
         case let .overviewUpdated(snapshot):
             overview = snapshot.data
+            syncChatSendBlockReason()
         case let .aiTeamUpdated(snapshot):
             aiTeamOverview = snapshot.data
             updateSelectedMemberForChat()
@@ -375,7 +377,15 @@ final class ChillClawAppState {
 
     private func refreshOverview() async throws {
         self.overview = try await loader.fetchOverview()
+        syncChatSendBlockReason()
         self.errorMessage = nil
+    }
+
+    private func syncChatSendBlockReason() {
+        chatViewModel.sendBlockedReason =
+            overview?.engine.pendingGatewayApply == true
+            ? (overview?.engine.pendingGatewayApplySummary ?? "pending-gateway-apply")
+            : nil
     }
 
     private func refreshCurrentSectionData() async throws {

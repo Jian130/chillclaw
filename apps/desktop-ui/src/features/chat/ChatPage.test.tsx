@@ -10,6 +10,7 @@ import {
   inlineToolActivitiesForMessage,
   memberNameForThread,
   preferredNewChatMemberId,
+  shouldHandleComposerPlainReturnShortcut,
   storedChatSidebarCollapsed,
   shouldSubmitComposerShortcut,
   sortChatThreads
@@ -317,12 +318,50 @@ describe("ChatPage helpers", () => {
         isComposing: true
       })
     ).toBe(false);
+
+    expect(
+      shouldSubmitComposerShortcut({
+        key: "Enter",
+        shiftKey: false,
+        canSend: true,
+        draft: "Blocked by pending apply",
+        isComposing: false,
+        blockedReason: "Apply pending changes first."
+      })
+    ).toBe(false);
+  });
+
+  it("always intercepts plain Return so only Shift-Return inserts a new line", () => {
+    expect(
+      shouldHandleComposerPlainReturnShortcut({
+        key: "Enter",
+        shiftKey: false,
+        isComposing: false
+      })
+    ).toBe(true);
+
+    expect(
+      shouldHandleComposerPlainReturnShortcut({
+        key: "Enter",
+        shiftKey: true,
+        isComposing: false
+      })
+    ).toBe(false);
+
+    expect(
+      shouldHandleComposerPlainReturnShortcut({
+        key: "Enter",
+        shiftKey: false,
+        isComposing: true
+      })
+    ).toBe(false);
   });
 
   it("reuses the same sendability rule for the button and keyboard path", () => {
     expect(canSendComposerDraft("Send this", true)).toBe(true);
     expect(canSendComposerDraft("   ", true)).toBe(false);
     expect(canSendComposerDraft("Blocked", false)).toBe(false);
+    expect(canSendComposerDraft("Blocked by pending apply", true, "Apply pending changes first.")).toBe(false);
   });
 
   it("exposes inline tool activity for the active assistant run only", () => {

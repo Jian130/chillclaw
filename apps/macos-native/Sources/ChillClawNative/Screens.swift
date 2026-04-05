@@ -2532,6 +2532,19 @@ struct ChatScreen: View {
                         }
 
                         VStack(spacing: 12) {
+                            if let sendBlockedReason = appState.chatViewModel.sendBlockedReason {
+                                InfoBanner(
+                                    title: "Chat is waiting for a gateway apply",
+                                    description: sendBlockedReason,
+                                    icon: "bolt.fill",
+                                    accent: .orange
+                                ) {
+                                    ActionButton("Open Deploy", systemImage: "bolt.fill", variant: .outline) {
+                                        appState.selectedSection = .deploy
+                                    }
+                                }
+                            }
+
                             HStack(spacing: 12) {
                                 ZStack(alignment: .topLeading) {
                                     NativeChatComposerTextView(
@@ -2794,10 +2807,22 @@ func nativeChatShouldSendComposerShortcut(
     canSend: Bool,
     draft: String
 ) -> Bool {
+    guard nativeChatShouldHandleComposerPlainReturn(
+        keyCode: keyCode,
+        modifierFlags: modifierFlags,
+        isComposing: isComposing
+    ) else { return false }
+    return canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
+func nativeChatShouldHandleComposerPlainReturn(
+    keyCode: Int,
+    modifierFlags: NSEvent.ModifierFlags,
+    isComposing: Bool
+) -> Bool {
     guard !isComposing else { return false }
     guard keyCode == 36 || keyCode == 76 else { return false }
-    guard !modifierFlags.contains(.shift) else { return false }
-    return canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    return !modifierFlags.contains(.shift)
 }
 
 func nativeChatShouldInsertComposerLineBreak(
@@ -2958,6 +2983,14 @@ private final class NativeChatTextView: NSTextView {
             draft: string
         ) {
             onSend?()
+            return
+        }
+
+        if nativeChatShouldHandleComposerPlainReturn(
+            keyCode: Int(event.keyCode),
+            modifierFlags: flags,
+            isComposing: composing
+        ) {
             return
         }
 

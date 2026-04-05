@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-04-05 14:36 CST
+
+- tightened chat send behavior across the React and native macOS clients by blocking message sends while an OpenClaw gateway apply is still pending, surfacing clearer user guidance in the composer, and aligning the shared ChillClaw chat view model plus its regression coverage with that staged-versus-live runtime distinction
+- refined the React chat composer so plain Return submits while Shift-Return inserts a newline, updated the shared localized chat copy for the new pending-apply state, and added matching desktop and native chat presentation tests
+- fixed macOS native Swift package builds and tests from symlinked or mixed checkout paths by routing repo scripts through a canonicalized Swift package wrapper with an isolated CLI build directory, and added regression coverage for the path-normalization behavior
+
 ### 2026-04-05 11:10 CST
 
 - hardened the daemon CI suite by replacing fixed chat-service sleep windows with condition-based waits and by widening the onboarding async handoff timeout budget, reducing GitHub Actions flakiness without changing product behavior

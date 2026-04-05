@@ -20,6 +20,13 @@ struct ChatPresentationTests {
     @Test
     func composerShortcutHelpersMatchCodexStyleBehavior() {
         #expect(
+            nativeChatShouldHandleComposerPlainReturn(
+                keyCode: 36,
+                modifierFlags: [],
+                isComposing: false
+            ) == true
+        )
+        #expect(
             nativeChatShouldSendComposerShortcut(
                 keyCode: 36,
                 modifierFlags: [],
@@ -44,6 +51,13 @@ struct ChatPresentationTests {
                 isComposing: true,
                 canSend: true,
                 draft: "正在输入"
+            ) == false
+        )
+        #expect(
+            nativeChatShouldHandleComposerPlainReturn(
+                keyCode: 36,
+                modifierFlags: [.shift],
+                isComposing: false
             ) == false
         )
         #expect(

@@ -311,6 +311,8 @@ const en: TranslationTree = {
     startFromMember: "Start from AI Member",
     newReply: "New reply",
     replyStopped: "Reply stopped",
+    blockedTitle: "Chat is waiting for a gateway apply",
+    blockedAction: "Open Deploy",
     authErrorTitle: "Brain authentication failed",
     authErrorBody: "This AI member's current Brain could not authenticate with its provider. Reauthenticate the model in Configuration or change the member's Brain."
   },
@@ -444,7 +446,9 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
     },
     chatPage: {
       showConversations: "显示会话",
-      hideConversations: "隐藏会话"
+      hideConversations: "隐藏会话",
+      blockedTitle: "聊天正在等待网关应用更改",
+      blockedAction: "打开 Deploy"
     },
     deploy: {
       infoTitle: "一键部署",
@@ -589,7 +593,9 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
     },
     chatPage: {
       showConversations: "会話を表示",
-      hideConversations: "会話を隠す"
+      hideConversations: "会話を隠す",
+      blockedTitle: "チャットはゲートウェイの適用待ちです",
+      blockedAction: "Deploy を開く"
     },
     deploy: {
       infoTitle: "ワンクリック配備",
@@ -734,7 +740,9 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
     },
     chatPage: {
       showConversations: "대화 목록 보기",
-      hideConversations: "대화 목록 숨기기"
+      hideConversations: "대화 목록 숨기기",
+      blockedTitle: "채팅은 게이트웨이 적용을 기다리고 있습니다",
+      blockedAction: "Deploy 열기"
     },
     deploy: {
       infoTitle: "원클릭 배포",
@@ -879,7 +887,9 @@ const partials: Partial<Record<Locale, Partial<TranslationTree>>> = {
     },
     chatPage: {
       showConversations: "Mostrar conversaciones",
-      hideConversations: "Ocultar conversaciones"
+      hideConversations: "Ocultar conversaciones",
+      blockedTitle: "El chat está esperando que el gateway aplique los cambios",
+      blockedAction: "Abrir Deploy"
     },
     deploy: {
       infoTitle: "Despliegue con un clic",

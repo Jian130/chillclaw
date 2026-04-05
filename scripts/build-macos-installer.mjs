@@ -147,7 +147,8 @@ async function buildStandaloneDaemon() {
 }
 
 async function buildNativeClient() {
-  await run("swift", [
+  await run("node", [
+    "./scripts/swift-package.mjs",
     "build",
     "--package-path",
     MACOS_NATIVE_PACKAGE_DIR,
@@ -157,7 +158,8 @@ async function buildNativeClient() {
     NATIVE_EXECUTABLE_NAME
   ]);
 
-  const binDir = await capture("swift", [
+  const binDir = await capture("node", [
+    "./scripts/swift-package.mjs",
     "build",
     "--package-path",
     MACOS_NATIVE_PACKAGE_DIR,

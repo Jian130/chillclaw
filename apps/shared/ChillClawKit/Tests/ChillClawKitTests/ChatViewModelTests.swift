@@ -144,6 +144,23 @@ struct ChatViewModelTests {
     }
 
     @Test
+    func pendingGatewayApplyBlocksSendBeforeOptimisticRollbackStarts() async {
+        let transport = DelayedSendChatTransport()
+        let viewModel = ChillClawChatViewModel(transport: transport)
+
+        await viewModel.refresh()
+        viewModel.draftMessage = "Draft a response"
+        viewModel.sendBlockedReason = "Apply pending changes first."
+
+        await viewModel.sendCurrentMessage()
+
+        #expect(viewModel.canSendCurrentDraft == false)
+        #expect(viewModel.draftMessage == "Draft a response")
+        #expect(viewModel.selectedThread?.messages.isEmpty == true)
+        #expect(transport.sendCallCount == 0)
+    }
+
+    @Test
     func startRetriesTheEventStreamAfterADisconnect() async {
         let transport = RetryingChatTransport()
         let viewModel = ChillClawChatViewModel(transport: transport)
@@ -221,6 +238,11 @@ private final class FailingSendChatTransport: ChillClawChatTransport, @unchecked
 private final class DelayedSendChatTransport: ChillClawChatTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<ChatActionResponse, Error>?
+    private var sends = 0
+
+    var sendCallCount: Int {
+        lock.withLock { sends }
+    }
 
     func fetchOverview() async throws -> ChatOverview {
         .init(threads: [
@@ -262,6 +284,7 @@ private final class DelayedSendChatTransport: ChillClawChatTransport, @unchecked
     func sendMessage(threadId: String, message: String, clientMessageId: String?) async throws -> ChatActionResponse {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
+            self.sends += 1
             self.continuation = continuation
             lock.unlock()
         }

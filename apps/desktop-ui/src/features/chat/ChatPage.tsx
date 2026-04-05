@@ -8,7 +8,7 @@ import {
   UserRound
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type {
   AIMemberDetail,
   ChatMessage,
@@ -23,6 +23,7 @@ import type {
 
 import { useAITeam } from "../../app/providers/AITeamProvider.js";
 import { useLocale } from "../../app/providers/LocaleProvider.js";
+import { useOverview } from "../../app/providers/OverviewProvider.js";
 import {
   abortChatThread,
   createChatThread,
@@ -39,6 +40,7 @@ import { Dialog } from "../../shared/ui/Dialog.js";
 import { EmptyState } from "../../shared/ui/EmptyState.js";
 import { ErrorState } from "../../shared/ui/ErrorState.js";
 import { FieldLabel, Select, Textarea } from "../../shared/ui/Field.js";
+import { InfoBanner } from "../../shared/ui/InfoBanner.js";
 import { LoadingBlocker } from "../../shared/ui/LoadingBlocker.js";
 import { LoadingPanel } from "../../shared/ui/LoadingPanel.js";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar.js";
@@ -245,8 +247,8 @@ function mergeToolActivity(current: ChatToolActivity[] | undefined, next: ChatTo
   return [...items, next];
 }
 
-export function canSendComposerDraft(draft: string, canSend: boolean): boolean {
-  return canSend && draft.trim().length > 0;
+export function canSendComposerDraft(draft: string, canSend: boolean, blockedReason?: string): boolean {
+  return !blockedReason && canSend && draft.trim().length > 0;
 }
 
 const CHAT_SIDEBAR_STORAGE_KEY = "chillclaw.chat.sidebarCollapsed";
@@ -293,12 +295,21 @@ export function shouldSubmitComposerShortcut(options: {
   canSend: boolean;
   draft: string;
   isComposing: boolean;
+  blockedReason?: string;
 }): boolean {
-  if (options.key !== "Enter" || options.shiftKey || options.isComposing) {
+  if (!shouldHandleComposerPlainReturnShortcut(options)) {
     return false;
   }
 
-  return canSendComposerDraft(options.draft, options.canSend);
+  return canSendComposerDraft(options.draft, options.canSend, options.blockedReason);
+}
+
+export function shouldHandleComposerPlainReturnShortcut(options: {
+  key: string;
+  shiftKey: boolean;
+  isComposing: boolean;
+}): boolean {
+  return options.key === "Enter" && !options.shiftKey && !options.isComposing;
 }
 
 function activeToolSummary(toolActivities: ChatToolActivity[] | undefined): string | undefined {
@@ -597,10 +608,12 @@ function MemberAvatarChip(props: { member?: AIMemberDetail; tone?: "assistant" |
 export default function ChatPage() {
   const chatLayoutMode = useChatLayoutMode();
   const { locale } = useLocale();
+  const { overview: productOverview } = useOverview();
   const copy = t(locale).chatPage;
   const common = t(locale).common;
   const { overview: teamOverview, loading: membersLoading } = useAITeam();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<ChatOverview>();
   const [detailsById, setDetailsById] = useState<Record<string, ChatThreadDetail>>({});
   const [selectedThreadId, setSelectedThreadId] = useState<string>();
@@ -648,6 +661,9 @@ export default function ChatPage() {
     () => [...(selectedThread?.messages ?? [])].reverse().find((message) => message.role === "user")?.text,
     [selectedThread?.messages]
   );
+  const sendBlockedReason = productOverview?.engine.pendingGatewayApply
+    ? productOverview.engine.pendingGatewayApplySummary ?? "pending-gateway-apply"
+    : undefined;
 
   useEffect(() => {
     storeChatSidebarCollapsed(sidebarCollapsed);
@@ -941,7 +957,11 @@ export default function ChatPage() {
   }
 
   async function handleSend() {
-    if (!selectedThreadId || !selectedSummary || !canSendComposerDraft(draft, selectedThread?.composerState.canSend ?? false)) {
+    if (
+      !selectedThreadId ||
+      !selectedSummary ||
+      !canSendComposerDraft(draft, selectedThread?.composerState.canSend ?? false, sendBlockedReason)
+    ) {
       return;
     }
 
@@ -984,7 +1004,7 @@ export default function ChatPage() {
 
   async function sendCurrentMessage(message: string, clientMessageId?: string) {
     const threadId = selectedThreadId;
-    if (!threadId) {
+    if (!threadId || !selectedThread || !canSendComposerDraft(message, selectedThread.composerState.canSend, sendBlockedReason)) {
       return;
     }
 
@@ -1047,20 +1067,22 @@ export default function ChatPage() {
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     const isComposing = Boolean(event.nativeEvent.isComposing) || (event.nativeEvent as { keyCode?: number }).keyCode === 229;
-    if (
-      !shouldSubmitComposerShortcut({
-        key: event.key,
-        shiftKey: event.shiftKey,
-        canSend: selectedThread?.composerState.canSend ?? false,
-        draft,
-        isComposing
-      })
-    ) {
+    const shortcut = {
+      key: event.key,
+      shiftKey: event.shiftKey,
+      canSend: selectedThread?.composerState.canSend ?? false,
+      draft,
+      isComposing,
+      blockedReason: sendBlockedReason
+    };
+    if (!shouldHandleComposerPlainReturnShortcut(shortcut)) {
       return;
     }
 
     event.preventDefault();
-    void handleSend();
+    if (shouldSubmitComposerShortcut(shortcut)) {
+      void handleSend();
+    }
   }
 
   function handleTranscriptScroll() {
@@ -1277,7 +1299,7 @@ export default function ChatPage() {
                   </div>
                 ) : null}
 
-                {selectedThread.historyStatus === "unavailable" ? (
+	                {selectedThread.historyStatus === "unavailable" ? (
                   <div className="chat-main__empty">
                     <EmptyState
                       title={copy.unavailableTitle}
@@ -1286,9 +1308,9 @@ export default function ChatPage() {
                       onAction={() => void handleCreateThread(selectedThread.memberId)}
                     />
                   </div>
-                ) : (
-                  <>
-                    <div className="chat-transcript-shell">
+	                ) : (
+	                  <>
+	                    <div className="chat-transcript-shell">
                       <div className="chat-transcript" ref={transcriptRef} onScroll={handleTranscriptScroll}>
                         {threadLoadingId === selectedThread.id ? (
                           <LoadingPanel compact title={copy.loadingThread} description="ChillClaw is syncing the latest messages from OpenClaw." />
@@ -1373,9 +1395,21 @@ export default function ChatPage() {
                           {copy.newReply}
                         </button>
                       ) : null}
-                    </div>
+	                    </div>
 
-                    <div className="chat-composer">
+	                    {sendBlockedReason ? (
+	                      <div className="chat-main__error">
+	                        <InfoBanner title={copy.blockedTitle} description={sendBlockedReason} accent="orange">
+	                          <div className="actions-row">
+	                            <Button variant="outline" onClick={() => navigate("/deploy")}>
+	                              {copy.blockedAction}
+	                            </Button>
+	                          </div>
+	                        </InfoBanner>
+	                      </div>
+	                    ) : null}
+
+	                    <div className="chat-composer">
                       <div className="chat-composer__shell">
                         <Textarea
                           ref={composerRef}
@@ -1392,7 +1426,7 @@ export default function ChatPage() {
                           </Button>
                         ) : (
                           <Button
-                            disabled={!canSendComposerDraft(draft, selectedThread.composerState.canSend)}
+                            disabled={!canSendComposerDraft(draft, selectedThread.composerState.canSend, sendBlockedReason)}
                             loading={selectedThread.composerState.status === "sending"}
                             onClick={() => void handleSend()}
                           >

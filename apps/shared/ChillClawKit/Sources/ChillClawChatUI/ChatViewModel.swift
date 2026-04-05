@@ -36,10 +36,11 @@ public final class ChillClawChatViewModel {
     public private(set) var overview = ChatOverview(threads: [])
     public private(set) var selectedThread: ChatThreadDetail?
     public private(set) var errorMessage: String?
+    public var sendBlockedReason: String?
     public var draftMessage = ""
     public var canSendCurrentDraft: Bool {
         guard let selectedThread else { return false }
-        return canSendChatDraft(draftMessage, canSend: selectedThread.composerState.canSend)
+        return canSendChatDraft(draftMessage, canSend: selectedThread.composerState.canSend, blockedReason: sendBlockedReason)
     }
 
     private let transport: ChillClawChatTransport
@@ -494,7 +495,11 @@ private func nativeChatDisplayTimestamp(_ value: String?) -> String {
 }
 
 private func canSendChatDraft(_ draft: String, canSend: Bool) -> Bool {
-    canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    canSendChatDraft(draft, canSend: canSend, blockedReason: nil)
+}
+
+private func canSendChatDraft(_ draft: String, canSend: Bool, blockedReason: String?) -> Bool {
+    blockedReason == nil && canSend && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 }
 
 private func composerAvailability(for status: String) -> (canSend: Bool, canAbort: Bool) {

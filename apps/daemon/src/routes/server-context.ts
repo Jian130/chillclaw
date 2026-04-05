@@ -8,6 +8,7 @@ import { ChatService as DaemonChatService } from "../services/chat-service.js";
 import { ChannelSetupService } from "../services/channel-setup-service.js";
 import { EventBusService } from "../services/event-bus-service.js";
 import { EventPublisher } from "../services/event-publisher.js";
+import { createLocalModelRuntimeService, type LocalModelRuntimeService } from "../services/local-model-runtime-service.js";
 import { OnboardingService } from "../services/onboarding-service.js";
 import { OverviewService } from "../services/overview-service.js";
 import { PluginService } from "../services/plugin-service.js";
@@ -24,6 +25,7 @@ export interface ServerContext {
   appServiceManager: AppServiceManager;
   appUpdateService: AppUpdateService;
   overviewService: OverviewService;
+  localModelRuntimeService: LocalModelRuntimeService;
   eventBus: EventBusService;
   eventPublisher: EventPublisher;
   presetSkillService: PresetSkillService;
@@ -44,9 +46,10 @@ export function createServerContext(setServerStop: () => void): ServerContext {
   const store = new StateStore();
   const appServiceManager = new AppServiceManager();
   const appUpdateService = new AppUpdateService();
-  const overviewService = new OverviewService(adapter, store, appServiceManager, appUpdateService);
   const eventBus = new EventBusService();
   const eventPublisher = new EventPublisher(eventBus);
+  const localModelRuntimeService = createLocalModelRuntimeService(adapter, store, eventPublisher);
+  const overviewService = new OverviewService(adapter, store, appServiceManager, appUpdateService, localModelRuntimeService);
   const presetSkillService = new PresetSkillService(adapter, store, eventPublisher);
   const channelSetupService = new ChannelSetupService(adapter, store, eventPublisher, secrets);
   const pluginService = new PluginService(adapter, eventPublisher);
@@ -61,7 +64,8 @@ export function createServerContext(setServerStop: () => void): ServerContext {
     channelSetupService,
     aiTeamService,
     presetSkillService,
-    eventPublisher
+    eventPublisher,
+    localModelRuntimeService
   );
   const taskService = new TaskService(adapter, store, eventPublisher);
   const appControlService = new AppControlService(setServerStop);
@@ -73,6 +77,7 @@ export function createServerContext(setServerStop: () => void): ServerContext {
     appServiceManager,
     appUpdateService,
     overviewService,
+    localModelRuntimeService,
     eventBus,
     eventPublisher,
     presetSkillService,

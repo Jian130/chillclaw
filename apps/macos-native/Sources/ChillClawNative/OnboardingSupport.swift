@@ -53,6 +53,7 @@ let nativeOnboardingIconTileRadius: CGFloat = NativeUI.iconCornerRadius
 let nativeOnboardingDisplayRadius: CGFloat = NativeUI.heroCornerRadius
 let nativeOnboardingCTAHeight: CGFloat = 50
 let nativeOnboardingAuthMethodCardHeight: CGFloat = 208
+let nativeOnboardingModelCloudHandoffDelayNanoseconds: UInt64 = 2_000_000_000
 
 enum NativeOnboardingActionButtonVariant: Sendable {
     case accent
@@ -708,6 +709,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
         switch event {
         case .deployCompleted, .gatewayStatus:
             return .installContext
+        case .localRuntimeProgress, .localRuntimeCompleted:
+            return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
              .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
             return nil
@@ -716,6 +719,10 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
         return nil
     case .model:
         switch event {
+        case .localRuntimeCompleted:
+            return .onboarding
+        case .localRuntimeProgress:
+            return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
              .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
@@ -724,6 +731,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
         switch event {
         case .channelSessionUpdated:
             return nil
+        case .localRuntimeProgress, .localRuntimeCompleted:
+            return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
              .chatStream, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
@@ -731,6 +740,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
     case .employee:
         switch event {
         case .presetSkillSyncUpdated:
+            return nil
+        case .localRuntimeProgress, .localRuntimeCompleted:
             return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated,
              .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
@@ -788,6 +799,18 @@ struct NativeOnboardingModelViewState: Sendable {
     var kind: NativeOnboardingModelScreenKind
     var provider: NativeResolvedOnboardingModelProvider?
     var entry: SavedModelEntry?
+}
+
+enum NativeOnboardingModelStepMode: Sendable, Equatable {
+    case detectingLocal
+    case cloudHandoff
+    case localSetup
+    case cloudConfig
+    case connected
+}
+
+struct NativeOnboardingLocalSetupProgress: Sendable, Equatable {
+    var currentStep: Int
 }
 
 private func nativeOnboardingInstallProgressFallback(_ phase: ChillClawDeployPhase?) -> Double {
@@ -962,6 +985,68 @@ func resolveNativeOnboardingModelViewState(
     return .init(kind: .configure, provider: provider, entry: selectedEntry)
 }
 
+func resolveNativeOnboardingModelStepMode(
+    bootstrapPending: Bool,
+    providerId: String,
+    selectedProviderPresent: Bool,
+    modelViewKind: NativeOnboardingModelScreenKind,
+    activeModelAuthSessionId: String?,
+    draftModelEntryID: String?,
+    summaryModelEntryID: String?,
+    localRuntime: LocalModelRuntimeOverview?
+) -> NativeOnboardingModelStepMode {
+    let hasPersistedModel = !(draftModelEntryID ?? "").isEmpty || !(summaryModelEntryID ?? "").isEmpty
+    let hasCloudFlow =
+        !providerId.isEmpty ||
+        selectedProviderPresent ||
+        !(activeModelAuthSessionId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        (modelViewKind == .configure && !hasPersistedModel)
+
+    if modelViewKind == .connected || localRuntime?.activeInOpenClaw == true {
+        return .connected
+    }
+
+    if hasCloudFlow || hasPersistedModel {
+        return .cloudConfig
+    }
+
+    if bootstrapPending {
+        return .detectingLocal
+    }
+
+    if localRuntime?.recommendation == "cloud" || localRuntime?.status == "cloud-recommended" {
+        return .cloudHandoff
+    }
+
+    if localRuntime?.recommendation == "local", localRuntime?.status != "ready" {
+        return .localSetup
+    }
+
+    return .cloudConfig
+}
+
+func resolveNativeOnboardingLocalSetupProgress(
+    mode: NativeOnboardingModelStepMode,
+    status: String?
+) -> NativeOnboardingLocalSetupProgress {
+    if mode == .connected || status == "ready" {
+        return .init(currentStep: 4)
+    }
+
+    switch status {
+    case "installing-runtime":
+        return .init(currentStep: 2)
+    case "downloading-model":
+        return .init(currentStep: 3)
+    case "starting-runtime", "configuring-openclaw":
+        return .init(currentStep: 4)
+    case "idle", "degraded", "failed", "cloud-recommended", "unchecked", nil:
+        return .init(currentStep: 1)
+    default:
+        return .init(currentStep: 1)
+    }
+}
+
 func resolveNativeOnboardingModelSetupVariant(providerID: String, methodKind: String?) -> NativeOnboardingModelSetupVariant {
     if methodKind == "oauth" {
         return .oauth
@@ -1072,6 +1157,18 @@ struct NativeOnboardingCopy: Sendable {
     let next: String
     let modelTitle: String
     let modelBody: String
+    let localModelSetupTitle: String
+    let localModelSetupBody: String
+    let localModelDetectingTitle: String
+    let localModelDetectingBody: String
+    let localModelUnsupportedTitle: String
+    let localModelUnsupportedBody: String
+    let localModelUnsupportedCloudBody: String
+    let localModelCloudFallbackCountdown: String
+    let localModelDetectStepLabel: String
+    let localModelPrepareStepLabel: String
+    let localModelDownloadStepLabel: String
+    let localModelConnectStepLabel: String
     let providerTitle: String
     let authTitle: String
     let authApiKeyLabel: String
@@ -1253,6 +1350,18 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             next: "继续",
             modelTitle: "选择你的 AI 模型",
             modelBody: "选择一个 AI 供应商，为你的数字员工提供能力支持",
+            localModelSetupTitle: "检测硬件并设置本地模型",
+            localModelSetupBody: "我们会检查你的硬件并安装本地 AI 模型",
+            localModelDetectingTitle: "正在检测硬件...",
+            localModelDetectingBody: "正在分析你的系统是否适合运行本地 AI 模型",
+            localModelUnsupportedTitle: "不建议使用本地模型",
+            localModelUnsupportedBody: "你的硬件尚未达到流畅运行本地 AI 模型的最低要求。",
+            localModelUnsupportedCloudBody: "别担心！你仍然可以改用强大的云端 AI。",
+            localModelCloudFallbackCountdown: "将在 2 秒后切换到云端 AI 配置...",
+            localModelDetectStepLabel: "检测硬件",
+            localModelPrepareStepLabel: "准备 Ollama",
+            localModelDownloadStepLabel: "下载本地模型",
+            localModelConnectStepLabel: "将 ChillClaw 连接到本地 AI",
             providerTitle: "选择一个供应商开始",
             authTitle: "你希望如何连接？",
             authApiKeyLabel: "API Key",
@@ -1410,6 +1519,18 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             next: "次へ",
             modelTitle: "AI モデルを選択",
             modelBody: "デジタル従業員を支える AI プロバイダーを選択してください",
+            localModelSetupTitle: "ハードウェアを検出してローカルモデルを設定",
+            localModelSetupBody: "ハードウェアを確認し、ローカル AI モデルをインストールします",
+            localModelDetectingTitle: "ハードウェアを検出しています...",
+            localModelDetectingBody: "ローカル AI モデルを動かせるかシステム性能を確認しています",
+            localModelUnsupportedTitle: "ローカルモデルは非推奨です",
+            localModelUnsupportedBody: "この Mac はローカル AI モデルを快適に動かすための最低要件を満たしていません。",
+            localModelUnsupportedCloudBody: "ご安心ください。代わりにクラウド AI を利用できます。",
+            localModelCloudFallbackCountdown: "2 秒後にクラウド AI の設定へ切り替えます...",
+            localModelDetectStepLabel: "ハードウェアを検出",
+            localModelPrepareStepLabel: "Ollama を準備",
+            localModelDownloadStepLabel: "ローカルモデルをダウンロード",
+            localModelConnectStepLabel: "ChillClaw をローカル AI に接続",
             providerTitle: "開始するプロバイダーを選択",
             authTitle: "どの方法で接続しますか？",
             authApiKeyLabel: "API Key",
@@ -1567,6 +1688,18 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             next: "다음",
             modelTitle: "AI 모델 선택",
             modelBody: "디지털 직원에 사용할 AI 제공자를 선택하세요",
+            localModelSetupTitle: "하드웨어를 감지하고 로컬 모델 설정",
+            localModelSetupBody: "하드웨어를 확인하고 로컬 AI 모델을 설치합니다",
+            localModelDetectingTitle: "하드웨어를 감지하는 중...",
+            localModelDetectingBody: "로컬 AI 모델을 실행할 수 있는지 시스템 성능을 분석하고 있습니다",
+            localModelUnsupportedTitle: "로컬 모델은 권장되지 않습니다",
+            localModelUnsupportedBody: "이 Mac은 로컬 AI 모델을 원활하게 실행하기 위한 최소 요구 사항을 충족하지 못합니다.",
+            localModelUnsupportedCloudBody: "걱정하지 마세요. 대신 강력한 클라우드 AI를 사용할 수 있습니다.",
+            localModelCloudFallbackCountdown: "2초 후 클라우드 AI 설정으로 전환합니다...",
+            localModelDetectStepLabel: "하드웨어 감지",
+            localModelPrepareStepLabel: "Ollama 준비",
+            localModelDownloadStepLabel: "로컬 모델 다운로드",
+            localModelConnectStepLabel: "ChillClaw를 로컬 AI에 연결",
             providerTitle: "시작할 제공자를 선택하세요",
             authTitle: "어떻게 연결하시겠어요?",
             authApiKeyLabel: "API Key",
@@ -1724,6 +1857,18 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             next: "Siguiente",
             modelTitle: "Elige tu modelo de IA",
             modelBody: "Selecciona un proveedor de IA para impulsar a tus empleados digitales",
+            localModelSetupTitle: "Detectar hardware y configurar modelo local",
+            localModelSetupBody: "Comprobaremos tu hardware e instalaremos un modelo local de IA",
+            localModelDetectingTitle: "Detectando hardware...",
+            localModelDetectingBody: "Analizando si tu sistema puede ejecutar modelos locales de IA",
+            localModelUnsupportedTitle: "No se recomienda el modelo local",
+            localModelUnsupportedBody: "Tu hardware no cumple los requisitos mínimos para ejecutar modelos locales de IA con fluidez.",
+            localModelUnsupportedCloudBody: "No te preocupes. En su lugar puedes usar una potente IA en la nube.",
+            localModelCloudFallbackCountdown: "Cambiando a la configuración de IA en la nube en 2 segundos...",
+            localModelDetectStepLabel: "Detectar hardware",
+            localModelPrepareStepLabel: "Preparar Ollama",
+            localModelDownloadStepLabel: "Descargar modelo local",
+            localModelConnectStepLabel: "Conectar ChillClaw a la IA local",
             providerTitle: "Selecciona un proveedor para empezar",
             authTitle: "¿Cómo te gustaría conectarte?",
             authApiKeyLabel: "API Key",
@@ -1881,6 +2026,18 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             next: "Next",
             modelTitle: "Choose Your AI Model",
             modelBody: "Select an AI provider to power your digital employees",
+            localModelSetupTitle: "Detect Hardware & Setup Local Model",
+            localModelSetupBody: "We'll check your hardware and install a local AI model",
+            localModelDetectingTitle: "Detecting Hardware...",
+            localModelDetectingBody: "Analyzing your system's capabilities for local AI models",
+            localModelUnsupportedTitle: "Local Model Not Recommended",
+            localModelUnsupportedBody: "Your hardware doesn't meet the minimum requirements for running local AI models smoothly.",
+            localModelUnsupportedCloudBody: "Don't worry! You can use powerful cloud AI instead.",
+            localModelCloudFallbackCountdown: "Switching to cloud AI configuration in 2 seconds...",
+            localModelDetectStepLabel: "Detect hardware",
+            localModelPrepareStepLabel: "Prepare Ollama",
+            localModelDownloadStepLabel: "Download local model",
+            localModelConnectStepLabel: "Connect ChillClaw to local AI",
             providerTitle: "Select a provider to get started",
             authTitle: "How would you like to connect?",
             authApiKeyLabel: "API Key",

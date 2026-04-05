@@ -38,6 +38,10 @@ export function connectedModelDetail(
     return "OpenClaw is not installed.";
   }
 
+  if (overview.localRuntime?.activeInOpenClaw) {
+    return overview.localRuntime.summary;
+  }
+
   if (modelConfig?.defaultModel) {
     return modelConfig.defaultModel;
   }
@@ -212,6 +216,7 @@ export default function DashboardPage() {
               <div className="status-list">
                 <div className="check-row"><strong>OpenClaw deployed</strong><StatusBadge tone={overview?.engine.installed ? "success" : "warning"}>{overview?.engine.installed ? "Active" : "Missing"}</StatusBadge></div>
                 <div className="check-row"><strong>Gateway reachable</strong><StatusBadge tone={overview?.engine.running ? "success" : "warning"}>{overview?.engine.running ? "Running" : "Stopped"}</StatusBadge></div>
+                <div className="check-row"><strong>Local AI runtime</strong><StatusBadge tone={overview?.localRuntime?.status === "ready" ? "success" : overview?.localRuntime?.status === "degraded" || overview?.localRuntime?.status === "failed" ? "warning" : "neutral"}>{overview?.localRuntime?.status === "ready" ? "Ready" : overview?.localRuntime?.status === "degraded" || overview?.localRuntime?.status === "failed" ? "Repair" : overview?.localRuntime?.recommendation === "local" ? "Available" : "Cloud"}</StatusBadge></div>
                 <div className="check-row"><strong>Channels configured</strong><StatusBadge tone={channelReady ? "success" : "warning"}>{channelReady ? `${channelReady} ready` : "Pending"}</StatusBadge></div>
                 <div className="check-row"><strong>Health blockers</strong><StatusBadge tone={overview?.healthChecks.some((check) => check.severity === "error") ? "warning" : "success"}>{overview?.healthChecks.some((check) => check.severity === "error") ? "Review" : "Clear"}</StatusBadge></div>
                 <div className="check-row"><strong>AI member roster</strong><StatusBadge tone="info">{aiTeam?.members.length ?? 0} members</StatusBadge></div>

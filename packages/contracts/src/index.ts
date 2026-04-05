@@ -17,6 +17,7 @@ export interface MutationSyncMeta {
 export type RecoveryActionType =
   | "restart-engine"
   | "repair-config"
+  | "repair-local-model-runtime"
   | "rollback-update"
   | "reinstall-engine"
   | "export-diagnostics";
@@ -172,11 +173,62 @@ export interface SavedModelEntry {
   updatedAt: string;
 }
 
+export type LocalModelRuntimeRecommendation = "unknown" | "local" | "cloud";
+export type LocalModelRuntimeSupportCode =
+  | "unchecked"
+  | "supported"
+  | "unsupported-platform"
+  | "unsupported-architecture"
+  | "insufficient-memory"
+  | "insufficient-disk";
+export type LocalModelRuntimeStatus =
+  | "unchecked"
+  | "idle"
+  | "installing-runtime"
+  | "starting-runtime"
+  | "downloading-model"
+  | "configuring-openclaw"
+  | "ready"
+  | "degraded"
+  | "cloud-recommended"
+  | "failed";
+export type LocalModelRuntimeTier = "small" | "medium" | "large";
+export type LocalModelRuntimeAction = "install" | "repair";
+export type LocalModelRuntimePhase =
+  | "inspecting-host"
+  | "installing-runtime"
+  | "starting-runtime"
+  | "downloading-model"
+  | "configuring-openclaw"
+  | "verifying";
+
+export interface LocalModelRuntimeOverview {
+  supported: boolean;
+  recommendation: LocalModelRuntimeRecommendation;
+  supportCode: LocalModelRuntimeSupportCode;
+  status: LocalModelRuntimeStatus;
+  runtimeInstalled: boolean;
+  runtimeReachable: boolean;
+  modelDownloaded: boolean;
+  activeInOpenClaw: boolean;
+  recommendedTier?: LocalModelRuntimeTier;
+  requiredDiskGb?: number;
+  totalMemoryGb?: number;
+  freeDiskGb?: number;
+  chosenModelKey?: string;
+  managedEntryId?: string;
+  summary: string;
+  detail: string;
+  lastError?: string;
+  recoveryHint?: string;
+}
+
 export interface ModelConfigOverview {
   providers: ModelProviderConfig[];
   models: ModelCatalogEntry[];
   defaultModel?: string;
   configuredModelKeys: string[];
+  localRuntime?: LocalModelRuntimeOverview;
   savedEntries: SavedModelEntry[];
   defaultEntryId?: string;
   fallbackEntryIds: string[];
@@ -1011,6 +1063,21 @@ export type ChillClawEvent =
       session: ChannelSession;
     }
   | {
+      type: "local-runtime.progress";
+      action: LocalModelRuntimeAction;
+      phase: LocalModelRuntimePhase;
+      percent?: number;
+      message: string;
+      localRuntime: LocalModelRuntimeOverview;
+    }
+  | {
+      type: "local-runtime.completed";
+      action: LocalModelRuntimeAction;
+      status: "completed" | "failed";
+      message: string;
+      localRuntime: LocalModelRuntimeOverview;
+    }
+  | {
       type: "config.applied";
       resource: ChillClawConfigResource;
       summary: string;
@@ -1028,6 +1095,7 @@ export interface ProductOverview {
   capabilities: EngineCapabilities;
   installChecks: InstallCheck[];
   channelSetup: ChannelSetupOverview;
+  localRuntime?: LocalModelRuntimeOverview;
   profiles: UserProfile[];
   templates: TaskTemplate[];
   healthChecks: HealthCheckResult[];
@@ -1121,6 +1189,15 @@ export interface RecoveryRunResponse {
   actionId: string;
   status: "completed" | "failed";
   message: string;
+}
+
+export interface LocalModelRuntimeActionResponse extends MutationSyncMeta {
+  action: LocalModelRuntimeAction;
+  status: "completed" | "failed";
+  message: string;
+  localRuntime: LocalModelRuntimeOverview;
+  modelConfig: ModelConfigOverview;
+  overview: ProductOverview;
 }
 
 export interface SetupRunResponse {
@@ -1369,6 +1446,21 @@ export const defaultTemplates: TaskTemplate[] = [
 
 export * from "./compatibility.js";
 
+export function createDefaultLocalModelRuntimeOverview(): LocalModelRuntimeOverview {
+  return {
+    supported: false,
+    recommendation: "unknown",
+    supportCode: "unchecked",
+    status: "unchecked",
+    runtimeInstalled: false,
+    runtimeReachable: false,
+    modelDownloaded: false,
+    activeInOpenClaw: false,
+    summary: "ChillClaw has not checked local AI on this Mac yet.",
+    detail: "ChillClaw will inspect local Ollama support when you choose the local AI path."
+  };
+}
+
 export function createDefaultProductOverview(options?: {
   appVersion?: string;
   appUpdate?: AppUpdateStatus;
@@ -1502,6 +1594,7 @@ export function createDefaultProductOverview(options?: {
       gatewayStarted: false,
       gatewaySummary: "Next recommended channel: Telegram."
     },
+    localRuntime: createDefaultLocalModelRuntimeOverview(),
     profiles: defaultProfiles,
     templates: defaultTemplates,
     healthChecks: [

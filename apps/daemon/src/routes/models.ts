@@ -1,4 +1,5 @@
 import type {
+  LocalModelRuntimeActionResponse,
   ModelAuthRequest,
   ModelAuthSessionInputRequest,
   ReplaceFallbackModelEntriesRequest,
@@ -8,11 +9,32 @@ import type {
 
 import { readJson, jsonResponse } from "./http.js";
 import { createPathMatcher } from "./matchers.js";
+import type { ServerContext } from "./server-context.js";
 import type { RouteDefinition } from "./types.js";
 
 const matchModelEntry = createPathMatcher("/api/models/entries/:entryId");
 const matchModelAuthSession = createPathMatcher("/api/models/auth/session/:sessionId");
 const matchModelAuthSessionInput = createPathMatcher("/api/models/auth/session/:sessionId/input");
+
+async function decoratedModelConfig(context: ServerContext) {
+  return context.localModelRuntimeService.decorateModelConfig(await context.adapter.config.getModelConfig());
+}
+
+async function publishModelAndOverview(
+  context: ServerContext,
+  modelConfig?: Awaited<ReturnType<typeof decoratedModelConfig>>
+) {
+  const effectiveModelConfig = modelConfig ?? (await decoratedModelConfig(context));
+  const sync = context.eventPublisher.publishModelConfigUpdated(effectiveModelConfig);
+  const overview = await context.overviewService.getOverview();
+  context.eventPublisher.publishOverviewUpdated(overview);
+
+  return {
+    sync,
+    modelConfig: effectiveModelConfig,
+    overview
+  };
+}
 
 export const modelsRoutes: RouteDefinition[] = [
   {
@@ -21,7 +43,7 @@ export const modelsRoutes: RouteDefinition[] = [
     freshReadInvalidationTargets: ["models"],
     snapshotPolicy: "silent",
     async handle({ context }) {
-      return jsonResponse(await context.adapter.config.getModelConfig());
+      return jsonResponse(await decoratedModelConfig(context));
     }
   },
   {
@@ -30,10 +52,14 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context, request }) {
       const body = await readJson<SaveModelEntryRequest>(request);
       const result = await context.adapter.config.createSavedModelEntry(body);
-      const sync = context.eventPublisher.publishModelConfigUpdated(result.modelConfig);
+      const { sync, modelConfig } = await publishModelAndOverview(
+        context,
+        await context.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      );
 
       return jsonResponse({
         ...result,
+        modelConfig,
         ...sync,
         settled: result.status === "interactive" ? false : sync.settled
       });
@@ -45,10 +71,14 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context, request, params }) {
       const body = await readJson<SaveModelEntryRequest>(request);
       const result = await context.adapter.config.updateSavedModelEntry(params.entryId, body);
-      const sync = context.eventPublisher.publishModelConfigUpdated(result.modelConfig);
+      const { sync, modelConfig } = await publishModelAndOverview(
+        context,
+        await context.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      );
 
       return jsonResponse({
         ...result,
+        modelConfig,
         ...sync,
         settled: result.status === "interactive" ? false : sync.settled
       });
@@ -59,10 +89,14 @@ export const modelsRoutes: RouteDefinition[] = [
     match: matchModelEntry,
     async handle({ context, params }) {
       const result = await context.adapter.config.removeSavedModelEntry(params.entryId);
-      const sync = context.eventPublisher.publishModelConfigUpdated(result.modelConfig);
+      const { sync, modelConfig } = await publishModelAndOverview(
+        context,
+        await context.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      );
 
       return jsonResponse({
         ...result,
+        modelConfig,
         ...sync
       });
     }
@@ -73,10 +107,14 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context, request }) {
       const body = await readJson<SetDefaultModelEntryRequest>(request);
       const result = await context.adapter.config.setDefaultModelEntry(body);
-      const sync = context.eventPublisher.publishModelConfigUpdated(result.modelConfig);
+      const { sync, modelConfig } = await publishModelAndOverview(
+        context,
+        await context.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      );
 
       return jsonResponse({
         ...result,
+        modelConfig,
         ...sync
       });
     }
@@ -87,10 +125,14 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context, request }) {
       const body = await readJson<ReplaceFallbackModelEntriesRequest>(request);
       const result = await context.adapter.config.replaceFallbackModelEntries(body);
-      const sync = context.eventPublisher.publishModelConfigUpdated(result.modelConfig);
+      const { sync, modelConfig } = await publishModelAndOverview(
+        context,
+        await context.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      );
 
       return jsonResponse({
         ...result,
+        modelConfig,
         ...sync
       });
     }
@@ -101,10 +143,14 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context, request }) {
       const body = await readJson<ModelAuthRequest>(request);
       const result = await context.adapter.config.authenticateModelProvider(body);
-      const sync = context.eventPublisher.publishModelConfigUpdated(result.modelConfig);
+      const { sync, modelConfig } = await publishModelAndOverview(
+        context,
+        await context.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      );
 
       return jsonResponse({
         ...result,
+        modelConfig,
         ...sync,
         settled: result.status === "interactive" ? false : sync.settled
       });
@@ -131,12 +177,54 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context, request }) {
       const body = await readJson<{ modelKey: string }>(request);
       const result = await context.adapter.config.setDefaultModel(body.modelKey);
-      const sync = context.eventPublisher.publishModelConfigUpdated(result.modelConfig);
+      const { sync, modelConfig } = await publishModelAndOverview(
+        context,
+        await context.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      );
 
       return jsonResponse({
         ...result,
+        modelConfig,
         ...sync
       });
+    }
+  },
+  {
+    method: "POST",
+    match: createPathMatcher("/api/models/local-runtime/install"),
+    async handle({ context }) {
+      const result = await context.localModelRuntimeService.install();
+      const { sync, modelConfig, overview } = await publishModelAndOverview(context);
+      const response: LocalModelRuntimeActionResponse = {
+        action: "install",
+        status: result.status,
+        message: result.message,
+        localRuntime: result.localRuntime,
+        modelConfig,
+        overview,
+        ...sync
+      };
+
+      return jsonResponse(response);
+    }
+  },
+  {
+    method: "POST",
+    match: createPathMatcher("/api/models/local-runtime/repair"),
+    async handle({ context }) {
+      const result = await context.localModelRuntimeService.repair();
+      const { sync, modelConfig, overview } = await publishModelAndOverview(context);
+      const response: LocalModelRuntimeActionResponse = {
+        action: "repair",
+        status: result.status,
+        message: result.message,
+        localRuntime: result.localRuntime,
+        modelConfig,
+        overview,
+        ...sync
+      };
+
+      return jsonResponse(response);
     }
   }
 ];

@@ -127,6 +127,97 @@ describe("DashboardPage model metrics", () => {
     expect(connectedModelDetail(overview, undefined)).toBe("OpenClaw is not installed.");
   });
 
+  it("prefers the managed local runtime summary when local AI is active", () => {
+    expect(
+      connectedModelDetail(
+        {
+          appName: "ChillClaw",
+          appVersion: "0.1.2",
+          platformTarget: "macOS first",
+          appUpdate: {
+            status: "unsupported",
+            supported: false,
+            currentVersion: "0.1.2",
+            checkedAt: new Date().toISOString(),
+            summary: "",
+            detail: ""
+          },
+          firstRun: {
+            introCompleted: true,
+            setupCompleted: true,
+            selectedProfileId: undefined
+          },
+          appService: {
+            mode: "unmanaged",
+            installed: false,
+            running: false,
+            managedAtLogin: false,
+            summary: "",
+            detail: ""
+          },
+          engine: {
+            engine: "openclaw",
+            installed: true,
+            running: true,
+            version: "2026.4.5",
+            summary: "Ready",
+            lastCheckedAt: new Date().toISOString()
+          },
+          installSpec: {
+            engine: "openclaw",
+            desiredVersion: "latest",
+            installSource: "npm-local",
+            prerequisites: []
+          },
+          capabilities: {
+            engine: "openclaw",
+            supportsInstall: true,
+            supportsUpdate: true,
+            supportsRecovery: true,
+            supportsStreaming: true,
+            runtimeModes: ["gateway"],
+            supportedChannels: [],
+            starterSkillCategories: [],
+            futureLocalModelFamilies: []
+          },
+          installChecks: [],
+          channelSetup: {
+            baseOnboardingCompleted: true,
+            channels: [],
+            gatewayStarted: false,
+            gatewaySummary: ""
+          },
+          localRuntime: {
+            supported: true,
+            recommendation: "local",
+            supportCode: "supported",
+            status: "ready",
+            runtimeInstalled: true,
+            runtimeReachable: true,
+            modelDownloaded: true,
+            activeInOpenClaw: true,
+            summary: "Local AI is ready on this Mac.",
+            detail: "OpenClaw is connected to the local runtime."
+          },
+          healthChecks: [],
+          recentTasks: [],
+          recoveryActions: [],
+          profiles: [],
+          templates: []
+        },
+        {
+          providers: [],
+          models: [],
+          defaultModel: "ollama/gemma4:e4b",
+          configuredModelKeys: ["ollama/gemma4:e4b"],
+          savedEntries: [],
+          defaultEntryId: undefined,
+          fallbackEntryIds: []
+        }
+      )
+    ).toBe("Local AI is ready on this Mac.");
+  });
+
   it("renders the dashboard scaffold in the full-width mode", () => {
     const html = renderToStaticMarkup(createElement(MemoryRouter, undefined, createElement(DashboardPage)));
 

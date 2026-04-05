@@ -33,6 +33,8 @@ func shouldRefreshNativeOverviewForEvent(_ event: ChillClawEvent) -> Bool {
         return false
     case .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
         return false
+    case .localRuntimeProgress, .localRuntimeCompleted:
+        return false
     case .deployCompleted, .gatewayStatus:
         return true
     case let .taskProgress(_, status, _):
@@ -50,6 +52,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
             return false
         case .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
             return false
+        case .localRuntimeProgress, .localRuntimeCompleted:
+            return false
         case .deployCompleted, .gatewayStatus:
             return true
         case let .taskProgress(_, status, _):
@@ -60,6 +64,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
     case .deploy:
         switch event {
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+            return false
+        case .localRuntimeProgress, .localRuntimeCompleted:
             return false
         case .deployCompleted, .gatewayStatus:
             return true
@@ -72,6 +78,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
             return false
         case .overviewUpdated, .aiTeamUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
             return false
+        case .localRuntimeProgress, .localRuntimeCompleted:
+            return false
         case .channelSessionUpdated:
             return true
         case .configApplied, .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
@@ -82,6 +90,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
         case .pluginConfigUpdated:
             return false
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+            return false
+        case .localRuntimeProgress, .localRuntimeCompleted:
             return false
         case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated, .configApplied:
             return false
@@ -94,6 +104,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
             return false
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .presetSkillSyncUpdated:
             return false
+        case .localRuntimeProgress, .localRuntimeCompleted:
+            return false
         case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated:
             return false
         }
@@ -104,6 +116,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
         case .configApplied:
             return false
         case .overviewUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
+            return false
+        case .localRuntimeProgress, .localRuntimeCompleted:
             return false
         case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated:
             return false
@@ -325,6 +339,8 @@ final class ChillClawAppState {
             skillConfig = snapshot.data
         case .presetSkillSyncUpdated:
             break
+        case .localRuntimeProgress, .localRuntimeCompleted:
+            break
         case .deployProgress, .deployCompleted, .gatewayStatus, .taskProgress, .chatStream, .channelSessionUpdated, .configApplied:
             break
         }
@@ -391,18 +407,18 @@ final class ChillClawAppState {
     private func refreshCurrentSectionData() async throws {
         switch selectedSection {
         case .dashboard:
-            async let modelTask = loader.fetchModelConfig()
-            async let teamTask = loader.fetchAITeamOverview()
-            self.modelConfig = try await modelTask
-            self.aiTeamOverview = try await teamTask
+            let modelConfig = try await loader.fetchModelConfig()
+            let aiTeamOverview = try await loader.fetchAITeamOverview()
+            self.modelConfig = modelConfig
+            self.aiTeamOverview = aiTeamOverview
             updateSelectedMemberForChat()
         case .deploy:
             self.deploymentTargets = try await loader.fetchDeploymentTargets()
         case .configuration:
-            async let modelTask = loader.fetchModelConfig()
-            async let channelTask = loader.fetchChannelConfig()
-            self.modelConfig = try await modelTask
-            self.channelConfig = try await channelTask
+            let modelConfig = try await loader.fetchModelConfig()
+            let channelConfig = try await loader.fetchChannelConfig()
+            self.modelConfig = modelConfig
+            self.channelConfig = channelConfig
         case .plugins:
             self.pluginConfig = try await loader.fetchPluginConfig()
         case .skills:

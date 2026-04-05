@@ -27,6 +27,7 @@ import type {
   InstallResponse,
   InstallSkillRequest,
   InstalledSkillDetail,
+  LocalModelRuntimeActionResponse,
   ModelAuthRequest,
   ModelAuthSessionInputRequest,
   ModelAuthSessionResponse,
@@ -420,6 +421,18 @@ export function setDefaultModel(request: SetDefaultModelRequest): Promise<ModelC
   return readJson<ModelConfigActionResponse>("/models/default", {
     method: "POST",
     body: JSON.stringify(request)
+  });
+}
+
+export function installLocalModelRuntime(): Promise<LocalModelRuntimeActionResponse> {
+  return readJson<LocalModelRuntimeActionResponse>("/models/local-runtime/install", {
+    method: "POST"
+  });
+}
+
+export function repairLocalModelRuntime(): Promise<LocalModelRuntimeActionResponse> {
+  return readJson<LocalModelRuntimeActionResponse>("/models/local-runtime/repair", {
+    method: "POST"
   });
 }
 

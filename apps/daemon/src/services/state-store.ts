@@ -6,6 +6,7 @@ import type {
   ChannelFieldSummary,
   ChannelSetupState,
   EngineTaskResult,
+  LocalModelRuntimeStatus,
   OnboardingDraftState,
   PresetSkillSyncOverview,
   PresetSkillTargetMode,
@@ -99,6 +100,13 @@ export interface OnboardingWarmupState {
   lastError?: string;
 }
 
+export interface LocalModelRuntimeState {
+  managedEntryId?: string;
+  selectedModelKey?: string;
+  status?: LocalModelRuntimeStatus;
+  lastError?: string;
+}
+
 export interface AppState {
   selectedProfileId?: string;
   tasks: EngineTaskResult[];
@@ -111,6 +119,7 @@ export interface AppState {
   skills?: SkillState;
   presetSkills?: PresetSkillState;
   chat?: ChatState;
+  localModelRuntime?: LocalModelRuntimeState;
 }
 
 export function defaultOnboardingDraftState(): OnboardingDraftState {

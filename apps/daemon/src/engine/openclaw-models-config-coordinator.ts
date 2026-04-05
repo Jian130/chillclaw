@@ -665,6 +665,56 @@ export class ModelsConfigCoordinator {
     return this.createOrUpdateSavedModelEntry("update", entryId, request);
   }
 
+  async upsertManagedLocalModelEntry(request: {
+    label: string;
+    providerId: string;
+    methodId: string;
+    modelKey: string;
+    entryId?: string;
+  }): Promise<ModelConfigActionResponse> {
+    const provider = providerDefinitionById(request.providerId);
+    const method = provider?.authMethods.find((item) => item.id === request.methodId);
+
+    if (!provider) {
+      throw new Error(`Unknown provider: ${request.providerId}`);
+    }
+
+    if (!method) {
+      throw new Error(`Unknown auth method for provider ${request.providerId}: ${request.methodId}`);
+    }
+
+    const state = await this.access.ensureSavedModelState();
+    const existingEntry =
+      (request.entryId ? state.modelEntries?.find((entry) => entry.id === request.entryId) : undefined) ??
+      state.modelEntries?.find((entry) => entry.providerId === request.providerId && entry.authMethodId === request.methodId);
+    const saveRequest: SaveModelEntryRequest = {
+      label: request.label,
+      providerId: request.providerId,
+      methodId: request.methodId,
+      modelKey: request.modelKey,
+      values: {},
+      makeDefault: true
+    };
+    const nextEntry = this.buildSavedModelEntryState(
+      request.entryId ?? existingEntry?.id ?? randomUUID(),
+      saveRequest,
+      new Date().toISOString(),
+      existingEntry,
+      method
+    );
+
+    await this.syncRuntimeModelChain(this.applySavedModelEntryState(state, nextEntry, saveRequest));
+    await this.access.markGatewayApplyPending();
+
+    return {
+      ...this.access.mutationSyncMeta(),
+      status: "completed",
+      message: appendGatewayApplyMessage(`${nextEntry.label} is ready.`),
+      modelConfig: await this.getModelConfig(),
+      requiresGatewayApply: true
+    };
+  }
+
   async removeSavedModelEntry(entryId: string): Promise<ModelConfigActionResponse> {
     await this.getModelConfig();
     const state = this.access.normalizeStateFlags(await this.access.readAdapterState());
@@ -1052,6 +1102,8 @@ export class ModelsConfigCoordinator {
             ? "API key"
             : method?.kind === "token"
               ? "Token"
+              : method?.kind === "local"
+                ? "Local runtime"
               : undefined),
       profileLabel: existingEntry?.profileLabel,
       profileIds: existingEntry?.profileIds ?? [],

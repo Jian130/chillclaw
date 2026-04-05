@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { ChannelConfigOverview, ChannelSession, OnboardingStep, ChillClawEvent } from "@chillclaw/contracts";
+import type {
+  ChannelConfigOverview,
+  ChannelSession,
+  ChillClawEvent,
+  LocalModelRuntimeOverview,
+  OnboardingStep
+} from "@chillclaw/contracts";
 
 import {
   applyPresetSkillSyncToOnboardingState,
@@ -11,6 +17,8 @@ import {
   onboardingRefreshResourceForEvent,
   resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingModelSetupVariant,
+  resolveOnboardingModelStepMode,
+  resolveOnboardingLocalSetupProgress,
   shouldShowOnboardingAuthMethodChooser,
   resolveOnboardingInstallViewState,
   resolveOnboardingModelPickerProviders,
@@ -26,6 +34,7 @@ import {
   nextOnboardingStepAfterModelSave,
   resolveCompletedOnboardingChannelEntry,
   type ResolvedOnboardingModelProvider,
+  type OnboardingModelStepMode,
   resolveOnboardingProviderId,
   resolveOnboardingModelProviders
 } from "./helpers.js";
@@ -985,6 +994,153 @@ describe("onboarding helpers", () => {
         activeModelAuthSessionId: "session-1"
       }).kind
     ).toBe("configure");
+  });
+
+  it("resolves the model step to detecting-local while fresh local capability is still loading", () => {
+    const mode = resolveOnboardingModelStepMode({
+      bootstrapPending: true,
+      providerId: "",
+      selectedProviderPresent: false,
+      modelViewKind: "picker",
+      activeModelAuthSessionId: undefined,
+      draftModelEntryId: undefined,
+      summaryModelEntryId: undefined,
+      localRuntime: undefined
+    });
+
+    expect(mode).toBe("detecting-local");
+  });
+
+  it("switches the model step into a cloud handoff when local AI is not recommended", () => {
+    const mode = resolveOnboardingModelStepMode({
+      bootstrapPending: false,
+      providerId: "",
+      selectedProviderPresent: false,
+      modelViewKind: "picker",
+      activeModelAuthSessionId: undefined,
+      draftModelEntryId: undefined,
+      summaryModelEntryId: undefined,
+      localRuntime: {
+        supported: false,
+        recommendation: "cloud",
+        supportCode: "insufficient-memory",
+        status: "cloud-recommended",
+        runtimeInstalled: false,
+        runtimeReachable: false,
+        modelDownloaded: false,
+        activeInOpenClaw: false,
+        summary: "This Mac is better suited to cloud AI.",
+        detail: "Use a cloud model provider instead."
+      }
+    });
+
+    expect(mode).toBe("cloud-handoff");
+  });
+
+  it("switches the model step into local setup when local AI is recommended but not ready yet", () => {
+    const mode = resolveOnboardingModelStepMode({
+      bootstrapPending: false,
+      providerId: "",
+      selectedProviderPresent: false,
+      modelViewKind: "picker",
+      activeModelAuthSessionId: undefined,
+      draftModelEntryId: undefined,
+      summaryModelEntryId: undefined,
+      localRuntime: {
+        supported: true,
+        recommendation: "local",
+        supportCode: "supported",
+        status: "idle",
+        runtimeInstalled: false,
+        runtimeReachable: false,
+        modelDownloaded: false,
+        activeInOpenClaw: false,
+        summary: "Local AI is available on this Mac.",
+        detail: "ChillClaw recommends a starter Ollama tier for this Apple Silicon Mac."
+      }
+    });
+
+    expect(mode).toBe("local-setup");
+  });
+
+  it("keeps the model step in cloud config when onboarding already has a cloud draft or auth session", () => {
+    const baseArgs = {
+      bootstrapPending: false,
+      providerId: "openai",
+      selectedProviderPresent: true,
+      modelViewKind: "configure" as const,
+      localRuntime: {
+        supported: false,
+        recommendation: "cloud",
+        supportCode: "insufficient-memory",
+        status: "cloud-recommended",
+        runtimeInstalled: false,
+        runtimeReachable: false,
+        modelDownloaded: false,
+        activeInOpenClaw: false,
+        summary: "This Mac is better suited to cloud AI.",
+        detail: "Use a cloud model provider instead."
+      } satisfies LocalModelRuntimeOverview
+    };
+
+    expect(
+      resolveOnboardingModelStepMode({
+        ...baseArgs,
+        activeModelAuthSessionId: undefined,
+        draftModelEntryId: "draft-entry",
+        summaryModelEntryId: undefined
+      })
+    ).toBe("cloud-config");
+    expect(
+      resolveOnboardingModelStepMode({
+        ...baseArgs,
+        activeModelAuthSessionId: "session-1",
+        draftModelEntryId: undefined,
+        summaryModelEntryId: undefined
+      })
+    ).toBe("cloud-config");
+  });
+
+  it("keeps the model step connected when local runtime is already active in OpenClaw", () => {
+    const mode = resolveOnboardingModelStepMode({
+      bootstrapPending: false,
+      providerId: "",
+      selectedProviderPresent: false,
+      modelViewKind: "connected",
+      activeModelAuthSessionId: undefined,
+      draftModelEntryId: undefined,
+      summaryModelEntryId: "managed-ollama-entry",
+      localRuntime: {
+        supported: true,
+        recommendation: "local",
+        supportCode: "supported",
+        status: "ready",
+        runtimeInstalled: true,
+        runtimeReachable: true,
+        modelDownloaded: true,
+        activeInOpenClaw: true,
+        summary: "Local AI is ready on this Mac.",
+        detail: "ChillClaw connected OpenClaw directly to the local Ollama runtime."
+      }
+    });
+
+    expect(mode).toBe("connected");
+  });
+
+  it("maps local runtime phases into stable local setup progress steps", () => {
+    const expectations: Array<[OnboardingModelStepMode, LocalModelRuntimeOverview["status"] | undefined, number]> = [
+      ["detecting-local", undefined, 1],
+      ["local-setup", "idle", 1],
+      ["local-setup", "installing-runtime", 2],
+      ["local-setup", "downloading-model", 3],
+      ["local-setup", "starting-runtime", 4],
+      ["local-setup", "configuring-openclaw", 4],
+      ["connected", "ready", 4]
+    ];
+
+    for (const [mode, status, expectedStep] of expectations) {
+      expect(resolveOnboardingLocalSetupProgress(mode, status).currentStep).toBe(expectedStep);
+    }
   });
 
   it("does not report connected until the saved model entry is persisted into onboarding state", () => {

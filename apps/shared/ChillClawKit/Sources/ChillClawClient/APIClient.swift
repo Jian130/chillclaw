@@ -174,6 +174,14 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/models/default-entry", body: SetDefaultModelEntryRequest(entryId: entryId))
     }
 
+    public func installLocalModelRuntime() async throws -> LocalModelRuntimeActionResponse {
+        try await post("/api/models/local-runtime/install", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func repairLocalModelRuntime() async throws -> LocalModelRuntimeActionResponse {
+        try await post("/api/models/local-runtime/repair", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
     public func replaceFallbackModels(entryIds: [String]) async throws -> ModelConfigActionResponse {
         try await post("/api/models/fallbacks", body: ReplaceFallbackModelEntriesRequest(entryIds: entryIds))
     }

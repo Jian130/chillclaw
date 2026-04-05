@@ -645,388 +645,626 @@ struct NativeOnboardingView: View {
     }
 
     private var modelStep: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            headerBlock(title: viewModel.copy.modelTitle, body: viewModel.copy.modelBody)
+        let localFlowMode = viewModel.modelStepMode
 
-            switch viewModel.modelViewState.kind {
-            case .picker:
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(viewModel.copy.providerTitle)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Color(red: 0.20, green: 0.25, blue: 0.32))
-                        .frame(maxWidth: .infinity)
+        return VStack(alignment: .leading, spacing: 24) {
+            headerBlock(
+                title: localFlowMode == .detectingLocal || localFlowMode == .cloudHandoff || localFlowMode == .localSetup
+                    ? viewModel.copy.localModelSetupTitle
+                    : viewModel.copy.modelTitle,
+                body: localFlowMode == .detectingLocal || localFlowMode == .cloudHandoff || localFlowMode == .localSetup
+                    ? viewModel.copy.localModelSetupBody
+                    : viewModel.copy.modelBody
+            )
+
+            if localFlowMode == .detectingLocal || localFlowMode == .cloudHandoff || localFlowMode == .localSetup {
+                modelLocalFirstFlow(mode: localFlowMode)
+            } else if viewModel.localRuntimeConnected {
+                modelLocalConnectedState
+            } else if viewModel.modelViewState.kind == .picker {
+                modelPickerState
+            } else {
+                modelProviderSetupState
+            }
+        }
+    }
+
+    private func modelLocalFirstFlow(mode: NativeOnboardingModelStepMode) -> some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if mode == .cloudHandoff {
+                HStack(alignment: .center, spacing: 20) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.95))
+                            .frame(width: 64, height: 64)
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.92, green: 0.35, blue: 0.05))
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(viewModel.copy.localModelUnsupportedTitle)
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(nativeOnboardingTextPrimary)
+                        Text(viewModel.copy.localModelUnsupportedBody)
+                            .font(.system(size: 16, weight: .regular))
+                            .lineSpacing(6)
+                            .foregroundStyle(nativeOnboardingTextSecondary)
+                        Text(viewModel.copy.localModelUnsupportedCloudBody)
+                            .font(.system(size: 16, weight: .semibold))
+                            .lineSpacing(6)
+                            .foregroundStyle(Color(red: 0.20, green: 0.25, blue: 0.32))
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 30)
+                .background(
+                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 1.0, green: 0.97, blue: 0.90),
+                                    Color(red: 1.0, green: 0.98, blue: 0.92),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                                .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1.5)
+                        )
+                )
+
+                Text(viewModel.copy.localModelCloudFallbackCountdown)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(nativeOnboardingTextSecondary)
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
+                    .padding(.vertical, 12)
+            } else {
+                VStack(spacing: 18) {
+                    ZStack(alignment: .bottomTrailing) {
+                        RoundedRectangle(cornerRadius: nativeOnboardingStandardRadius, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.88, green: 0.93, blue: 1.0),
+                                        Color(red: 0.91, green: 0.95, blue: 1.0),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.15, green: 0.34, blue: 0.95))
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Color(red: 0.15, green: 0.34, blue: 0.95))
+                            .offset(x: 6, y: 6)
+                    }
+
+                    Text(mode == .detectingLocal ? viewModel.copy.localModelDetectingTitle : (viewModel.localRuntime?.summary ?? viewModel.copy.localModelDetectingTitle))
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(nativeOnboardingTextPrimary)
                         .multilineTextAlignment(.center)
 
-                    VStack(spacing: 16) {
-                        ForEach(viewModel.modelPickerProviders) { provider in
-                            OnboardingSelectCard(selected: false) {
-                                viewModel.selectProvider(provider)
-                            } content: {
-                                HStack(spacing: 16) {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
-                                            .fill(Color.white.opacity(0.92))
-                                            .frame(width: 48, height: 48)
-                                        Image(systemName: "brain.head.profile")
-                                            .font(.system(size: 22, weight: .semibold))
-                                            .foregroundStyle(onboardingProviderAccent(provider.theme))
-                                    }
+                    Text(mode == .detectingLocal ? viewModel.copy.localModelDetectingBody : (viewModel.localRuntimeMessage.isEmpty ? viewModel.localRuntime?.detail ?? viewModel.copy.localModelDetectingBody : viewModel.localRuntimeMessage))
+                        .font(.system(size: 16, weight: .regular))
+                        .lineSpacing(6)
+                        .foregroundStyle(nativeOnboardingTextSecondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 28)
 
-                                    Text(provider.label)
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundStyle(nativeOnboardingTextPrimary)
-
-                                    Spacer()
-
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundStyle(Color(red: 0.60, green: 0.64, blue: 0.71))
-                                }
-                                .padding(.horizontal, 6)
-                            }
-                        }
+                VStack(spacing: 12) {
+                    ForEach(Array(viewModel.localSetupStepLabels.enumerated()), id: \.offset) { index, label in
+                        modelLocalSetupStepRow(index: index, label: label)
                     }
-
-                    NativeOnboardingActionButton(variant: .secondary) {
-                        Task { await viewModel.goToStep(.install) }
-                    } label: {
-                        Text(viewModel.copy.back)
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
                 }
 
-            case .configure, .connected:
-                if let provider = viewModel.modelViewState.provider,
-                   let curatedProvider = viewModel.selectedCuratedProvider
+                if let repairMessage = viewModel.localRuntime?.lastError ?? viewModel.localRuntime?.recoveryHint,
+                   mode == .localSetup,
+                   viewModel.localRuntime?.status == "failed" || viewModel.localRuntime?.status == "degraded"
                 {
-                    let authMethods = curatedProvider.authMethods
-                    let shouldShowAuthMethodChooser = shouldShowNativeOnboardingAuthMethodChooser(authMethods)
-                    let setupVariant = resolveNativeOnboardingModelSetupVariant(
-                        providerID: curatedProvider.id,
-                        methodKind: viewModel.selectedMethod?.kind
+                    InfoBanner(
+                        title: viewModel.localRuntimeStatusLabel,
+                        description: repairMessage,
+                        icon: "wrench.and.screwdriver",
+                        accent: .orange
                     )
-                    VStack(alignment: .leading, spacing: 24) {
+                }
+            }
+        }
+    }
+
+    private func modelLocalSetupStepRow(index: Int, label: String) -> some View {
+        let stepNumber = index + 1
+        let isComplete = stepNumber < viewModel.localSetupProgress.currentStep
+        let isActive = stepNumber == viewModel.localSetupProgress.currentStep
+
+        return HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        isComplete
+                            ? Color(red: 0.87, green: 0.98, blue: 0.91)
+                            : (isActive ? Color(red: 0.91, green: 0.95, blue: 1.0) : Color(red: 0.95, green: 0.96, blue: 0.98))
+                    )
+                    .frame(width: 36, height: 36)
+
+                if isComplete {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.09, green: 0.64, blue: 0.33))
+                } else if isActive {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("\(stepNumber)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(nativeOnboardingTextSecondary)
+                }
+            }
+
+            Text(label)
+                .font(.system(size: 16, weight: isActive ? .semibold : .medium))
+                .foregroundStyle(isActive || isComplete ? nativeOnboardingTextPrimary : nativeOnboardingTextSecondary)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                .fill(Color.white.opacity(0.92))
+                .overlay(
+                    RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                        .strokeBorder(isActive ? Color(red: 0.56, green: 0.75, blue: 0.99) : Color.black.opacity(0.06), lineWidth: isActive ? 1.5 : 1)
+                )
+        )
+    }
+
+    private var modelLocalConnectedState: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center, spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.92))
+                        .frame(width: 54, height: 54)
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.15, green: 0.34, blue: 0.95))
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(viewModel.localRuntime?.summary ?? viewModel.copy.localModelConnectStepLabel)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(nativeOnboardingTextPrimary)
+                    Text(viewModel.localRuntimeMessage.isEmpty ? viewModel.localRuntime?.detail ?? "" : viewModel.localRuntimeMessage)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(nativeOnboardingTextSecondary)
+                }
+
+                Spacer(minLength: 0)
+
+                StatusBadge(viewModel.localRuntimeStatusLabel, tone: viewModel.localRuntimeStatusTone)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 22)
+            .background(
+                RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.91, green: 0.99, blue: 0.93),
+                                Color(red: 0.85, green: 0.98, blue: 0.90),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                            .strokeBorder(Color(red: 0.67, green: 0.96, blue: 0.76))
+                    )
+            )
+
+            NativeOnboardingActionButton(variant: nativeOnboardingForwardActionVariant()) {
+                Task { await viewModel.advancePastModel() }
+            } label: {
+                Text(viewModel.copy.next)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+        }
+    }
+
+    private var modelPickerState: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(viewModel.copy.providerTitle)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color(red: 0.20, green: 0.25, blue: 0.32))
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+
+            VStack(spacing: 16) {
+                ForEach(viewModel.modelPickerProviders) { provider in
+                    OnboardingSelectCard(selected: false) {
+                        viewModel.selectProvider(provider)
+                    } content: {
                         HStack(spacing: 16) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
                                     .fill(Color.white.opacity(0.92))
-                                    .frame(width: 52, height: 52)
+                                    .frame(width: 48, height: 48)
                                 Image(systemName: "brain.head.profile")
-                                    .font(.system(size: 24, weight: .semibold))
-                                    .foregroundStyle(onboardingProviderAccent(curatedProvider.theme))
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .foregroundStyle(onboardingProviderAccent(provider.theme))
                             }
 
-                            Text(curatedProvider.label)
+                            Text(provider.label)
                                 .font(.system(size: 20, weight: .semibold))
                                 .foregroundStyle(nativeOnboardingTextPrimary)
 
-                            Spacer(minLength: 0)
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Color(red: 0.60, green: 0.64, blue: 0.71))
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 24)
-                        .background(
-                            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
-                                .fill(onboardingProviderGradient(curatedProvider.theme))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
-                                        .strokeBorder(Color(red: 0.56, green: 0.75, blue: 0.99), lineWidth: 2)
-                                )
-                        )
+                        .padding(.horizontal, 6)
+                    }
+                }
+            }
 
-                        if viewModel.modelViewState.kind == .configure {
-                            if shouldShowAuthMethodChooser {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text(viewModel.copy.authTitle)
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundStyle(nativeOnboardingTextPrimary)
+            NativeOnboardingActionButton(variant: .secondary) {
+                Task { await viewModel.goToStep(.install) }
+            } label: {
+                Text(viewModel.copy.back)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
 
-                                    GeometryReader { proxy in
-                                        let layout = nativeOnboardingAuthMethodCardLayout(
-                                            containerWidth: proxy.size.width,
-                                            methodCount: authMethods.count
-                                        )
+    private var modelProviderSetupState: some View {
+        Group {
+            if let provider = viewModel.modelViewState.provider,
+               let curatedProvider = viewModel.selectedCuratedProvider
+            {
+                let authMethods = curatedProvider.authMethods
+                let shouldShowAuthMethodChooser = shouldShowNativeOnboardingAuthMethodChooser(authMethods)
+                let setupVariant = resolveNativeOnboardingModelSetupVariant(
+                    providerID: curatedProvider.id,
+                    methodKind: viewModel.selectedMethod?.kind
+                )
 
-                                        HStack(spacing: layout.spacing) {
-                                            ForEach(authMethods) { method in
-                                                OnboardingSelectCard(selected: viewModel.methodId == method.id) {
-                                                    viewModel.selectModelAuthMethod(method.id)
-                                                } content: {
-                                                    VStack(spacing: 10) {
-                                                        ZStack {
-                                                            RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
-                                                                .fill(Color(red: 0.93, green: 0.96, blue: 1.0))
-                                                                .frame(width: 42, height: 42)
-                                                            Image(systemName: onboardingAuthMethodSymbol(method))
-                                                                .font(.system(size: 18, weight: .semibold))
-                                                                .foregroundStyle(Color(red: 0.24, green: 0.41, blue: 0.95))
-                                                        }
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack(spacing: 16) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: nativeOnboardingFeatureRadius, style: .continuous)
+                                .fill(Color.white.opacity(0.92))
+                                .frame(width: 52, height: 52)
+                            Image(systemName: "brain.head.profile")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(onboardingProviderAccent(curatedProvider.theme))
+                        }
 
-                                                        Text(nativeOnboardingAuthMethodLabel(method, copy: viewModel.copy))
-                                                            .font(.system(size: 20, weight: .semibold))
-                                                            .foregroundStyle(nativeOnboardingTextPrimary)
-                                                            .multilineTextAlignment(.center)
+                        Text(curatedProvider.label)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(nativeOnboardingTextPrimary)
 
-                                                        Text(nativeOnboardingAuthMethodBody(method, copy: viewModel.copy))
-                                                            .font(.system(size: 14, weight: .regular))
-                                                            .lineSpacing(4)
-                                                            .foregroundStyle(nativeOnboardingTextSecondary)
-                                                            .multilineTextAlignment(.center)
-                                                            .fixedSize(horizontal: false, vertical: true)
-                                                    }
-                                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                                }
-                                                .frame(width: layout.cardWidth)
-                                                .frame(minHeight: layout.cardHeight, maxHeight: layout.cardHeight)
-                                            }
-                                        }
-                                    }
-                                    .frame(height: nativeOnboardingAuthMethodCardHeight)
-                                }
-                            }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                            .fill(onboardingProviderGradient(curatedProvider.theme))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                                    .strokeBorder(Color(red: 0.56, green: 0.75, blue: 0.99), lineWidth: 2)
+                            )
+                    )
 
-                            if setupVariant == .oauth {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    if let message = viewModel.modelSession?.message, !message.isEmpty {
-                                        Text(message)
-                                            .font(.system(size: 14, weight: .regular))
-                                            .foregroundStyle(nativeOnboardingTextSecondary)
-                                    }
+                    if viewModel.modelViewState.kind == .configure {
+                        if shouldShowAuthMethodChooser {
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text(viewModel.copy.authTitle)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundStyle(nativeOnboardingTextPrimary)
 
-                                    if viewModel.modelSession?.launchUrl != nil {
-                                        Button(viewModel.copy.openAuthWindow) {
-                                            viewModel.openModelAuthWindow()
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.large)
-                                    }
-
-                                    if let prompt = viewModel.modelSession?.inputPrompt {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text(prompt)
-                                                .font(.system(size: 16, weight: .semibold))
-                                            TextField(prompt, text: $viewModel.modelSessionInput)
-                                                .textFieldStyle(.roundedBorder)
-                                        }
-
-                                        Button {
-                                            Task { await viewModel.submitModelSessionInput() }
-                                        } label: {
-                                            if viewModel.modelBusy == "input" {
-                                                ProgressView().controlSize(.small)
-                                            } else {
-                                                Text(viewModel.copy.submitAuthInput)
-                                            }
-                                        }
-                                        .buttonStyle(.borderedProminent)
-                                        .controlSize(.large)
-                                        .disabled(viewModel.modelSessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                    }
-                                }
-                            } else if setupVariant == .guidedMiniMaxAPIKey {
-                                VStack(alignment: .leading, spacing: 18) {
-                                    NativeOnboardingGuideCard(
-                                        step: "1",
-                                        stepGradient: [Color(red: 0.23, green: 0.51, blue: 0.96), Color(red: 0.31, green: 0.27, blue: 0.9)],
-                                        tone: .tutorial,
-                                        title: viewModel.copy.minimaxTutorialTitle,
-                                        body: viewModel.copy.minimaxTutorialBody,
-                                        trailing: {
-                                            Button {
-                                                viewModel.openModelTutorial()
-                                            } label: {
-                                                Image(systemName: "play.circle")
-                                                    .font(.system(size: 34, weight: .regular))
-                                                    .foregroundStyle(Color(red: 0.16, green: 0.39, blue: 0.94))
-                                            }
-                                            .buttonStyle(.plain)
-                                        },
-                                        content: { EmptyView() }
+                                GeometryReader { proxy in
+                                    let layout = nativeOnboardingAuthMethodCardLayout(
+                                        containerWidth: proxy.size.width,
+                                        methodCount: authMethods.count
                                     )
 
-                                    NativeOnboardingGuideCard(
-                                        step: "2",
-                                        stepGradient: [Color(red: 0.58, green: 0.2, blue: 0.92), Color(red: 0.93, green: 0.28, blue: 0.6)],
-                                        tone: .getKey,
-                                        title: viewModel.copy.minimaxGetKeyTitle,
-                                        body: viewModel.copy.minimaxGetKeyBody,
-                                        trailing: { EmptyView() }
-                                    ) {
-                                        NativeOnboardingActionButton(variant: .accent) {
-                                            viewModel.openModelDocs()
-                                        } label: {
-                                            HStack(spacing: 10) {
-                                                Image(systemName: "arrow.up.right.square")
-                                                    .font(.system(size: 16, weight: .semibold))
-                                                Text(viewModel.copy.minimaxGetKeyCTA)
-                                                    .font(.system(size: 15, weight: .semibold))
-                                                Image(systemName: "arrow.right")
-                                                    .font(.system(size: 14, weight: .semibold))
-                                            }
-                                        }
-                                    }
+                                    HStack(spacing: layout.spacing) {
+                                        ForEach(authMethods) { method in
+                                            OnboardingSelectCard(selected: viewModel.methodId == method.id) {
+                                                viewModel.selectModelAuthMethod(method.id)
+                                            } content: {
+                                                VStack(spacing: 10) {
+                                                    ZStack {
+                                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
+                                                            .fill(Color(red: 0.93, green: 0.96, blue: 1.0))
+                                                            .frame(width: 42, height: 42)
+                                                        Image(systemName: onboardingAuthMethodSymbol(method))
+                                                            .font(.system(size: 18, weight: .semibold))
+                                                            .foregroundStyle(Color(red: 0.24, green: 0.41, blue: 0.95))
+                                                    }
 
-                                    NativeOnboardingGuideCard(
-                                        step: "3",
-                                        stepGradient: [Color(red: 0.09, green: 0.64, blue: 0.33), Color(red: 0.06, green: 0.73, blue: 0.51)],
-                                        tone: .input,
-                                        title: viewModel.copy.minimaxEnterKeyTitle,
-                                        body: viewModel.copy.minimaxEnterKeyBody,
-                                        trailing: { EmptyView() }
-                                    ) {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            if let firstField = viewModel.selectedMethod?.fields.first {
-                                                if firstField.secret == true {
-                                                    SecureField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
-                                                        get: { viewModel.modelValues[firstField.id] ?? "" },
-                                                        set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
-                                                    ))
-                                                    .textFieldStyle(.plain)
-                                                    .font(.system(size: 16, weight: .regular, design: .monospaced))
-                                                    .padding(.horizontal, 18)
-                                                    .frame(height: 56)
-                                                    .background(
-                                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
-                                                            .fill(Color.white.opacity(0.95))
-                                                            .overlay(
-                                                                RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
-                                                                    .strokeBorder(Color(red: 0.33, green: 0.85, blue: 0.55), lineWidth: 1.5)
-                                                            )
-                                                    )
-                                                } else {
-                                                    TextField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
-                                                        get: { viewModel.modelValues[firstField.id] ?? "" },
-                                                        set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
-                                                    ))
-                                                    .textFieldStyle(.plain)
-                                                    .font(.system(size: 16, weight: .regular, design: .monospaced))
-                                                    .padding(.horizontal, 18)
-                                                    .frame(height: 56)
-                                                    .background(
-                                                        RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
-                                                            .fill(Color.white.opacity(0.95))
-                                                            .overlay(
-                                                                RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
-                                                                    .strokeBorder(Color(red: 0.33, green: 0.85, blue: 0.55), lineWidth: 1.5)
-                                                            )
-                                                    )
+                                                    Text(nativeOnboardingAuthMethodLabel(method, copy: viewModel.copy))
+                                                        .font(.system(size: 20, weight: .semibold))
+                                                        .foregroundStyle(nativeOnboardingTextPrimary)
+                                                        .multilineTextAlignment(.center)
+
+                                                    Text(nativeOnboardingAuthMethodBody(method, copy: viewModel.copy))
+                                                        .font(.system(size: 14, weight: .regular))
+                                                        .lineSpacing(4)
+                                                        .foregroundStyle(nativeOnboardingTextSecondary)
+                                                        .multilineTextAlignment(.center)
+                                                        .fixedSize(horizontal: false, vertical: true)
                                                 }
+                                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                                             }
-
-                                            HStack(spacing: 8) {
-                                                Image(systemName: "key.fill")
-                                                    .font(.system(size: 12, weight: .semibold))
-                                                    .foregroundStyle(Color(red: 0.24, green: 0.41, blue: 0.95))
-                                                Text(viewModel.copy.modelApiKeyHelp)
-                                                    .font(.system(size: 14, weight: .regular))
-                                                    .foregroundStyle(nativeOnboardingTextSecondary)
-                                            }
+                                            .frame(width: layout.cardWidth)
+                                            .frame(minHeight: layout.cardHeight, maxHeight: layout.cardHeight)
                                         }
                                     }
                                 }
-                            } else {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(viewModel.copy.modelApiKeyTitle)
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(nativeOnboardingTextPrimary)
+                                .frame(height: nativeOnboardingAuthMethodCardHeight)
+                            }
+                        }
 
-                                    if let firstField = viewModel.selectedMethod?.fields.first {
-                                        if firstField.secret == true {
-                                            SecureField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
-                                                get: { viewModel.modelValues[firstField.id] ?? "" },
-                                                set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
-                                            ))
-                                            .textFieldStyle(.roundedBorder)
-                                        } else {
-                                            TextField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
-                                                get: { viewModel.modelValues[firstField.id] ?? "" },
-                                                set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
-                                            ))
-                                            .textFieldStyle(.roundedBorder)
-                                        }
-                                    }
-
-                                    Text(viewModel.copy.modelApiKeyHelp)
+                        if setupVariant == .oauth {
+                            VStack(alignment: .leading, spacing: 16) {
+                                if let message = viewModel.modelSession?.message, !message.isEmpty {
+                                    Text(message)
                                         .font(.system(size: 14, weight: .regular))
                                         .foregroundStyle(nativeOnboardingTextSecondary)
+                                }
 
-                                    if !curatedProvider.platformUrl.isEmpty {
-                                        NativeOnboardingActionButton(variant: .secondary) {
-                                            viewModel.openModelDocs()
+                                if viewModel.modelSession?.launchUrl != nil {
+                                    Button(viewModel.copy.openAuthWindow) {
+                                        viewModel.openModelAuthWindow()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.large)
+                                }
+
+                                if let prompt = viewModel.modelSession?.inputPrompt {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(prompt)
+                                            .font(.system(size: 16, weight: .semibold))
+                                        TextField(prompt, text: $viewModel.modelSessionInput)
+                                            .textFieldStyle(.roundedBorder)
+                                    }
+
+                                    Button {
+                                        Task { await viewModel.submitModelSessionInput() }
+                                    } label: {
+                                        if viewModel.modelBusy == "input" {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Text(viewModel.copy.submitAuthInput)
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.large)
+                                    .disabled(viewModel.modelSessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                }
+                            }
+                        } else if setupVariant == .guidedMiniMaxAPIKey {
+                            VStack(alignment: .leading, spacing: 18) {
+                                NativeOnboardingGuideCard(
+                                    step: "1",
+                                    stepGradient: [Color(red: 0.23, green: 0.51, blue: 0.96), Color(red: 0.31, green: 0.27, blue: 0.9)],
+                                    tone: .tutorial,
+                                    title: viewModel.copy.minimaxTutorialTitle,
+                                    body: viewModel.copy.minimaxTutorialBody,
+                                    trailing: {
+                                        Button {
+                                            viewModel.openModelTutorial()
                                         } label: {
-                                            Label(viewModel.copy.modelGetApiKey, systemImage: "arrow.up.right.square")
+                                            Image(systemName: "play.circle")
+                                                .font(.system(size: 34, weight: .regular))
+                                                .foregroundStyle(Color(red: 0.16, green: 0.39, blue: 0.94))
+                                        }
+                                        .buttonStyle(.plain)
+                                    },
+                                    content: { EmptyView() }
+                                )
+
+                                NativeOnboardingGuideCard(
+                                    step: "2",
+                                    stepGradient: [Color(red: 0.58, green: 0.2, blue: 0.92), Color(red: 0.93, green: 0.28, blue: 0.6)],
+                                    tone: .getKey,
+                                    title: viewModel.copy.minimaxGetKeyTitle,
+                                    body: viewModel.copy.minimaxGetKeyBody,
+                                    trailing: { EmptyView() }
+                                ) {
+                                    NativeOnboardingActionButton(variant: .accent) {
+                                        viewModel.openModelDocs()
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.system(size: 16, weight: .semibold))
+                                            Text(viewModel.copy.minimaxGetKeyCTA)
                                                 .font(.system(size: 15, weight: .semibold))
+                                            Image(systemName: "arrow.right")
+                                                .font(.system(size: 14, weight: .semibold))
                                         }
                                     }
                                 }
-                            }
 
-                            HStack(spacing: 16) {
-                                NativeOnboardingActionButton(variant: .secondary) {
-                                    Task { await viewModel.returnToModelPicker() }
-                                } label: {
-                                    Text(viewModel.copy.back)
-                                        .font(.system(size: 15, weight: .semibold))
-                                }
-                                .frame(maxWidth: .infinity)
-
-                                NativeOnboardingActionButton(
-                                    variant: nativeOnboardingForwardActionVariant(),
-                                    disabled: viewModel.modelBusy == "save" || requiredModelFieldsMissing(viewModel.selectedMethod, values: viewModel.modelValues)
+                                NativeOnboardingGuideCard(
+                                    step: "3",
+                                    stepGradient: [Color(red: 0.09, green: 0.64, blue: 0.33), Color(red: 0.06, green: 0.73, blue: 0.51)],
+                                    tone: .input,
+                                    title: viewModel.copy.minimaxEnterKeyTitle,
+                                    body: viewModel.copy.minimaxEnterKeyBody,
+                                    trailing: { EmptyView() }
                                 ) {
-                                    Task { await viewModel.saveModel() }
-                                } label: {
-                                    if viewModel.modelBusy == "save" {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                            .tint(.white)
-                                    } else {
-                                        Text(viewModel.copy.modelSave)
-                                            .font(.system(size: 15, weight: .semibold))
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        if let firstField = viewModel.selectedMethod?.fields.first {
+                                            if firstField.secret == true {
+                                                SecureField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
+                                                    get: { viewModel.modelValues[firstField.id] ?? "" },
+                                                    set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
+                                                ))
+                                                .textFieldStyle(.plain)
+                                                .font(.system(size: 16, weight: .regular, design: .monospaced))
+                                                .padding(.horizontal, 18)
+                                                .frame(height: 56)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
+                                                        .fill(Color.white.opacity(0.95))
+                                                        .overlay(
+                                                            RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
+                                                                .strokeBorder(Color(red: 0.33, green: 0.85, blue: 0.55), lineWidth: 1.5)
+                                                        )
+                                                )
+                                            } else {
+                                                TextField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
+                                                    get: { viewModel.modelValues[firstField.id] ?? "" },
+                                                    set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
+                                                ))
+                                                .textFieldStyle(.plain)
+                                                .font(.system(size: 16, weight: .regular, design: .monospaced))
+                                                .padding(.horizontal, 18)
+                                                .frame(height: 56)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
+                                                        .fill(Color.white.opacity(0.95))
+                                                        .overlay(
+                                                            RoundedRectangle(cornerRadius: nativeOnboardingControlRadius, style: .continuous)
+                                                                .strokeBorder(Color(red: 0.33, green: 0.85, blue: 0.55), lineWidth: 1.5)
+                                                        )
+                                                )
+                                            }
+                                        }
+
+                                        HStack(spacing: 8) {
+                                            Image(systemName: "key.fill")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(Color(red: 0.24, green: 0.41, blue: 0.95))
+                                            Text(viewModel.copy.modelApiKeyHelp)
+                                                .font(.system(size: 14, weight: .regular))
+                                                .foregroundStyle(nativeOnboardingTextSecondary)
+                                        }
                                     }
                                 }
                             }
                         } else {
-                            VStack(alignment: .leading, spacing: 20) {
-                                HStack(spacing: 16) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.white.opacity(0.92))
-                                            .frame(width: 54, height: 54)
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.system(size: 28, weight: .semibold))
-                                            .foregroundStyle(Color(red: 0.09, green: 0.64, blue: 0.33))
-                                    }
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(viewModel.copy.modelApiKeyTitle)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(nativeOnboardingTextPrimary)
 
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(viewModel.copy.modelConnectedTitle)
-                                            .font(.system(size: 20, weight: .semibold))
-                                            .foregroundStyle(nativeOnboardingTextPrimary)
-                                        Text(viewModel.copy.modelConnectedBody.replacingOccurrences(of: "{provider}", with: provider.curated.label))
-                                            .font(.system(size: 14, weight: .regular))
-                                            .foregroundStyle(nativeOnboardingTextSecondary)
+                                if let firstField = viewModel.selectedMethod?.fields.first {
+                                    if firstField.secret == true {
+                                        SecureField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
+                                            get: { viewModel.modelValues[firstField.id] ?? "" },
+                                            set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
+                                        ))
+                                        .textFieldStyle(.roundedBorder)
+                                    } else {
+                                        TextField(viewModel.copy.modelApiKeyPlaceholder, text: Binding(
+                                            get: { viewModel.modelValues[firstField.id] ?? "" },
+                                            set: { viewModel.updateModelValue(fieldId: firstField.id, value: $0) }
+                                        ))
+                                        .textFieldStyle(.roundedBorder)
                                     }
                                 }
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 22)
-                                .background(
-                                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
-                                        .fill(LinearGradient(colors: [
-                                            Color(red: 0.91, green: 0.99, blue: 0.93),
-                                            Color(red: 0.85, green: 0.98, blue: 0.9),
-                                        ], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
-                                                .strokeBorder(Color(red: 0.67, green: 0.96, blue: 0.76))
-                                        )
-                                )
 
-                                NativeOnboardingActionButton(variant: nativeOnboardingForwardActionVariant()) {
-                                    Task { await viewModel.advancePastModel() }
-                                } label: {
-                                    Text(viewModel.copy.next)
+                                Text(viewModel.copy.modelApiKeyHelp)
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundStyle(nativeOnboardingTextSecondary)
+
+                                if !curatedProvider.platformUrl.isEmpty {
+                                    NativeOnboardingActionButton(variant: .secondary) {
+                                        viewModel.openModelDocs()
+                                    } label: {
+                                        Label(viewModel.copy.modelGetApiKey, systemImage: "arrow.up.right.square")
+                                            .font(.system(size: 15, weight: .semibold))
+                                    }
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 16) {
+                            NativeOnboardingActionButton(variant: .secondary) {
+                                Task { await viewModel.returnToModelPicker() }
+                            } label: {
+                                Text(viewModel.copy.back)
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+
+                            NativeOnboardingActionButton(
+                                variant: nativeOnboardingForwardActionVariant(),
+                                disabled: viewModel.modelBusy == "save" || requiredModelFieldsMissing(viewModel.selectedMethod, values: viewModel.modelValues)
+                            ) {
+                                Task { await viewModel.saveModel() }
+                            } label: {
+                                if viewModel.modelBusy == "save" {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(.white)
+                                } else {
+                                    Text(viewModel.copy.modelSave)
                                         .font(.system(size: 15, weight: .semibold))
                                 }
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 20) {
+                            HStack(spacing: 16) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.92))
+                                        .frame(width: 54, height: 54)
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 28, weight: .semibold))
+                                        .foregroundStyle(Color(red: 0.09, green: 0.64, blue: 0.33))
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(viewModel.copy.modelConnectedTitle)
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .foregroundStyle(nativeOnboardingTextPrimary)
+                                    Text(viewModel.copy.modelConnectedBody.replacingOccurrences(of: "{provider}", with: provider.curated.label))
+                                        .font(.system(size: 14, weight: .regular))
+                                        .foregroundStyle(nativeOnboardingTextSecondary)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                                    .fill(LinearGradient(colors: [
+                                        Color(red: 0.91, green: 0.99, blue: 0.93),
+                                        Color(red: 0.85, green: 0.98, blue: 0.9),
+                                    ], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                                            .strokeBorder(Color(red: 0.67, green: 0.96, blue: 0.76))
+                                    )
+                            )
+
+                            NativeOnboardingActionButton(variant: nativeOnboardingForwardActionVariant()) {
+                                Task { await viewModel.advancePastModel() }
+                            } label: {
+                                Text(viewModel.copy.next)
+                                    .font(.system(size: 15, weight: .semibold))
                             }
                         }
                     }

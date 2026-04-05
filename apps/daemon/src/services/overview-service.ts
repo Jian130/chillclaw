@@ -14,13 +14,15 @@ import { AppUpdateService } from "./app-update-service.js";
 import { getDefaultAppSupportDir } from "../runtime-paths.js";
 import { StateStore } from "./state-store.js";
 import { getProductVersion } from "../product-version.js";
+import type { LocalModelRuntimeService } from "./local-model-runtime-service.js";
 
 export class OverviewService {
   constructor(
     private readonly adapter: EngineAdapter,
     private readonly store: StateStore,
     private readonly appServiceManager = new AppServiceManager(),
-    private readonly appUpdateService = new AppUpdateService()
+    private readonly appUpdateService = new AppUpdateService(),
+    private readonly localModelRuntimeService?: LocalModelRuntimeService
   ) {}
 
   async getOverview(): Promise<ProductOverview> {
@@ -51,6 +53,33 @@ export class OverviewService {
     };
     const onboardingCompleted = true;
     const nextChannelId = (["telegram", "whatsapp", "feishu", "wechat"] as const).find((channelId) => mergedChannels[channelId].status !== "completed");
+    const localRuntime = this.localModelRuntimeService
+      ? await this.localModelRuntimeService.getOverview()
+      : base.localRuntime;
+    const recoveryActions = [...base.recoveryActions];
+    const mergedHealthChecks = [...healthChecks];
+
+    if (localRuntime && (localRuntime.status === "degraded" || localRuntime.status === "failed")) {
+      recoveryActions.unshift({
+        id: "repair-local-model-runtime",
+        type: "repair-local-model-runtime",
+        title: "Repair local AI runtime",
+        description: "Restart or reconnect the local Ollama runtime that ChillClaw manages on this Mac.",
+        safetyLevel: "safe",
+        expectedImpact: "May restart the local Ollama runtime and re-check the downloaded local model."
+      });
+    }
+
+    if (localRuntime?.activeInOpenClaw && (localRuntime.status === "degraded" || localRuntime.status === "failed")) {
+      mergedHealthChecks.unshift({
+        id: "local-model-runtime",
+        title: "Local AI runtime",
+        severity: "warning",
+        summary: "Local AI on this Mac needs repair.",
+        detail: localRuntime.detail,
+        remediationActionIds: ["repair-local-model-runtime"]
+      });
+    }
 
     return {
       ...base,
@@ -74,9 +103,11 @@ export class OverviewService {
           ? engine.pendingGatewayApplySummary ?? "ChillClaw saved changes that are ready to apply to the gateway."
           : nextChannelId
             ? `Next recommended channel: ${mergedChannels[nextChannelId].title}.`
-            : "All channel setup steps are complete. Restart the gateway to load every channel."
+          : "All channel setup steps are complete. Restart the gateway to load every channel."
       },
-      healthChecks,
+      localRuntime,
+      healthChecks: mergedHealthChecks,
+      recoveryActions,
       recentTasks: state.tasks.slice(-5).reverse(),
       profiles: base.profiles,
       templates: base.templates

@@ -66,6 +66,7 @@ describe("SettingsPage", () => {
     expect(html).toContain("Manage this in the native macOS app");
     expect(html).toContain("App Updates");
     expect(html).toContain("OpenClaw Runtime");
+    expect(html).toContain("Local AI on This Mac");
     expect(html).toContain("Download 0.1.4");
   });
 });

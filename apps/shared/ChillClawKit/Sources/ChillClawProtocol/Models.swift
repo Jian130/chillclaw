@@ -554,6 +554,67 @@ public struct RecoveryAction: Codable, Sendable, Identifiable {
     public var expectedImpact: String
 }
 
+public struct LocalModelRuntimeOverview: Codable, Sendable {
+    public var supported: Bool
+    public var recommendation: String
+    public var supportCode: String
+    public var status: String
+    public var runtimeInstalled: Bool
+    public var runtimeReachable: Bool
+    public var modelDownloaded: Bool
+    public var activeInOpenClaw: Bool
+    public var recommendedTier: String?
+    public var requiredDiskGb: Double?
+    public var totalMemoryGb: Double?
+    public var freeDiskGb: Double?
+    public var chosenModelKey: String?
+    public var managedEntryId: String?
+    public var summary: String
+    public var detail: String
+    public var lastError: String?
+    public var recoveryHint: String?
+
+    public init(
+        supported: Bool,
+        recommendation: String,
+        supportCode: String,
+        status: String,
+        runtimeInstalled: Bool,
+        runtimeReachable: Bool,
+        modelDownloaded: Bool,
+        activeInOpenClaw: Bool,
+        recommendedTier: String? = nil,
+        requiredDiskGb: Double? = nil,
+        totalMemoryGb: Double? = nil,
+        freeDiskGb: Double? = nil,
+        chosenModelKey: String? = nil,
+        managedEntryId: String? = nil,
+        summary: String,
+        detail: String,
+        lastError: String? = nil,
+        recoveryHint: String? = nil
+    ) {
+        self.supported = supported
+        self.recommendation = recommendation
+        self.supportCode = supportCode
+        self.status = status
+        self.runtimeInstalled = runtimeInstalled
+        self.runtimeReachable = runtimeReachable
+        self.modelDownloaded = modelDownloaded
+        self.activeInOpenClaw = activeInOpenClaw
+        self.recommendedTier = recommendedTier
+        self.requiredDiskGb = requiredDiskGb
+        self.totalMemoryGb = totalMemoryGb
+        self.freeDiskGb = freeDiskGb
+        self.chosenModelKey = chosenModelKey
+        self.managedEntryId = managedEntryId
+        self.summary = summary
+        self.detail = detail
+        self.lastError = lastError
+        self.recoveryHint = recoveryHint
+    }
+}
+
 public struct SetupStepResult: Codable, Sendable, Identifiable {
     public var id: String
     public var title: String
@@ -600,6 +661,7 @@ public struct ProductOverview: Codable, Sendable {
     public var capabilities: EngineCapabilities
     public var installChecks: [InstallCheck]
     public var channelSetup: ChannelSetupOverview
+    public var localRuntime: LocalModelRuntimeOverview?
     public var profiles: [UserProfile]
     public var templates: [TaskTemplate]
     public var healthChecks: [HealthCheckResult]
@@ -618,6 +680,7 @@ public struct ProductOverview: Codable, Sendable {
         capabilities: EngineCapabilities,
         installChecks: [InstallCheck],
         channelSetup: ChannelSetupOverview,
+        localRuntime: LocalModelRuntimeOverview? = nil,
         profiles: [UserProfile],
         templates: [TaskTemplate],
         healthChecks: [HealthCheckResult],
@@ -635,6 +698,7 @@ public struct ProductOverview: Codable, Sendable {
         self.capabilities = capabilities
         self.installChecks = installChecks
         self.channelSetup = channelSetup
+        self.localRuntime = localRuntime
         self.profiles = profiles
         self.templates = templates
         self.healthChecks = healthChecks
@@ -654,6 +718,7 @@ public struct ProductOverview: Codable, Sendable {
         case capabilities
         case installChecks
         case channelSetup
+        case localRuntime
         case profiles
         case templates
         case healthChecks
@@ -678,6 +743,7 @@ public struct ProductOverview: Codable, Sendable {
             capabilities: try container.decode(EngineCapabilities.self, forKey: .capabilities),
             installChecks: try container.decode([InstallCheck].self, forKey: .installChecks),
             channelSetup: try container.decode(ChannelSetupOverview.self, forKey: .channelSetup),
+            localRuntime: try container.decodeIfPresent(LocalModelRuntimeOverview.self, forKey: .localRuntime),
             profiles: try container.decode([UserProfile].self, forKey: .profiles),
             templates: try container.decode([TaskTemplate].self, forKey: .templates),
             healthChecks: try container.decode([HealthCheckResult].self, forKey: .healthChecks),
@@ -871,6 +937,7 @@ public struct ModelConfigOverview: Codable, Sendable {
     public var savedEntries: [SavedModelEntry]
     public var defaultEntryId: String?
     public var fallbackEntryIds: [String]
+    public var localRuntime: LocalModelRuntimeOverview?
 }
 
 public struct ModelAuthSession: Codable, Sendable, Identifiable {
@@ -892,6 +959,18 @@ public struct ModelConfigActionResponse: Codable, Sendable {
     public var authSession: ModelAuthSession?
     public var requiresGatewayApply: Bool?
     public var onboarding: OnboardingStateResponse?
+}
+
+public struct LocalModelRuntimeActionResponse: Codable, Sendable {
+    public var epoch: String
+    public var revision: Int
+    public var settled: Bool
+    public var action: String
+    public var status: String
+    public var message: String
+    public var localRuntime: LocalModelRuntimeOverview
+    public var modelConfig: ModelConfigOverview
+    public var overview: ProductOverview
 }
 
 public struct ModelAuthSessionResponse: Codable, Sendable {

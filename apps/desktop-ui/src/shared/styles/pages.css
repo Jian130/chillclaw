@@ -3457,6 +3457,137 @@
   gap: 28px;
 }
 
+.onboarding-model-local-flow {
+  gap: 28px;
+}
+
+.onboarding-model-local-hero {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 20px 0 8px;
+  text-align: center;
+}
+
+.onboarding-model-local-hero__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  border-radius: var(--radius-2xl);
+  background: var(--surface-info-glass);
+  color: var(--accent-strong);
+  box-shadow: var(--shadow-primary-card);
+}
+
+.onboarding-model-local-hero__spinner {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  color: var(--primary);
+  animation: deploy-spin 1s linear infinite;
+}
+
+.onboarding-model-local-hero__copy {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+}
+
+.onboarding-model-local-hero__copy strong {
+  color: var(--text);
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.onboarding-model-local-hero__copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.onboarding-model-local-progress {
+  display: grid;
+  gap: 14px;
+}
+
+.onboarding-model-local-progress__step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid rgb(var(--slate-rgb) / 0.18);
+  border-radius: var(--radius-panel);
+  background: rgb(var(--white-rgb) / 0.9);
+}
+
+.onboarding-model-local-progress__step--active {
+  border-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  background: var(--surface-info-glass);
+  box-shadow: var(--shadow-primary-subtle);
+}
+
+.onboarding-model-local-progress__step--complete {
+  border-color: color-mix(in srgb, var(--success) 38%, transparent);
+  background: var(--surface-success);
+}
+
+.onboarding-model-local-progress__badge {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--white-rgb) / 0.94);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+  box-shadow: var(--shadow-inset-border-soft);
+}
+
+.onboarding-model-local-progress__step--active .onboarding-model-local-progress__badge {
+  color: var(--primary);
+}
+
+.onboarding-model-local-progress__step--complete .onboarding-model-local-progress__badge {
+  color: var(--success);
+}
+
+.onboarding-model-local-progress__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.onboarding-model-local-progress__copy strong {
+  color: var(--text);
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.onboarding-model-cloud-handoff {
+  min-height: 220px;
+}
+
+.onboarding-model-cloud-handoff__detail {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.onboarding-model-cloud-handoff__countdown {
+  margin: 0;
+  text-align: center;
+  color: var(--text-soft);
+  font-size: 16px;
+  line-height: 24px;
+}
+
 .onboarding-step__intro--model {
   gap: 10px;
 }

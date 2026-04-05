@@ -44,6 +44,22 @@ export interface OnboardingCopy {
   modelEyebrow: string;
   modelTitle: string;
   modelBody: string;
+  localAiTitle: string;
+  localAiInstallCta: string;
+  localAiRepairCta: string;
+  localAiStorageLabel: string;
+  localModelSetupTitle: string;
+  localModelSetupBody: string;
+  localModelDetectingTitle: string;
+  localModelDetectingBody: string;
+  localModelUnsupportedTitle: string;
+  localModelUnsupportedBody: string;
+  localModelUnsupportedCloudBody: string;
+  localModelCloudFallbackCountdown: string;
+  localModelDetectStepLabel: string;
+  localModelPrepareStepLabel: string;
+  localModelDownloadStepLabel: string;
+  localModelConnectStepLabel: string;
   providerTitle: string;
   authTitle: string;
   authApiKeyLabel: string;
@@ -186,6 +202,22 @@ const en: OnboardingCopy = {
   modelEyebrow: "Step 3",
   modelTitle: "Choose Your AI Model",
   modelBody: "Select an AI provider to power your digital employees",
+  localAiTitle: "Use Local AI on This Mac",
+  localAiInstallCta: "Install Local AI",
+  localAiRepairCta: "Repair Local AI",
+  localAiStorageLabel: "Needs about {gb} GB free",
+  localModelSetupTitle: "Detect Hardware & Setup Local Model",
+  localModelSetupBody: "We'll check your hardware and install a local AI model",
+  localModelDetectingTitle: "Detecting Hardware...",
+  localModelDetectingBody: "Analyzing your system's capabilities for local AI models",
+  localModelUnsupportedTitle: "Local Model Not Recommended",
+  localModelUnsupportedBody: "Your hardware doesn't meet the minimum requirements for running local AI models smoothly.",
+  localModelUnsupportedCloudBody: "Don't worry! You can use powerful cloud AI instead.",
+  localModelCloudFallbackCountdown: "Switching to cloud AI configuration in 2 seconds...",
+  localModelDetectStepLabel: "Detect hardware",
+  localModelPrepareStepLabel: "Prepare Ollama",
+  localModelDownloadStepLabel: "Download local model",
+  localModelConnectStepLabel: "Connect ChillClaw to local AI",
   providerTitle: "Select a provider to get started",
   authTitle: "How would you like to connect?",
   authApiKeyLabel: "API Key",
@@ -337,6 +369,22 @@ const zh: OnboardingCopy = {
   modelEyebrow: "第 3 步",
   modelTitle: "选择你的 AI 模型",
   modelBody: "选择一个 AI 供应商，为你的数字员工提供能力支持",
+  localAiTitle: "在这台 Mac 上使用本地 AI",
+  localAiInstallCta: "安装本地 AI",
+  localAiRepairCta: "修复本地 AI",
+  localAiStorageLabel: "大约需要 {gb} GB 可用空间",
+  localModelSetupTitle: "检测硬件并设置本地模型",
+  localModelSetupBody: "我们会检查你的硬件，并安装一个本地 AI 模型",
+  localModelDetectingTitle: "正在检测硬件...",
+  localModelDetectingBody: "正在分析你的系统是否适合运行本地 AI 模型",
+  localModelUnsupportedTitle: "不建议使用本地模型",
+  localModelUnsupportedBody: "你的硬件暂时达不到流畅运行本地 AI 模型的最低建议配置。",
+  localModelUnsupportedCloudBody: "别担心，你仍然可以使用强大的云端 AI。",
+  localModelCloudFallbackCountdown: "将在 2 秒后切换到云端 AI 配置...",
+  localModelDetectStepLabel: "检测硬件",
+  localModelPrepareStepLabel: "准备 Ollama",
+  localModelDownloadStepLabel: "下载本地模型",
+  localModelConnectStepLabel: "连接 ChillClaw 到本地 AI",
   providerTitle: "选择一个供应商开始",
   authTitle: "你希望如何连接？",
   authApiKeyLabel: "API Key",
@@ -488,6 +536,22 @@ const ja: OnboardingCopy = {
   modelEyebrow: "ステップ 3",
   modelTitle: "AI モデルを選択",
   modelBody: "デジタル従業員を支える AI プロバイダーを選択してください",
+  localAiTitle: "この Mac でローカル AI を使う",
+  localAiInstallCta: "ローカル AI をインストール",
+  localAiRepairCta: "ローカル AI を修復",
+  localAiStorageLabel: "約 {gb} GB の空き容量が必要です",
+  localModelSetupTitle: "ハードウェアを検出してローカルモデルを設定",
+  localModelSetupBody: "ハードウェアを確認し、ローカル AI モデルをインストールします",
+  localModelDetectingTitle: "ハードウェアを検出しています...",
+  localModelDetectingBody: "ローカル AI モデルを動かせるかシステムを確認しています",
+  localModelUnsupportedTitle: "ローカルモデルは非推奨です",
+  localModelUnsupportedBody: "このハードウェアはローカル AI モデルを快適に動かすための推奨条件を満たしていません。",
+  localModelUnsupportedCloudBody: "ご安心ください。代わりにクラウド AI を利用できます。",
+  localModelCloudFallbackCountdown: "2 秒後にクラウド AI の設定へ切り替えます...",
+  localModelDetectStepLabel: "ハードウェアを検出",
+  localModelPrepareStepLabel: "Ollama を準備",
+  localModelDownloadStepLabel: "ローカルモデルをダウンロード",
+  localModelConnectStepLabel: "ChillClaw をローカル AI に接続",
   providerTitle: "プロバイダーを選んで開始",
   authTitle: "どの方法で接続しますか？",
   authApiKeyLabel: "API Key",
@@ -639,6 +703,22 @@ const ko: OnboardingCopy = {
   modelEyebrow: "3단계",
   modelTitle: "AI 모델 선택",
   modelBody: "디지털 직원에게 사용할 AI 제공자를 선택하세요",
+  localAiTitle: "이 Mac에서 로컬 AI 사용",
+  localAiInstallCta: "로컬 AI 설치",
+  localAiRepairCta: "로컬 AI 복구",
+  localAiStorageLabel: "약 {gb}GB 여유 공간 필요",
+  localModelSetupTitle: "하드웨어를 감지하고 로컬 모델 설정",
+  localModelSetupBody: "하드웨어를 확인하고 로컬 AI 모델을 설치합니다",
+  localModelDetectingTitle: "하드웨어를 감지하는 중...",
+  localModelDetectingBody: "로컬 AI 모델을 실행할 수 있는지 시스템 성능을 분석하고 있습니다",
+  localModelUnsupportedTitle: "로컬 모델은 권장되지 않습니다",
+  localModelUnsupportedBody: "이 하드웨어는 로컬 AI 모델을 원활하게 실행하기 위한 최소 권장 사양을 충족하지 않습니다.",
+  localModelUnsupportedCloudBody: "걱정하지 마세요. 대신 강력한 클라우드 AI를 사용할 수 있습니다.",
+  localModelCloudFallbackCountdown: "2초 후 클라우드 AI 설정으로 전환합니다...",
+  localModelDetectStepLabel: "하드웨어 감지",
+  localModelPrepareStepLabel: "Ollama 준비",
+  localModelDownloadStepLabel: "로컬 모델 다운로드",
+  localModelConnectStepLabel: "ChillClaw를 로컬 AI에 연결",
   providerTitle: "시작할 제공자를 선택하세요",
   authTitle: "어떤 방식으로 연결하시겠어요?",
   authApiKeyLabel: "API Key",
@@ -790,6 +870,22 @@ const es: OnboardingCopy = {
   modelEyebrow: "Paso 3",
   modelTitle: "Elige tu modelo de IA",
   modelBody: "Selecciona un proveedor de IA para impulsar a tus empleados digitales",
+  localAiTitle: "Usar IA local en esta Mac",
+  localAiInstallCta: "Instalar IA local",
+  localAiRepairCta: "Reparar IA local",
+  localAiStorageLabel: "Necesita unos {gb} GB libres",
+  localModelSetupTitle: "Detectar hardware y configurar modelo local",
+  localModelSetupBody: "Revisaremos tu hardware e instalaremos un modelo de IA local",
+  localModelDetectingTitle: "Detectando hardware...",
+  localModelDetectingBody: "Analizando la capacidad de tu sistema para ejecutar modelos locales de IA",
+  localModelUnsupportedTitle: "No se recomienda el modelo local",
+  localModelUnsupportedBody: "Tu hardware no cumple con los requisitos mínimos recomendados para ejecutar modelos locales de IA con fluidez.",
+  localModelUnsupportedCloudBody: "No te preocupes: puedes usar una potente IA en la nube.",
+  localModelCloudFallbackCountdown: "Cambiando a la configuración de IA en la nube en 2 segundos...",
+  localModelDetectStepLabel: "Detectar hardware",
+  localModelPrepareStepLabel: "Preparar Ollama",
+  localModelDownloadStepLabel: "Descargar modelo local",
+  localModelConnectStepLabel: "Conectar ChillClaw a la IA local",
   providerTitle: "Selecciona un proveedor para empezar",
   authTitle: "¿Cómo te gustaría conectarte?",
   authApiKeyLabel: "API Key",

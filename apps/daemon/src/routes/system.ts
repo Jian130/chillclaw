@@ -390,6 +390,23 @@ export const systemRoutes: RouteDefinition[] = [
         return jsonResponse({ error: "Unknown recovery action." }, 404);
       }
 
+      if (action.id === "repair-local-model-runtime") {
+        const result = await context.localModelRuntimeService.repair();
+        const modelConfig = await context.localModelRuntimeService.decorateModelConfig(await context.adapter.config.getModelConfig());
+        context.eventPublisher.publishModelConfigUpdated(modelConfig);
+        const overview = await context.overviewService.getOverview();
+        context.eventPublisher.publishOverviewUpdated(overview);
+
+        return jsonResponse({
+          result: {
+            actionId: action.id,
+            status: result.status,
+            message: result.message
+          },
+          overview
+        });
+      }
+
       return jsonResponse({
         result: await context.adapter.instances.repair(action),
         overview: await context.overviewService.getOverview()

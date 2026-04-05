@@ -38,6 +38,8 @@ public enum ChillClawEvent: Codable, Sendable {
     case deployCompleted(correlationId: String, targetId: String, status: String, message: String, engineStatus: EngineStatus)
     case gatewayStatus(reachable: Bool, pendingGatewayApply: Bool, summary: String)
     case taskProgress(taskId: String, status: ChillClawTaskProgressStatus, message: String)
+    case localRuntimeProgress(action: String, phase: String, percent: Int?, message: String, localRuntime: LocalModelRuntimeOverview)
+    case localRuntimeCompleted(action: String, status: String, message: String, localRuntime: LocalModelRuntimeOverview)
     case chatStream(threadId: String, sessionKey: String, payload: ChatStreamEvent)
     case channelSessionUpdated(channelId: SupportedChannelId, session: ChannelSession)
     case configApplied(resource: ChillClawConfigResource, summary: String)
@@ -46,6 +48,7 @@ public enum ChillClawEvent: Codable, Sendable {
         case type
         case correlationId
         case targetId
+        case action
         case phase
         case percent
         case message
@@ -61,6 +64,7 @@ public enum ChillClawEvent: Codable, Sendable {
         case channelId
         case session
         case resource
+        case localRuntime
         case snapshot
     }
 
@@ -110,6 +114,21 @@ public enum ChillClawEvent: Codable, Sendable {
                 taskId: try container.decode(String.self, forKey: .taskId),
                 status: try container.decode(ChillClawTaskProgressStatus.self, forKey: .status),
                 message: try container.decode(String.self, forKey: .message)
+            )
+        case "local-runtime.progress":
+            self = .localRuntimeProgress(
+                action: try container.decode(String.self, forKey: .action),
+                phase: try container.decode(String.self, forKey: .phase),
+                percent: try container.decodeIfPresent(Int.self, forKey: .percent),
+                message: try container.decode(String.self, forKey: .message),
+                localRuntime: try container.decode(LocalModelRuntimeOverview.self, forKey: .localRuntime)
+            )
+        case "local-runtime.completed":
+            self = .localRuntimeCompleted(
+                action: try container.decode(String.self, forKey: .action),
+                status: try container.decode(String.self, forKey: .status),
+                message: try container.decode(String.self, forKey: .message),
+                localRuntime: try container.decode(LocalModelRuntimeOverview.self, forKey: .localRuntime)
             )
         case "chat.stream":
             self = .chatStream(
@@ -185,6 +204,19 @@ public enum ChillClawEvent: Codable, Sendable {
             try container.encode(taskId, forKey: .taskId)
             try container.encode(status, forKey: .status)
             try container.encode(message, forKey: .message)
+        case let .localRuntimeProgress(action, phase, percent, message, localRuntime):
+            try container.encode("local-runtime.progress", forKey: .type)
+            try container.encode(action, forKey: .action)
+            try container.encode(phase, forKey: .phase)
+            try container.encodeIfPresent(percent, forKey: .percent)
+            try container.encode(message, forKey: .message)
+            try container.encode(localRuntime, forKey: .localRuntime)
+        case let .localRuntimeCompleted(action, status, message, localRuntime):
+            try container.encode("local-runtime.completed", forKey: .type)
+            try container.encode(action, forKey: .action)
+            try container.encode(status, forKey: .status)
+            try container.encode(message, forKey: .message)
+            try container.encode(localRuntime, forKey: .localRuntime)
         case let .chatStream(threadId, sessionKey, payload):
             try container.encode("chat.stream", forKey: .type)
             try container.encode(threadId, forKey: .threadId)

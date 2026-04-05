@@ -17,6 +17,22 @@ export function getManagedWechatInstallerDir(): string {
   return resolve(getDataDir(), "wechat-installer-runtime");
 }
 
+export function getManagedOllamaDir(): string {
+  return resolve(getDataDir(), "ollama-runtime");
+}
+
+export function getManagedOllamaAppPath(): string {
+  return resolve(getManagedOllamaDir(), "Ollama.app");
+}
+
+export function getManagedOllamaCliPath(): string {
+  return resolve(getManagedOllamaAppPath(), "Contents", "Resources", "ollama");
+}
+
+export function getManagedOllamaModelsDir(): string {
+  return resolve(getManagedOllamaDir(), "models");
+}
+
 export function getAppRootDir(): string | undefined {
   return process.env.CHILLCLAW_APP_ROOT;
 }

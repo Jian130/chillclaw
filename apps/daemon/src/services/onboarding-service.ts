@@ -31,6 +31,7 @@ import type { OverviewService } from "./overview-service.js";
 import type { PresetSkillService } from "./preset-skill-service.js";
 import { SetupService } from "./setup-service.js";
 import { AITeamService } from "./ai-team-service.js";
+import type { LocalModelRuntimeService } from "./local-model-runtime-service.js";
 import { StateStore, defaultOnboardingDraftState, type OnboardingWarmupState } from "./state-store.js";
 
 const onboardingUiConfig = resolveOnboardingUiConfig();
@@ -200,7 +201,8 @@ export class OnboardingService {
     private readonly channelSetupService: ChannelSetupService,
     private readonly aiTeamService: AITeamService,
     private readonly presetSkillService?: PresetSkillService,
-    private readonly eventPublisher?: EventPublisher
+    private readonly eventPublisher?: EventPublisher,
+    private readonly localModelRuntimeService?: LocalModelRuntimeService
   ) {
     void this.resumePendingWarmups();
   }
@@ -292,7 +294,7 @@ export class OnboardingService {
     const result = await setupService.runFirstRunSetup({ forceLocal: options?.forceLocal ?? false });
     const install = await this.detectInstallStateFromRuntime(result.install, (await this.store.read()).onboarding?.draft.install);
     const onboarding = await this.updateState({
-      currentStep: "install",
+      currentStep: install.installed ? "permissions" : "install",
       install
     });
 
@@ -310,7 +312,7 @@ export class OnboardingService {
       : await this.adapter.instances.update();
     const install = await this.detectInstallStateFromRuntime(undefined, (await this.store.read()).onboarding?.draft.install);
     const onboarding = await this.updateState({
-      currentStep: "install",
+      currentStep: install.installed ? "permissions" : "install",
       install
     });
 
@@ -372,11 +374,15 @@ export class OnboardingService {
       ? await this.adapter.config.updateSavedModelEntry(draft.model.entryId, request)
       : await this.adapter.config.createSavedModelEntry(request);
     const result = await this.clearOnboardingFallbackModels(mutation);
-    const sync = this.eventPublisher?.publishModelConfigUpdated(result.modelConfig) ?? fallbackMutationSyncMeta(!result.authSession);
+    const modelConfig = this.localModelRuntimeService
+      ? await this.localModelRuntimeService.decorateModelConfig(result.modelConfig)
+      : result.modelConfig;
+    const sync = this.eventPublisher?.publishModelConfigUpdated(modelConfig) ?? fallbackMutationSyncMeta(!result.authSession);
     const onboarding = await this.updateState(this.modelDraftPatchFromMutation(request, result));
 
     return {
       ...result,
+      modelConfig,
       ...sync,
       settled: result.status === "interactive" ? false : sync.settled,
       onboarding
@@ -931,6 +937,8 @@ export class OnboardingService {
       };
     }
 
+    // Keep the model step undecided so clients can still run local-vs-cloud detection
+    // instead of silently inheriting an unrelated saved default model.
     if (!repaired.model && stepIsAtOrAfter(repaired.currentStep, "channel")) {
       const modelConfig = await this.adapter.config.getModelConfig();
       const preferredEntry =

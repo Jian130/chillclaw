@@ -5,6 +5,9 @@ import type {
   ChannelConfigOverview,
   DeploymentTargetId,
   EngineStatus,
+  LocalModelRuntimeAction,
+  LocalModelRuntimeOverview,
+  LocalModelRuntimePhase,
   ModelConfigOverview,
   MutationSyncMeta,
   PluginConfigOverview,
@@ -62,6 +65,31 @@ export class EventPublisher {
   publishTaskProgress(args: { taskId: string; status: ChillClawTaskProgressStatus; message: string }): void {
     this.bus.publish({
       type: "task.progress",
+      ...args
+    });
+  }
+
+  publishLocalRuntimeProgress(args: {
+    action: LocalModelRuntimeAction;
+    phase: LocalModelRuntimePhase;
+    percent?: number;
+    message: string;
+    localRuntime: LocalModelRuntimeOverview;
+  }): void {
+    this.bus.publish({
+      type: "local-runtime.progress",
+      ...args
+    });
+  }
+
+  publishLocalRuntimeCompleted(args: {
+    action: LocalModelRuntimeAction;
+    status: "completed" | "failed";
+    message: string;
+    localRuntime: LocalModelRuntimeOverview;
+  }): void {
+    this.bus.publish({
+      type: "local-runtime.completed",
       ...args
     });
   }

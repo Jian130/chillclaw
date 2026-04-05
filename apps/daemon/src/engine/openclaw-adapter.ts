@@ -3422,6 +3422,7 @@ export class OpenClawAdapter implements EngineAdapter {
       getModelConfig: () => modelsConfigCoordinator.getModelConfig(),
       createSavedModelEntry: (request) => modelsConfigCoordinator.createSavedModelEntry(request),
       updateSavedModelEntry: (entryId, request) => modelsConfigCoordinator.updateSavedModelEntry(entryId, request),
+      upsertManagedLocalModelEntry: (request) => modelsConfigCoordinator.upsertManagedLocalModelEntry(request),
       removeSavedModelEntry: (entryId) => modelsConfigCoordinator.removeSavedModelEntry(entryId),
       setDefaultModelEntry: (request) => modelsConfigCoordinator.setDefaultModelEntry(request),
       replaceFallbackModelEntries: (request) => modelsConfigCoordinator.replaceFallbackModelEntries(request),

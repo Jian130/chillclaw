@@ -65,6 +65,9 @@ func makeDashboardPresentation(
 
     let connectedModelsDetail: String = {
         guard overview.engine.installed else { return copy.openClawNotInstalled }
+        if overview.localRuntime?.activeInOpenClaw == true {
+            return overview.localRuntime?.summary ?? copy.noConfiguredModels
+        }
         if let defaultModel = modelConfig?.defaultModel, !defaultModel.isEmpty {
             return defaultModel
         }
@@ -104,13 +107,32 @@ func makeDashboardPresentation(
         )
     } ?? []
 
-    let healthItems = [
+    var healthItems = [
         NativeDashboardHealthItem(title: copy.openClawDeployedTitle, status: overview.engine.installed ? copy.healthActive : copy.healthMissing, tone: overview.engine.installed ? .success : .warning),
         NativeDashboardHealthItem(title: copy.gatewayReachableTitle, status: overview.engine.running ? copy.healthRunning : copy.healthStopped, tone: overview.engine.running ? .success : .warning),
         NativeDashboardHealthItem(title: copy.channelsConfiguredTitle, status: channelReadyCount > 0 ? copy.readyChannelLabel(channelReadyCount) : copy.healthPending, tone: channelReadyCount > 0 ? .success : .warning),
         NativeDashboardHealthItem(title: copy.healthBlockersTitle, status: overview.healthChecks.contains(where: { $0.severity == "error" }) ? copy.healthReview : copy.healthClear, tone: overview.healthChecks.contains(where: { $0.severity == "error" }) ? .warning : .success),
         NativeDashboardHealthItem(title: copy.aiMemberRosterTitle, status: copy.memberCountLabel(aiTeamOverview?.members.count ?? 0), tone: .info)
     ]
+
+    if let localRuntime = overview.localRuntime {
+        healthItems.insert(
+            NativeDashboardHealthItem(
+                title: "Local AI runtime",
+                status: localRuntime.status == "ready"
+                    ? copy.healthActive
+                    : (localRuntime.status == "degraded" || localRuntime.status == "failed")
+                        ? copy.healthReview
+                        : (localRuntime.recommendation == "local" ? "Available" : "Cloud"),
+                tone: localRuntime.status == "ready"
+                    ? .success
+                    : (localRuntime.status == "degraded" || localRuntime.status == "failed")
+                        ? .warning
+                        : .neutral
+            ),
+            at: min(2, healthItems.count)
+        )
+    }
 
     return NativeDashboardPresentation(
         heroVersion: overview.engine.version ?? overview.installSpec.desiredVersion,

@@ -84,6 +84,28 @@ test("onboarding service persists draft progress and uses full completion as the
   assert.equal(persisted.setupCompletedAt, undefined);
 });
 
+test("installRuntime advances onboarding to permissions when the managed runtime is ready", async () => {
+  const { service } = createService("onboarding-service-install-runtime-advances");
+
+  const result = await service.installRuntime();
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.onboarding?.draft.currentStep, "permissions");
+  assert.equal(result.onboarding?.draft.install?.installed, true);
+  assert.equal(result.onboarding?.summary.install?.installed, true);
+});
+
+test("updateRuntime advances onboarding to permissions when the managed runtime is ready", async () => {
+  const { service } = createService("onboarding-service-update-runtime-advances");
+
+  const result = await service.updateRuntime();
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.onboarding?.draft.currentStep, "permissions");
+  assert.equal(result.onboarding?.draft.install?.installed, true);
+  assert.equal(result.onboarding?.summary.install?.installed, true);
+});
+
 test("saving the employee draft stays lightweight once the channel draft is already staged", async () => {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-employee-draft-${randomUUID()}.json`);
   const adapter = new MockAdapter();
@@ -124,6 +146,71 @@ test("saving the employee draft stays lightweight once the channel draft is alre
   assert.equal(result.draft.employee?.name, "Alex Morgan");
   assert.equal(result.draft.employee?.jobTitle, "Research Analyst");
   assert.equal(result.summary.channel?.entryId, "wechat:default");
+});
+
+test("onboarding state keeps the model step undecided even when a default model entry already exists", async () => {
+  const { adapter, service } = createService("onboarding-service-model-step-stays-undecided");
+
+  await adapter.config.createSavedModelEntry({
+    label: "Local AI on this Mac",
+    providerId: "ollama",
+    methodId: "ollama-local",
+    modelKey: "ollama/gemma4:e4b",
+    values: {},
+    makeDefault: true
+  });
+
+  await service.updateState({
+    currentStep: "model",
+    install: {
+      installed: true,
+      version: "2026.4.5",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: new Date().toISOString()
+    },
+    model: undefined
+  });
+
+  const repaired = await service.getState();
+
+  assert.equal(repaired.draft.model, undefined);
+  assert.equal(repaired.summary.model, undefined);
+});
+
+test("onboarding state repairs later steps from an already configured default model entry", async () => {
+  const { adapter, service } = createService("onboarding-service-repair-later-model-step");
+
+  await adapter.config.createSavedModelEntry({
+    label: "Local AI on this Mac",
+    providerId: "ollama",
+    methodId: "ollama-local",
+    modelKey: "ollama/gemma4:e4b",
+    values: {},
+    makeDefault: true
+  });
+
+  await service.updateState({
+    currentStep: "channel",
+    install: {
+      installed: true,
+      version: "2026.4.5",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: new Date().toISOString()
+    },
+    model: undefined
+  });
+
+  const repaired = await service.getState();
+
+  assert.equal(repaired.draft.model?.providerId, "ollama");
+  assert.equal(repaired.draft.model?.modelKey, "ollama/gemma4:e4b");
+  assert.equal(repaired.summary.model?.entryId, repaired.draft.model?.entryId);
 });
 
 test("saving the employee draft reuses the staged model snapshot without refetching model config", async () => {

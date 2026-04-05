@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { createDefaultLocalModelRuntimeOverview } from "@chillclaw/contracts";
+
 import { EventBusService } from "./event-bus-service.js";
 import { EventPublisher } from "./event-publisher.js";
 
@@ -199,4 +201,53 @@ test("event publisher emits retained plugin snapshot events", () => {
 
   assert.equal(sync.revision, publishedRevision);
   assert.equal(replayed.some((event) => event.type === "plugin-config.updated"), true);
+});
+
+test("event publisher emits local runtime progress and completion events", () => {
+  const bus = new EventBusService();
+  const publisher = new EventPublisher(bus);
+  const events: string[] = [];
+
+  bus.subscribe((event) => {
+    events.push(event.type);
+  });
+
+  const localRuntime = {
+    ...createDefaultLocalModelRuntimeOverview(),
+    supported: true,
+    recommendation: "local" as const,
+    supportCode: "supported" as const,
+    status: "downloading-model" as const,
+    runtimeInstalled: true,
+    runtimeReachable: true,
+    modelDownloaded: false,
+    activeInOpenClaw: false,
+    recommendedTier: "medium" as const,
+    requiredDiskGb: 16,
+    totalMemoryGb: 36,
+    freeDiskGb: 128,
+    chosenModelKey: "ollama/gemma4:e4b",
+    summary: "Local AI is downloading.",
+    detail: "ChillClaw is downloading the starter local model."
+  };
+
+  publisher.publishLocalRuntimeProgress({
+    action: "install",
+    phase: "downloading-model",
+    message: "Downloading model",
+    localRuntime
+  });
+  publisher.publishLocalRuntimeCompleted({
+    action: "install",
+    status: "completed",
+    message: "Local AI is ready.",
+    localRuntime: {
+      ...localRuntime,
+      status: "ready",
+      modelDownloaded: true,
+      activeInOpenClaw: true
+    }
+  });
+
+  assert.deepEqual(events, ["local-runtime.progress", "local-runtime.completed"]);
 });

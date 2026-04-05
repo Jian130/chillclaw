@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### 2026-04-05 22:05 CST
+
+- hardened the managed local AI onboarding path after QA by fixing daemon-side Ollama command resolution, preventing stale onboarding draft state from skipping the new step 4 detection screen, and keeping the local-first model decision flow aligned between the daemon, React desktop UI, and native macOS app
+- fixed native macOS step 4 local-runtime behavior so hardware detection, Ollama download progress, cloud fallback handoff, and timeout recovery stay in sync with daemon `local-runtime.*` events instead of freezing on the first setup step or surfacing false timeout popups while background setup is still advancing
+- refined shared local-runtime contracts, event propagation, and connected-model presentation so dashboard, settings, and onboarding surfaces consistently report managed local runtime readiness, repair state, and the selected Ollama-backed model entry
+
+### 2026-04-05 15:38 CST
+
+- added a daemon-managed local AI deployment flow that inspects Apple Silicon Mac hardware, recommends a curated Ollama Qwen tier, installs or reuses the local Ollama runtime, downloads the selected model, and wires OpenClaw to the resulting `ollama/...` model entry automatically
+- extended shared contracts, daemon routes, WebSocket events, and OpenClaw model coordination so managed local runtime status, install progress, repair actions, and recovery guidance stay aligned across the daemon, React desktop UI, shared Swift client, and native macOS app
+- added onboarding, settings, dashboard, and native macOS surfaces for managed local AI, keeping onboarding focused on storage impact and install status while showing the actual chosen local model after setup completes in settings and connected-model health views
+
 ### 2026-04-05 14:36 CST
 
 - tightened chat send behavior across the React and native macOS clients by blocking message sends while an OpenClaw gateway apply is still pending, surfacing clearer user guidance in the composer, and aligning the shared ChillClaw chat view model plus its regression coverage with that staged-versus-live runtime distinction

@@ -56,6 +56,32 @@ struct DashboardSupportTests {
     }
 
     @Test
+    func dashboardPresentationPrefersManagedLocalRuntimeSummaryWhenActive() {
+        var overview = makeDashboardOverview()
+        overview.localRuntime = .init(
+            supported: true,
+            recommendation: "local",
+            supportCode: "supported",
+            status: "ready",
+            runtimeInstalled: true,
+            runtimeReachable: true,
+            modelDownloaded: true,
+            activeInOpenClaw: true,
+            summary: "Local AI is ready on this Mac.",
+            detail: "OpenClaw is connected to the local runtime."
+        )
+
+        let presentation = makeDashboardPresentation(
+            overview: overview,
+            modelConfig: makeDashboardModelConfig(),
+            aiTeamOverview: makeDashboardAITeamOverview()
+        )
+
+        #expect(presentation.metrics[1] == .init(title: "Connected Models", value: "2", detail: "Local AI is ready on this Mac."))
+        #expect(presentation.healthItems.contains { $0.title == "Local AI runtime" && $0.status == "Active" && $0.tone == .success })
+    }
+
+    @Test
     func dashboardCopyLocalizesSidebarAndSectionLabels() {
         let copy = nativeDashboardCopy(localeIdentifier: "zh")
 

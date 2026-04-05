@@ -127,6 +127,23 @@ test("model config overview serializes providers, runtime models, and saved entr
     ],
     defaultModel: "openai/gpt-5",
     configuredModelKeys: ["openai/gpt-5"],
+    localRuntime: {
+      supported: true,
+      recommendation: "local",
+      supportCode: "supported",
+      status: "ready",
+      runtimeInstalled: true,
+      runtimeReachable: true,
+      modelDownloaded: true,
+      activeInOpenClaw: true,
+      recommendedTier: "medium",
+      requiredDiskGb: 16,
+      totalMemoryGb: 36,
+      freeDiskGb: 120,
+      chosenModelKey: "ollama/gemma4:e4b",
+      summary: "Local AI is ready on this Mac.",
+      detail: "ChillClaw connected OpenClaw to the local Ollama runtime."
+    },
     savedEntries: [
       {
         id: "entry-1",
@@ -155,7 +172,16 @@ test("model config overview serializes providers, runtime models, and saved entr
   assert.equal(parsed.providers[0]?.providerType, "built-in");
   assert.equal(parsed.providers[0]?.supportsNoAuth, false);
   assert.equal(parsed.defaultModel, "openai/gpt-5");
+  assert.equal(parsed.localRuntime?.chosenModelKey, "ollama/gemma4:e4b");
   assert.equal(parsed.savedEntries[0]?.isDefault, true);
+});
+
+test("default product overview exposes an unchecked local runtime summary", () => {
+  const overview = createDefaultProductOverview({ appVersion: "1.2.3" });
+
+  assert.equal(overview.localRuntime?.status, "unchecked");
+  assert.equal(overview.localRuntime?.recommendation, "unknown");
+  assert.equal(overview.localRuntime?.supportCode, "unchecked");
 });
 
 test("generic channel config shapes serialize with masked summaries and capabilities", () => {

@@ -99,6 +99,14 @@ export interface ManagedSkillInstallRequest {
   bundledAssetPath?: string;
 }
 
+export interface ManagedLocalModelEntryRequest {
+  label: string;
+  providerId: string;
+  methodId: string;
+  modelKey: string;
+  entryId?: string;
+}
+
 export interface ManagedSkillInstallResult {
   runtimeSkillId?: string;
   version?: string;
@@ -194,6 +202,7 @@ export interface ConfigManager {
   getModelConfig(): Promise<ModelConfigOverview>;
   createSavedModelEntry(request: SaveModelEntryRequest): Promise<ModelConfigActionResponse>;
   updateSavedModelEntry(entryId: string, request: SaveModelEntryRequest): Promise<ModelConfigActionResponse>;
+  upsertManagedLocalModelEntry(request: ManagedLocalModelEntryRequest): Promise<ModelConfigActionResponse>;
   removeSavedModelEntry(entryId: string): Promise<ModelConfigActionResponse>;
   setDefaultModelEntry(request: SetDefaultModelEntryRequest): Promise<ModelConfigActionResponse>;
   replaceFallbackModelEntries(request: ReplaceFallbackModelEntriesRequest): Promise<ModelConfigActionResponse>;

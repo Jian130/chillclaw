@@ -7,6 +7,7 @@ ChillClaw is a macOS-first, local-first desktop product that makes OpenClaw usab
 - a local TypeScript daemon with an engine adapter seam
 - an `OpenClawAdapter` implementation that manages deploy targets, model entries, channels, chat sessions, updates, and gateway health
 - shared contracts for deployment, model/channel management, AI members, chat, onboarding, task execution, recovery, and updates
+- a managed local AI path that can install Ollama, download a recommended on-device model, and connect OpenClaw to that local runtime
 
 ## Workspace layout
 
@@ -56,6 +57,7 @@ The root `npm run build` and `npm test` commands now include the website workspa
   - shows the live OpenClaw runtime model chain and ChillClaw-managed configured model records
   - supports model add/edit flows
   - supports default and fallback model selection
+  - supports a daemon-managed local AI setup path that can recommend, install, repair, and surface a local Ollama-backed model runtime
   - stages model, channel, skill, and workspace configuration changes immediately without requiring the gateway to be running
   - returns explicit pending-apply state when saved configuration still needs the gateway to reload
   - falls back to direct OpenClaw config writes for known CLI command drift on safe config-backed mutations
@@ -66,6 +68,7 @@ The root `npm run build` and `npm test` commands now include the website workspa
   - uses a daemon-backed full-screen onboarding flow at `/onboarding`
   - persists draft onboarding progress through the daemon so refreshes resume the current step
   - wires install, permissions, model setup, channel setup, and AI employee creation to the real ChillClaw daemon flows instead of mock state
+  - offers a managed local AI option on supported Apple Silicon Macs, showing storage impact and install progress while the daemon installs Ollama and stages a local OpenClaw model automatically
   - uses daemon-owned onboarding UI config so the curated model and channel choices stay aligned across clients
   - resolves curated onboarding AI employee presets, managed preset skills, and onboarding avatar presentation from the daemon-owned preset catalog instead of client-local preset definitions
   - documents the current six-step onboarding flow, completion handoff, and remaining target-contract gaps in [docs/reference/onboarding-design.md](/Users/home/Ryo/Projects/chillclaw/docs/reference/onboarding-design.md)
@@ -116,6 +119,7 @@ flowchart LR
 - The native macOS app state, native onboarding flow, and native chat transport all listen to the shared daemon event bus so overview, step-scoped onboarding data, active sections, and live chat transcript updates reconcile through one WebSocket channel.
 - The daemon owns the OpenClaw gateway socket internally for chat and runtime behavior instead of exposing that socket to clients.
 - The daemon-side platform layer now owns explicit filesystem/state, CLI runner, gateway socket, and secrets seams, including a macOS keychain-backed secrets adapter for mirrored user-entered credentials.
+- The daemon also owns managed local-model runtime state, including host inspection, curated Ollama model recommendation, install progress, repair state, and OpenClaw model-entry handoff.
 - Read-only OpenClaw CLI reads are cached and coalesced inside the daemon per logical refresh cycle so one page load does not fan out into repeated duplicate CLI calls.
 - The engine seam lives behind `EngineAdapter`, so ChillClaw product logic does not talk to OpenClaw directly.
 - `EngineAdapter` is now the composed manager boundary itself rather than a second public flat method bag on top of those managers.
@@ -127,6 +131,7 @@ flowchart LR
 - Config and AI employee saves are staged changes. They write correct engine and workspace state first, then the gateway manager is responsible for applying them live.
 - `OpenClawAdapter` checks for an existing OpenClaw install, reuses it when available, and otherwise deploys a ChillClaw-managed local OpenClaw runtime under the user's ChillClaw data directory.
 - The adapter seam is intentionally future-facing: it should later support local-LLM runtimes and model families such as Qwen, MiniMax-exposed local runtimes, Llama, Mistral, and other OpenAI-compatible local gateways.
+- The current local-runtime slice uses Ollama as the managed daemon-owned local engine and configures OpenClaw against the selected `ollama/...` model entry rather than exposing raw local-model wiring directly to clients.
 - User state, diagnostics, and ChillClaw metadata live in `~/Library/Application Support/ChillClaw` when packaged.
 
 ### Packaging breakdown

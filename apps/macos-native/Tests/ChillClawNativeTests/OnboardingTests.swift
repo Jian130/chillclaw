@@ -117,7 +117,7 @@ struct OnboardingTests {
         )
         let occurrences = source.components(separatedBy: "variant: nativeOnboardingForwardActionVariant()").count - 1
 
-        #expect(occurrences == 6)
+        #expect(occurrences == 7)
     }
 
     @Test
@@ -593,6 +593,289 @@ struct OnboardingTests {
 
         #expect(viewModel.permissionsNextBusy == false)
         #expect(viewModel.currentStep == .model)
+    }
+
+    @Test
+    func advancingToModelBootstrapsLocalDetectionWithoutCrashing() async throws {
+        let recorder = NativeRequestRecorder()
+        let confirmGate = AsyncGate()
+        let detectedLocalRuntime = makeLocalRuntime(recommendation: "local", status: "installing-runtime")
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/permissions/confirm"):
+                await confirmGate.wait()
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: false, localRuntime: detectedLocalRuntime))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/models/config"):
+                let body = try JSONEncoder.chillClaw.encode(emptyModelConfig(localRuntime: detectedLocalRuntime))
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = ChillClawChatViewModel(transport: FakeChatTransport())
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .permissions)
+
+        let task = Task {
+            await viewModel.advancePastPermissions()
+        }
+
+        await waitForRecordedURLCount(recorder, expectedCount: 1)
+        await confirmGate.open()
+        await waitForRecordedURLCount(recorder, expectedCount: 3)
+
+        #expect(viewModel.currentStep == .model)
+
+        await task.value
+        for _ in 0..<20 {
+            if viewModel.modelStepMode == .localSetup {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(viewModel.pageError == nil)
+        #expect(viewModel.modelStepMode == .localSetup)
+        #expect(viewModel.localRuntime?.status == "installing-runtime")
+    }
+
+    @Test
+    func localRuntimeProgressEventsAdvanceTheVisibleLocalSetupStep() async throws {
+        let recorder = NativeRequestRecorder()
+        let installGate = AsyncGate()
+        let initialRuntime = makeLocalRuntime(recommendation: "local", status: "idle")
+        let downloadingRuntime = makeLocalRuntime(recommendation: "local", status: "downloading-model")
+        var eventContinuation: AsyncStream<ChillClawEvent>.Continuation?
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("GET", "/api/onboarding/state"):
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: false, localRuntime: initialRuntime))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/models/config"):
+                let body = try JSONEncoder.chillClaw.encode(emptyModelConfig(localRuntime: initialRuntime))
+                return (jsonResponse(url: url), body)
+            case ("POST", "/api/models/local-runtime/install"):
+                await installGate.wait()
+                let body = try JSONEncoder.chillClaw.encode(
+                    LocalModelRuntimeActionResponse(
+                        epoch: "epoch-1",
+                        revision: 1,
+                        settled: false,
+                        action: "install",
+                        status: "running",
+                        message: "Downloading local model.",
+                        localRuntime: downloadingRuntime,
+                        modelConfig: emptyModelConfig(localRuntime: downloadingRuntime),
+                        overview: makeOverview(setupCompleted: false, localRuntime: downloadingRuntime)
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = ChillClawChatViewModel(transport: FakeChatTransport())
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false)
+
+        let eventStream = AsyncStream<ChillClawEvent> { continuation in
+            eventContinuation = continuation
+        }
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { eventStream }
+        )
+
+        await viewModel.bootstrap()
+        await waitForRecordedURLCount(recorder, expectedCount: 4)
+
+        for _ in 0..<20 {
+            if viewModel.modelStepMode == .localSetup, viewModel.localSetupProgress.currentStep == 1 {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        eventContinuation?.yield(
+            .localRuntimeProgress(
+                action: "install",
+                phase: "downloading-model",
+                percent: 54,
+                message: "Downloading local model.",
+                localRuntime: downloadingRuntime
+            )
+        )
+
+        for _ in 0..<20 {
+            if viewModel.localSetupProgress.currentStep == 3 {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(viewModel.modelStepMode == .localSetup)
+        #expect(viewModel.localRuntime?.status == "downloading-model")
+        #expect(viewModel.localSetupProgress.currentStep == 3)
+        #expect(viewModel.localRuntimeMessage == "Downloading local model.")
+
+        await installGate.open()
+        eventContinuation?.finish()
+    }
+
+    @Test
+    func localRuntimeInstallTimeoutDoesNotSurfaceAnErrorAfterProgressBegins() async throws {
+        let recorder = NativeRequestRecorder()
+        let installGate = AsyncGate()
+        let initialRuntime = makeLocalRuntime(recommendation: "local", status: "idle")
+        let downloadingRuntime = makeLocalRuntime(recommendation: "local", status: "downloading-model")
+        var eventContinuation: AsyncStream<ChillClawEvent>.Continuation?
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("GET", "/api/onboarding/state"):
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: false, localRuntime: initialRuntime))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/models/config"):
+                let body = try JSONEncoder.chillClaw.encode(emptyModelConfig(localRuntime: initialRuntime))
+                return (jsonResponse(url: url), body)
+            case ("POST", "/api/models/local-runtime/install"):
+                await installGate.wait()
+                throw URLError(.timedOut)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = ChillClawChatViewModel(transport: FakeChatTransport())
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false)
+
+        let eventStream = AsyncStream<ChillClawEvent> { continuation in
+            eventContinuation = continuation
+        }
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { eventStream }
+        )
+
+        await viewModel.bootstrap()
+        await waitForRecordedURLCount(recorder, expectedCount: 4)
+
+        eventContinuation?.yield(
+            .localRuntimeProgress(
+                action: "install",
+                phase: "downloading-model",
+                percent: 58,
+                message: "Downloading local model.",
+                localRuntime: downloadingRuntime
+            )
+        )
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        await installGate.open()
+
+        for _ in 0..<30 {
+            if viewModel.localRuntimeBusy.isEmpty {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(viewModel.pageError == nil)
+        #expect(viewModel.localRuntime?.status == "downloading-model")
+        #expect(viewModel.localSetupProgress.currentStep == 3)
+        #expect(viewModel.localRuntimeBusy.isEmpty)
+
+        eventContinuation?.finish()
     }
 
     @Test
@@ -1163,6 +1446,84 @@ struct OnboardingTests {
     }
 
     @Test
+    func localFirstModelStepModeResolvesDetectingHandoffSetupAndConnectedStates() {
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: true,
+                providerId: "",
+                selectedProviderPresent: false,
+                modelViewKind: .picker,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
+                localRuntime: nil
+            ) == .detectingLocal
+        )
+
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: false,
+                providerId: "",
+                selectedProviderPresent: false,
+                modelViewKind: .picker,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
+                localRuntime: makeLocalRuntime(recommendation: "cloud", status: "cloud-recommended", supported: false)
+            ) == .cloudHandoff
+        )
+
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: false,
+                providerId: "",
+                selectedProviderPresent: false,
+                modelViewKind: .picker,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
+                localRuntime: makeLocalRuntime(recommendation: "local", status: "idle")
+            ) == .localSetup
+        )
+
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: false,
+                providerId: "openai",
+                selectedProviderPresent: true,
+                modelViewKind: .configure,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
+                localRuntime: nil
+            ) == .cloudConfig
+        )
+
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: false,
+                providerId: "",
+                selectedProviderPresent: false,
+                modelViewKind: .picker,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
+                localRuntime: makeLocalRuntime(recommendation: "local", status: "ready", activeInOpenClaw: true)
+            ) == .connected
+        )
+    }
+
+    @Test
+    func localFirstSetupProgressMapsRuntimeStatusesToStableSteps() {
+        #expect(resolveNativeOnboardingLocalSetupProgress(mode: .detectingLocal, status: nil).currentStep == 1)
+        #expect(resolveNativeOnboardingLocalSetupProgress(mode: .localSetup, status: "installing-runtime").currentStep == 2)
+        #expect(resolveNativeOnboardingLocalSetupProgress(mode: .localSetup, status: "downloading-model").currentStep == 3)
+        #expect(resolveNativeOnboardingLocalSetupProgress(mode: .localSetup, status: "starting-runtime").currentStep == 4)
+        #expect(resolveNativeOnboardingLocalSetupProgress(mode: .localSetup, status: "configuring-openclaw").currentStep == 4)
+        #expect(resolveNativeOnboardingLocalSetupProgress(mode: .connected, status: "ready").currentStep == 4)
+    }
+
+    @Test
     func modelStepCopyMatchesFigmaCuratedProviderFlow() {
         let copy = nativeOnboardingCopy(localeIdentifier: "en")
 
@@ -1170,6 +1531,10 @@ struct OnboardingTests {
         #expect(copy.modelBody == "Select an AI provider to power your digital employees")
         #expect(copy.providerTitle == "Select a provider to get started")
         #expect(copy.authTitle == "How would you like to connect?")
+        #expect(copy.localModelSetupTitle == "Detect Hardware & Setup Local Model")
+        #expect(copy.localModelDetectingTitle == "Detecting Hardware...")
+        #expect(copy.localModelUnsupportedTitle == "Local Model Not Recommended")
+        #expect(copy.localModelCloudFallbackCountdown == "Switching to cloud AI configuration in 2 seconds...")
     }
 
     @Test
@@ -1371,6 +1736,31 @@ struct OnboardingTests {
         #expect(viewModel.providerId == "modelstudio")
         #expect(viewModel.methodId == "modelstudio-standard-api-key-cn")
         #expect(viewModel.modelKey == "modelstudio/qwen3.5-plus")
+    }
+
+    @Test
+    func nativeModelStepSourceIncludesLocalFirstDetectionAndAutoSetupHooks() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let viewSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingView.swift"),
+            encoding: .utf8
+        )
+        let viewModelSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(viewSource.contains("viewModel.copy.localModelSetupTitle"))
+        #expect(viewSource.contains("viewModel.copy.localModelCloudFallbackCountdown"))
+        #expect(viewSource.contains("viewModel.modelStepMode"))
+        #expect(viewModelSource.contains("installLocalModelRuntime()"))
+        #expect(viewModelSource.contains("repairLocalModelRuntime()"))
+        #expect(viewModelSource.contains("nativeOnboardingModelCloudHandoffDelayNanoseconds"))
+        #expect(viewModelSource.contains("readFreshOverview()"))
+        #expect(viewModelSource.contains("readFreshModelConfig()"))
     }
 
     @Test
@@ -2830,7 +3220,7 @@ struct OnboardingTests {
                 let body = try JSONEncoder.chillClaw.encode(query.contains("fresh=1") ? refreshedTargets : initialTargets)
                 return (jsonResponse(url: url), body)
             case ("POST", "/api/onboarding/runtime/update"):
-                var nextState = makeOnboardingStateResponse(step: .install)
+                var nextState = makeOnboardingStateResponse(step: .permissions)
                 nextState.draft.install = .init(
                     installed: true,
                     version: "2026.3.14",
@@ -2902,6 +3292,114 @@ struct OnboardingTests {
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/update"))
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.updateAvailable == false)
+        #expect(viewModel.currentStep == .permissions)
+        #expect(viewModel.pageError == nil)
+        #expect(viewModel.installBusy == false)
+    }
+
+    @Test
+    func runInstallRecoversWhenTheInstallRequestTimesOutAfterRuntimeFinishes() async throws {
+        let recorder = NativeRequestRecorder()
+        let refreshedTargets = DeploymentTargetsResponse(
+            checkedAt: "2026-03-20T00:00:00.000Z",
+            targets: [
+                .init(
+                    id: "managed-local",
+                    title: "Managed Local OpenClaw",
+                    description: "ChillClaw manages this local OpenClaw install.",
+                    installMode: "managed-local",
+                    installed: true,
+                    installable: true,
+                    planned: true,
+                    recommended: true,
+                    active: true,
+                    version: "2026.3.14",
+                    desiredVersion: "2026.3.14",
+                    latestVersion: "2026.3.14",
+                    updateAvailable: false,
+                    summary: "Managed local OpenClaw 2026.3.14 is ready on this Mac.",
+                    updateSummary: nil,
+                    requirements: ["macOS"],
+                    requirementsSourceUrl: nil
+                )
+            ]
+        )
+        let recoveredOverview = makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14")
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/runtime/install"):
+                throw URLError(.timedOut)
+            case ("GET", "/api/onboarding/state"):
+                var state = makeOnboardingStateResponse(step: .install)
+                state.draft.currentStep = .permissions
+                state.draft.install = .init(
+                    installed: true,
+                    version: "2026.3.14",
+                    disposition: "installed-managed",
+                    updateAvailable: false,
+                    latestVersion: "2026.3.14",
+                    updateSummary: nil
+                )
+                state.summary.install = state.draft.install
+                let body = try JSONEncoder.chillClaw.encode(state)
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let body = try JSONEncoder.chillClaw.encode(recoveredOverview)
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/deploy/targets"):
+                let body = try JSONEncoder.chillClaw.encode(refreshedTargets)
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = ChillClawChatViewModel(transport: FakeChatTransport())
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: false, running: false, version: nil) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false, installed: false, running: false, version: nil)
+        appState.deploymentTargets = .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: [])
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .install)
+
+        await viewModel.runInstall()
+
+        let urls = await recorder.recordedURLs()
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/install"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/overview?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets?fresh=1"))
+        #expect(appState.overview?.engine.version == "2026.3.14")
+        #expect(appState.deploymentTargets?.targets.first?.installed == true)
+        #expect(viewModel.onboardingState?.draft.install?.installed == true)
+        #expect(viewModel.currentStep == .permissions)
         #expect(viewModel.pageError == nil)
         #expect(viewModel.installBusy == false)
     }
@@ -2972,7 +3470,14 @@ struct OnboardingTests {
             let url = try #require(request.url)
             switch url.path {
             case "/api/onboarding/state":
-                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
+                var state = makeOnboardingStateResponse(step: .model)
+                state.draft.model = .init(
+                    providerId: "openai",
+                    modelKey: "openai/gpt-5.1-codex",
+                    methodId: "openai-api-key",
+                    entryId: nil
+                )
+                let body = try JSONEncoder.chillClaw.encode(state)
                 return (jsonResponse(url: url), body)
             case "/api/models/config":
                 let body = try JSONEncoder.chillClaw.encode(emptyModelConfig())
@@ -3414,7 +3919,8 @@ private func makeOverview(
     setupCompleted: Bool,
     installed: Bool = true,
     running: Bool = true,
-    version: String? = "2026.3.13"
+    version: String? = "2026.3.13",
+    localRuntime: LocalModelRuntimeOverview? = nil
 ) -> ProductOverview {
     .init(
         appName: "ChillClaw",
@@ -3427,6 +3933,7 @@ private func makeOverview(
         capabilities: .init(engine: "openclaw", supportsInstall: true, supportsUpdate: true, supportsRecovery: true, supportsStreaming: true, runtimeModes: ["gateway"], supportedChannels: ["telegram"], starterSkillCategories: ["communication"], futureLocalModelFamilies: ["qwen"]),
         installChecks: [],
         channelSetup: .init(baseOnboardingCompleted: true, channels: [], nextChannelId: nil, gatewayStarted: true, gatewaySummary: "Running"),
+        localRuntime: localRuntime,
         profiles: [],
         templates: [],
         healthChecks: [],
@@ -3462,7 +3969,10 @@ private func makeAppState(
     return appState
 }
 
-private func emptyModelConfig(providers: [ModelProviderConfig] = []) -> ModelConfigOverview {
+private func emptyModelConfig(
+    providers: [ModelProviderConfig] = [],
+    localRuntime: LocalModelRuntimeOverview? = nil
+) -> ModelConfigOverview {
     .init(
         providers: providers,
         models: [],
@@ -3470,7 +3980,36 @@ private func emptyModelConfig(providers: [ModelProviderConfig] = []) -> ModelCon
         configuredModelKeys: [],
         savedEntries: [],
         defaultEntryId: nil,
-        fallbackEntryIds: []
+        fallbackEntryIds: [],
+        localRuntime: localRuntime
+    )
+}
+
+private func makeLocalRuntime(
+    recommendation: String = "local",
+    status: String = "idle",
+    supported: Bool = true,
+    activeInOpenClaw: Bool = false
+) -> LocalModelRuntimeOverview {
+    .init(
+        supported: supported,
+        recommendation: recommendation,
+        supportCode: supported ? "recommended" : "insufficient-memory",
+        status: status,
+        runtimeInstalled: status != "idle" && status != "cloud-recommended",
+        runtimeReachable: status == "starting-runtime" || status == "configuring-openclaw" || status == "ready",
+        modelDownloaded: status == "starting-runtime" || status == "configuring-openclaw" || status == "ready",
+        activeInOpenClaw: activeInOpenClaw,
+        recommendedTier: supported ? "balanced" : nil,
+        requiredDiskGb: supported ? 8 : nil,
+        totalMemoryGb: supported ? 18 : 8,
+        freeDiskGb: supported ? 96 : 12,
+        chosenModelKey: supported ? "qwen2.5:7b-instruct" : nil,
+        managedEntryId: activeInOpenClaw ? "local-managed-entry" : nil,
+        summary: supported ? "Local AI is available on this Mac." : "Cloud AI is recommended on this Mac.",
+        detail: supported ? "ChillClaw can prepare a managed local model." : "This Mac should use cloud AI instead.",
+        lastError: status == "failed" ? "Local runtime setup failed." : nil,
+        recoveryHint: status == "failed" ? "Repair the local runtime and try again." : nil
     )
 }
 
@@ -3751,14 +4290,19 @@ private actor NativeRequestRecorder {
     private var requests: [URLRequest] = []
 
     func session(handler: @escaping @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)) async -> URLSession {
-        await MainActor.run {
-            NativeRecordingURLProtocol.handler = { request in
+        let recorderID = UUID().uuidString
+        await NativeRecordingURLProtocolRegistry.shared.register(
+            id: recorderID,
+            handler: { request in
                 await self.record(request)
                 return try await handler(request)
             }
-        }
+        )
 
         let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpAdditionalHeaders = [
+            NativeRecordingURLProtocol.recorderHeader: recorderID
+        ]
         configuration.protocolClasses = [NativeRecordingURLProtocol.self]
         return URLSession(configuration: configuration)
     }
@@ -3773,6 +4317,23 @@ private actor NativeRequestRecorder {
 
     func recordedRequests() -> [URLRequest] {
         requests
+    }
+}
+
+private actor NativeRecordingURLProtocolRegistry {
+    static let shared = NativeRecordingURLProtocolRegistry()
+
+    private var handlers: [String: @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)] = [:]
+
+    func register(
+        id: String,
+        handler: @escaping @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)
+    ) {
+        handlers[id] = handler
+    }
+
+    func handler(for id: String) -> (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))? {
+        handlers[id]
     }
 }
 
@@ -3856,7 +4417,7 @@ private final class NotificationCenterThreadRecorder {
 }
 
 private final class NativeRecordingURLProtocol: URLProtocol, @unchecked Sendable {
-    @MainActor static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
+    static let recorderHeader = "X-ChillClaw-Native-Recorder-ID"
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -3864,7 +4425,8 @@ private final class NativeRecordingURLProtocol: URLProtocol, @unchecked Sendable
     override func startLoading() {
         Task {
             guard let client else { return }
-            let handler = await MainActor.run { Self.handler }
+            let recorderID = request.value(forHTTPHeaderField: Self.recorderHeader) ?? ""
+            let handler = await NativeRecordingURLProtocolRegistry.shared.handler(for: recorderID)
             guard let handler else {
                 client.urlProtocol(self, didFailWithError: ChillClawClientError.invalidResponse)
                 return

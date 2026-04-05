@@ -56,4 +56,25 @@ describe("OnboardingPage CTA styling", () => {
     expect(source).toContain("const result = await completeOnboarding({ employee: draft });");
     expect(source).not.toContain("await saveEmployeeDraftToDaemon(draft);");
   });
+
+  it("includes the new local-first step title and cloud handoff copy", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain("copy.localModelSetupTitle");
+    expect(source).toContain("copy.localModelCloudFallbackCountdown");
+  });
+
+  it("uses a dedicated 2-second delay for the cloud handoff", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain("MODEL_CLOUD_HANDOFF_DELAY_MS = 2_000");
+  });
+
+  it("auto-starts the local runtime flow through the existing install and repair APIs", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain("const autoLocalRuntimeAction");
+    expect(source).toContain("void handleLocalRuntimeAction(autoLocalRuntimeAction);");
+    expect(source).toContain('action === "repair" ? await repairLocalModelRuntime() : await installLocalModelRuntime()');
+  });
 });

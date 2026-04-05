@@ -31,6 +31,7 @@ test("config manager stores model auth secrets through the secrets adapter befor
       getModelConfig: async () => response.modelConfig,
       createSavedModelEntry: async () => response,
       updateSavedModelEntry: async () => response,
+      upsertManagedLocalModelEntry: async () => response,
       removeSavedModelEntry: async () => response,
       setDefaultModelEntry: async () => response,
       replaceFallbackModelEntries: async () => response,

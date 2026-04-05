@@ -258,6 +258,53 @@ test("authenticateModelProvider starts MiniMax China OAuth with an explicit meth
   ]);
 });
 
+test("upsertManagedLocalModelEntry configures an Ollama default without starting interactive auth", async () => {
+  let gatewayApplyMarks = 0;
+  const { coordinator, interactiveCalls, runCalls, getAdapterState } = createCoordinatorTestHarness({
+    markGatewayApplyPending: async () => {
+      gatewayApplyMarks += 1;
+    },
+    buildModelConfigOverview: (_allModels, _configuredModels, _configuredAuthProviders, modelEntries, defaultEntryId, fallbackEntryIds) => ({
+      ...createEmptyModelConfig(),
+      localRuntime: {
+        supported: true,
+        recommendation: "local",
+        supportCode: "supported",
+        status: "ready",
+        runtimeInstalled: true,
+        runtimeReachable: true,
+        modelDownloaded: true,
+        activeInOpenClaw: true,
+        chosenModelKey: "ollama/gemma4:e4b",
+        summary: "Local AI is ready on this Mac.",
+        detail: "ChillClaw connected OpenClaw to the local Ollama runtime."
+      },
+      savedEntries: modelEntries,
+      defaultEntryId,
+      fallbackEntryIds,
+      configuredModelKeys: modelEntries.map((entry) => entry.modelKey),
+      defaultModel: modelEntries.find((entry) => entry.id === defaultEntryId)?.modelKey
+    })
+  });
+
+  const result = await coordinator.upsertManagedLocalModelEntry({
+    label: "Local AI on this Mac",
+    providerId: "ollama",
+    methodId: "ollama-local",
+    modelKey: "ollama/gemma4:e4b",
+    entryId: "managed-ollama-entry"
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.requiresGatewayApply, true);
+  assert.equal(interactiveCalls.length, 0);
+  assert.equal(runCalls.length, 0);
+  assert.equal(gatewayApplyMarks, 1);
+  assert.equal(getAdapterState().defaultModelEntryId, "managed-ollama-entry");
+  assert.equal(getAdapterState().modelEntries?.[0]?.providerId, "ollama");
+  assert.equal(getAdapterState().modelEntries?.[0]?.authMethodId, "ollama-local");
+});
+
 test("removeSavedModelEntry removes a runtime-derived default entry through coordinator-owned runtime cleanup", async () => {
   const configWrites: Array<Record<string, unknown>> = [];
   let pendingMarked = 0;

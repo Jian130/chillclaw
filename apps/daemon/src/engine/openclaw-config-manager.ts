@@ -22,13 +22,21 @@ import type {
 } from "@chillclaw/contracts";
 
 import type { ChannelSetupState } from "@chillclaw/contracts";
-import type { ConfigManager, ManagedSkillInstallRequest, ManagedSkillInstallResult, SkillRuntimeCatalog, SkillRuntimeEntry } from "./adapter.js";
+import type {
+  ConfigManager,
+  ManagedLocalModelEntryRequest,
+  ManagedSkillInstallRequest,
+  ManagedSkillInstallResult,
+  SkillRuntimeCatalog,
+  SkillRuntimeEntry
+} from "./adapter.js";
 import { NoopSecretsAdapter, modelAuthSecretName, type SecretsAdapter } from "../platform/secrets-adapter.js";
 
 type ConfigAccess = {
   getModelConfig: () => Promise<ModelConfigOverview>;
   createSavedModelEntry: (request: SaveModelEntryRequest) => Promise<ModelConfigActionResponse>;
   updateSavedModelEntry: (entryId: string, request: SaveModelEntryRequest) => Promise<ModelConfigActionResponse>;
+  upsertManagedLocalModelEntry: (request: ManagedLocalModelEntryRequest) => Promise<ModelConfigActionResponse>;
   removeSavedModelEntry: (entryId: string) => Promise<ModelConfigActionResponse>;
   setDefaultModelEntry: (request: SetDefaultModelEntryRequest) => Promise<ModelConfigActionResponse>;
   replaceFallbackModelEntries: (request: ReplaceFallbackModelEntriesRequest) => Promise<ModelConfigActionResponse>;
@@ -99,6 +107,10 @@ export class OpenClawConfigManager implements ConfigManager {
   async updateSavedModelEntry(entryId: string, request: SaveModelEntryRequest) {
     await this.persistModelSecrets(request.providerId, request.methodId, request.values);
     return this.access.updateSavedModelEntry(entryId, request);
+  }
+
+  upsertManagedLocalModelEntry(request: ManagedLocalModelEntryRequest) {
+    return this.access.upsertManagedLocalModelEntry(request);
   }
 
   removeSavedModelEntry(entryId: string) {

@@ -398,6 +398,7 @@ export class MockAdapter implements EngineAdapter {
       getModelConfig: () => this.getModelConfig(),
       createSavedModelEntry: (request) => this.createSavedModelEntry(request),
       updateSavedModelEntry: (entryId, request) => this.updateSavedModelEntry(entryId, request),
+      upsertManagedLocalModelEntry: (request) => this.upsertManagedLocalModelEntry(request),
       removeSavedModelEntry: (entryId) => this.removeSavedModelEntry(entryId),
       setDefaultModelEntry: (request) => this.setDefaultModelEntry(request),
       replaceFallbackModelEntries: (request) => this.replaceFallbackModelEntries(request),
@@ -818,6 +819,48 @@ export class MockAdapter implements EngineAdapter {
       ...this.mutationSyncMeta(),
       status: "completed",
       message: "Mock saved model entry created.",
+      modelConfig: await this.getModelConfig(),
+      requiresGatewayApply: true
+    };
+  }
+
+  async upsertManagedLocalModelEntry(request: {
+    label: string;
+    providerId: string;
+    methodId: string;
+    modelKey: string;
+    entryId?: string;
+  }): Promise<ModelConfigActionResponse> {
+    const existing = request.entryId ? this.savedEntries.find((entry) => entry.id === request.entryId) : undefined;
+    const now = new Date().toISOString();
+    const nextEntry = {
+      id: request.entryId ?? existing?.id ?? randomUUID(),
+      label: request.label,
+      providerId: request.providerId,
+      modelKey: request.modelKey,
+      agentId: existing?.agentId ?? "",
+      authMethodId: request.methodId,
+      authModeLabel: "Local runtime",
+      profileLabel: existing?.profileLabel,
+      isDefault: true,
+      isFallback: false,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    };
+
+    this.savedEntries = [
+      ...this.savedEntries.filter((entry) => entry.id !== nextEntry.id).map((entry) => ({
+        ...entry,
+        isDefault: false
+      })),
+      nextEntry
+    ];
+    this.markGatewayApplyPending();
+
+    return {
+      ...this.mutationSyncMeta(),
+      status: "completed",
+      message: "Mock managed local model entry updated.",
       modelConfig: await this.getModelConfig(),
       requiresGatewayApply: true
     };

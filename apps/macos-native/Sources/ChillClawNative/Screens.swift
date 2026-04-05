@@ -3046,6 +3046,8 @@ struct SettingsScreen: View {
     @State private var isRedoingOnboarding = false
     @State private var isCheckingAppUpdate = false
     @State private var isCheckingEngineUpdate = false
+    @State private var isInstallingLocalRuntime = false
+    @State private var isRepairingLocalRuntime = false
     @AppStorage(nativeOnboardingLocaleDefaultsKey) private var selectedLocaleIdentifier = resolveNativeOnboardingLocaleIdentifier()
 
     var body: some View {
@@ -3129,6 +3131,72 @@ struct SettingsScreen: View {
                                 appState.applyBanner(result["message"] ?? "")
                             } catch {
                                 appState.errorMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+            }
+
+            SurfaceCard(title: "Local AI on This Mac", subtitle: "Install or reconnect the managed Ollama runtime and keep OpenClaw pointed at it directly.") {
+                SettingRow(
+                    title: appState.overview?.localRuntime?.summary ?? "Local AI has not been checked yet.",
+                    subtitle: appState.overview?.localRuntime?.detail ?? "Refresh settings to inspect the local runtime state."
+                ) {
+                    StatusBadge(
+                        appState.overview?.localRuntime?.status == "ready"
+                            ? "Ready"
+                            : (appState.overview?.localRuntime?.status == "degraded" || appState.overview?.localRuntime?.status == "failed")
+                                ? "Repair needed"
+                                : (appState.overview?.localRuntime?.recommendation == "local" ? "Available" : "Cloud"),
+                        tone: appState.overview?.localRuntime?.status == "ready"
+                            ? .success
+                            : (appState.overview?.localRuntime?.status == "degraded" || appState.overview?.localRuntime?.status == "failed")
+                                ? .warning
+                                : .neutral
+                    )
+                }
+
+                if let chosenModelKey = appState.overview?.localRuntime?.chosenModelKey, !chosenModelKey.isEmpty {
+                    SettingRow(title: "Connected model", subtitle: chosenModelKey) {
+                        EmptyView()
+                    }
+                }
+
+                if let requiredDiskGb = appState.overview?.localRuntime?.requiredDiskGb {
+                    SettingRow(title: "Storage impact", subtitle: "\(Int(requiredDiskGb.rounded())) GB") {
+                        EmptyView()
+                    }
+                }
+
+                HStack {
+                    if appState.overview?.localRuntime?.supported == true && appState.overview?.localRuntime?.recommendation == "local" {
+                        if appState.overview?.localRuntime?.status == "degraded" || appState.overview?.localRuntime?.status == "failed" {
+                            ActionButton(isRepairingLocalRuntime ? "Repairing..." : "Repair Local AI", variant: .secondary, isBusy: isRepairingLocalRuntime) {
+                                Task {
+                                    isRepairingLocalRuntime = true
+                                    defer { isRepairingLocalRuntime = false }
+                                    do {
+                                        let result = try await appState.client.repairLocalModelRuntime()
+                                        appState.applyBanner(result.message)
+                                        await appState.refreshAll()
+                                    } catch {
+                                        appState.errorMessage = error.localizedDescription
+                                    }
+                                }
+                            }
+                        } else if appState.overview?.localRuntime?.status != "ready" {
+                            ActionButton(isInstallingLocalRuntime ? "Installing..." : "Install Local AI", variant: .outline, isBusy: isInstallingLocalRuntime) {
+                                Task {
+                                    isInstallingLocalRuntime = true
+                                    defer { isInstallingLocalRuntime = false }
+                                    do {
+                                        let result = try await appState.client.installLocalModelRuntime()
+                                        appState.applyBanner(result.message)
+                                        await appState.refreshAll()
+                                    } catch {
+                                        appState.errorMessage = error.localizedDescription
+                                    }
+                                }
                             }
                         }
                     }

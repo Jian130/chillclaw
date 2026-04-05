@@ -18,7 +18,7 @@ import {
   Sparkles,
   Users
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
   AITeamOverview,
@@ -45,7 +45,9 @@ import {
   fetchModelConfig,
   fetchOnboardingState,
   installOnboardingRuntime,
+  installLocalModelRuntime,
   navigateOnboardingStep,
+  repairLocalModelRuntime,
   resetOnboardingChannelDraft,
   resetOnboardingModelDraft,
   reuseOnboardingRuntime,
@@ -87,17 +89,21 @@ import {
   resolveOnboardingChannelSetupVariant,
   resolveOnboardingInstallViewState,
   resolveOnboardingModelPickerProviders,
+  resolveOnboardingLocalSetupProgress,
   resolveOnboardingModelSetupVariant,
+  resolveOnboardingModelStepMode,
   resolveOnboardingModelViewState,
   resolveOnboardingProviderId,
   resolveOnboardingModelProviders,
   resolveOnboardingPresetSkillIds,
   shouldRefreshOnboardingChannelConfig,
   shouldShowOnboardingAuthMethodChooser,
-  type OnboardingInstallProgressSnapshot
+  type OnboardingInstallProgressSnapshot,
+  type OnboardingModelStepMode
 } from "./helpers.js";
 
 const ONBOARDING_STEP_ORDER = ["welcome", "install", "permissions", "model", "channel", "employee"] as const;
+const MODEL_CLOUD_HANDOFF_DELAY_MS = 2_000;
 
 function isCurrentOrLaterStep(step: OnboardingStateResponse["draft"]["currentStep"], target: typeof ONBOARDING_STEP_ORDER[number]) {
   return ONBOARDING_STEP_ORDER.indexOf(step) >= ONBOARDING_STEP_ORDER.indexOf(target);
@@ -220,6 +226,11 @@ export default function OnboardingPage() {
   const [modelSession, setModelSession] = useState<ModelAuthSessionResponse["session"]>();
   const [modelSessionInput, setModelSessionInput] = useState("");
   const [modelBusy, setModelBusy] = useState<"" | "save" | "input">("");
+  const [localRuntimeBusy, setLocalRuntimeBusy] = useState<"" | "install" | "repair">("");
+  const [localRuntimeSnapshot, setLocalRuntimeSnapshot] = useState<ModelConfigOverview["localRuntime"]>();
+  const [localRuntimeMessage, setLocalRuntimeMessage] = useState("");
+  const [modelBootstrapPending, setModelBootstrapPending] = useState(false);
+  const [cloudHandoffComplete, setCloudHandoffComplete] = useState(false);
   const [modelTutorialOpen, setModelTutorialOpen] = useState(false);
 
   const [selectedChannelId, setSelectedChannelId] = useState("");
@@ -353,6 +364,61 @@ export default function OnboardingPage() {
       selectedModelEntry
     ]
   );
+  const localRuntime = localRuntimeSnapshot ?? modelConfig?.localRuntime ?? overview?.localRuntime;
+  const localRuntimeConnected = Boolean(localRuntime?.activeInOpenClaw);
+  const localRuntimeStatusTone =
+    localRuntime?.status === "ready"
+      ? "success"
+      : localRuntime?.status === "degraded" || localRuntime?.status === "failed"
+        ? "warning"
+        : localRuntime?.status === "cloud-recommended"
+          ? "neutral"
+          : "info";
+  const localRuntimeStatusLabel =
+    localRuntime?.status === "ready"
+      ? "Ready"
+      : localRuntime?.status === "degraded" || localRuntime?.status === "failed"
+        ? "Repair needed"
+        : localRuntime?.status === "cloud-recommended"
+          ? "Use cloud setup"
+          : localRuntimeBusy
+            ? "Preparing"
+            : "Available";
+  const localRuntimeStorageLabel = localRuntime?.requiredDiskGb
+    ? copy.localAiStorageLabel.replace("{gb}", String(localRuntime.requiredDiskGb))
+    : undefined;
+  const baseModelStepMode = resolveOnboardingModelStepMode({
+    bootstrapPending: modelBootstrapPending,
+    providerId,
+    selectedProviderPresent: Boolean(selectedProviderPresentation),
+    modelViewKind: modelViewState.kind,
+    activeModelAuthSessionId: currentDraft.activeModelAuthSessionId,
+    draftModelEntryId: currentDraft.model?.entryId,
+    summaryModelEntryId: onboardingState?.summary.model?.entryId,
+    localRuntime
+  });
+  const modelStepMode: OnboardingModelStepMode =
+    baseModelStepMode === "cloud-handoff" && cloudHandoffComplete ? "cloud-config" : baseModelStepMode;
+  const localSetupProgress = resolveOnboardingLocalSetupProgress(modelStepMode, localRuntime?.status);
+  const autoLocalRuntimeAction =
+    modelStepMode === "local-setup" &&
+    localRuntime &&
+    !localRuntimeBusy &&
+    (localRuntime.status === "idle" || localRuntime.status === "degraded" || localRuntime.status === "failed")
+      ? localRuntime.status === "degraded" || localRuntime.status === "failed"
+        ? "repair"
+        : "install"
+      : undefined;
+  const autoLocalRuntimeActionKey = autoLocalRuntimeAction
+    ? `${autoLocalRuntimeAction}:${localRuntime?.status ?? ""}:${localRuntime?.chosenModelKey ?? ""}`
+    : "";
+  const autoLocalRuntimeActionRef = useRef("");
+  const localSetupSteps = [
+    copy.localModelDetectStepLabel,
+    copy.localModelPrepareStepLabel,
+    copy.localModelDownloadStepLabel,
+    copy.localModelConnectStepLabel
+  ];
 
   const selectedBrainEntryId = selectedModelEntry?.id;
   const employeePresets = useMemo(() => resolveOnboardingEmployeePresets(onboardingState), [onboardingState]);
@@ -591,6 +657,7 @@ export default function OnboardingPage() {
         setOverview(event.snapshot.data);
       } else if (event.type === "model-config.updated") {
         setModelConfig(event.snapshot.data);
+        setLocalRuntimeSnapshot(event.snapshot.data.localRuntime);
       } else if (event.type === "channel-config.updated") {
         setChannelConfig(event.snapshot.data);
       } else if (event.type === "channel.session.updated") {
@@ -599,6 +666,15 @@ export default function OnboardingPage() {
         setTeamOverview(event.snapshot.data);
       } else if (event.type === "preset-skill-sync.updated") {
         setOnboardingState((current) => applyPresetSkillSyncToOnboardingState(current, event.snapshot.data));
+      } else if (event.type === "local-runtime.progress" && currentStep === "model") {
+        setLocalRuntimeBusy(event.action);
+        setLocalRuntimeMessage(event.message);
+        setLocalRuntimeSnapshot(event.localRuntime);
+      } else if (event.type === "local-runtime.completed" && currentStep === "model") {
+        setLocalRuntimeBusy("");
+        setLocalRuntimeMessage(event.message);
+        setLocalRuntimeSnapshot(event.localRuntime);
+        void refreshOnboardingState().catch(() => undefined);
       } else if (event.type === "task.progress" && completionWarmupTaskId && event.taskId === completionWarmupTaskId) {
         setCompletionWarmupStatus(event.status);
         setCompletionWarmupMessage(event.message);
@@ -647,6 +723,91 @@ export default function OnboardingPage() {
       setInstallProgress(undefined);
     }
   }, [currentStep]);
+
+  useEffect(() => {
+    if (currentStep !== "model") {
+      setLocalRuntimeBusy("");
+      setLocalRuntimeSnapshot(undefined);
+      setLocalRuntimeMessage("");
+      setModelBootstrapPending(false);
+      setCloudHandoffComplete(false);
+      autoLocalRuntimeActionRef.current = "";
+      return;
+    }
+
+    const shouldBootstrapLocalFirstModel =
+      !currentDraft.activeModelAuthSessionId &&
+      !currentDraft.model?.entryId &&
+      !onboardingState?.summary.model?.entryId &&
+      !providerId &&
+      modelViewState.kind === "picker";
+    if (!shouldBootstrapLocalFirstModel) {
+      setModelBootstrapPending(false);
+      setCloudHandoffComplete(false);
+      return;
+    }
+
+    let cancelled = false;
+    setModelBootstrapPending(true);
+    setCloudHandoffComplete(false);
+    autoLocalRuntimeActionRef.current = "";
+
+    void (async () => {
+      try {
+        const [nextOverview, nextModelConfig] = await Promise.all([readFreshOverview(), readFreshModelConfig()]);
+        if (cancelled) {
+          return;
+        }
+        setLocalRuntimeSnapshot(nextModelConfig.localRuntime ?? nextOverview.localRuntime);
+      } catch (loadError) {
+        if (!cancelled) {
+          setPageError(loadError instanceof Error ? loadError.message : "ChillClaw could not inspect local AI support.");
+        }
+      } finally {
+        if (!cancelled) {
+          setModelBootstrapPending(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentDraft.activeModelAuthSessionId,
+    currentDraft.model?.entryId,
+    currentStep,
+    modelViewState.kind,
+    onboardingState?.summary.model?.entryId,
+    providerId
+  ]);
+
+  useEffect(() => {
+    if (currentStep !== "model" || modelStepMode !== "cloud-handoff" || cloudHandoffComplete) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCloudHandoffComplete(true);
+    }, MODEL_CLOUD_HANDOFF_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [cloudHandoffComplete, currentStep, modelStepMode]);
+
+  useEffect(() => {
+    if (currentStep !== "model" || !autoLocalRuntimeAction || !autoLocalRuntimeActionKey) {
+      return;
+    }
+
+    if (autoLocalRuntimeActionRef.current === autoLocalRuntimeActionKey) {
+      return;
+    }
+
+    autoLocalRuntimeActionRef.current = autoLocalRuntimeActionKey;
+    void handleLocalRuntimeAction(autoLocalRuntimeAction);
+  }, [autoLocalRuntimeAction, autoLocalRuntimeActionKey, currentStep]);
 
   useEffect(() => {
     if (!selectedProviderPresentation || !modelKey) {
@@ -960,6 +1121,31 @@ export default function OnboardingPage() {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not finish installation.");
     } finally {
       setInstallBusy(false);
+    }
+  }
+
+  async function handleLocalRuntimeAction(action: "install" | "repair") {
+    setPageError(undefined);
+    setLocalRuntimeBusy(action);
+    setLocalRuntimeMessage(
+      action === "repair"
+        ? localRuntime?.detail ?? copy.localAiRepairCta
+        : localRuntime?.detail ?? copy.localAiInstallCta
+    );
+    try {
+      const result = action === "repair" ? await repairLocalModelRuntime() : await installLocalModelRuntime();
+      setOverview(result.overview);
+      setModelConfig(result.modelConfig);
+      setLocalRuntimeSnapshot(result.localRuntime);
+      setLocalRuntimeMessage(result.message);
+      const nextOnboarding = await refreshOnboardingState();
+      if (result.status === "completed" && nextOnboarding.summary.model?.entryId) {
+        await goToStep("channel");
+      }
+    } catch (actionError) {
+      setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not prepare local AI on this Mac.");
+    } finally {
+      setLocalRuntimeBusy("");
     }
   }
 
@@ -1381,183 +1567,338 @@ export default function OnboardingPage() {
             ) : null}
 
             {currentStep === "model" ? (
-              <LoadingBlocker
-                active={modelBusy !== ""}
-                label={copy.modelTitle}
-                description={copy.modelBody}
-              >
-                <div className="onboarding-step onboarding-step--model onboarding-step--model-figma">
+              modelStepMode === "detecting-local" || modelStepMode === "cloud-handoff" || modelStepMode === "local-setup" ? (
+                <div className="onboarding-step onboarding-step--model onboarding-step--model-figma onboarding-model-local-flow">
                   <div className="onboarding-step__intro onboarding-step__intro--welcome onboarding-step__intro--model">
-                    <h2>{copy.modelTitle}</h2>
-                    <p>{copy.modelBody}</p>
+                    <h2>{copy.localModelSetupTitle}</h2>
+                    <p>{copy.localModelSetupBody}</p>
                   </div>
 
-                  {modelViewState.kind === "picker" ? (
-                    <div className="onboarding-model-flow onboarding-model-flow--picker">
-                      <div className="onboarding-provider-picker__header">
-                        <p className="onboarding-provider-picker__hint">{copy.providerTitle}</p>
+                  {modelStepMode === "cloud-handoff" ? (
+                    <>
+                      <div className="onboarding-install-status onboarding-install-status--warning onboarding-model-cloud-handoff">
+                        <div className="onboarding-install-status__icon">
+                          <AlertCircle size={28} />
+                        </div>
+                        <div className="onboarding-install-status__copy">
+                          <strong>{copy.localModelUnsupportedTitle}</strong>
+                          <p>{copy.localModelUnsupportedBody}</p>
+                          <p className="onboarding-model-cloud-handoff__detail">{copy.localModelUnsupportedCloudBody}</p>
+                        </div>
                       </div>
-                      <div className="onboarding-provider-grid">
-                        {modelPickerProviders.map((providerOption) => (
-                          <button
-                            className={`onboarding-select-card onboarding-select-card--provider onboarding-select-card--provider-figma ${onboardingProviderThemeClass(providerOption.theme)}`}
-                            key={providerOption.id}
-                            onClick={() => {
-                              setProviderId(providerOption.id);
-                              setMethodId(providerOption.authMethods[0]?.id ?? "");
-                              setModelKey(providerOption.defaultModelKey);
-                              setModelLabel(providerOption.label);
-                              setModelValues({});
-                              setPageError(undefined);
-                              setModelSession(undefined);
-                              setModelSessionInput("");
-                            }}
-                            type="button"
-                          >
-                            <div className="onboarding-provider-mark onboarding-provider-mark--figma">
-                              <Brain size={22} />
-                            </div>
-                            <div className="onboarding-provider-copy onboarding-provider-copy--figma">
-                              <strong>{providerOption.label}</strong>
-                            </div>
-                            <ArrowRight className="onboarding-provider-arrow" size={18} />
-                          </button>
-                        ))}
+                      <p className="onboarding-model-cloud-handoff__countdown">{copy.localModelCloudFallbackCountdown}</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="onboarding-model-local-hero">
+                        <div className="onboarding-model-local-hero__icon">
+                          <Server size={52} />
+                          <LoaderCircle className="onboarding-model-local-hero__spinner" size={24} />
+                        </div>
+                        <div className="onboarding-model-local-hero__copy">
+                          <strong>
+                            {modelStepMode === "detecting-local"
+                              ? copy.localModelDetectingTitle
+                              : localRuntime?.summary ?? copy.localModelDetectingTitle}
+                          </strong>
+                          <p>
+                            {modelStepMode === "detecting-local"
+                              ? copy.localModelDetectingBody
+                              : localRuntimeMessage || localRuntime?.detail || copy.localModelDetectingBody}
+                          </p>
+                        </div>
+                        {localRuntimeStorageLabel && modelStepMode === "local-setup" ? (
+                          <TagBadge tone="neutral">
+                            <Download size={14} />
+                            {localRuntimeStorageLabel}
+                          </TagBadge>
+                        ) : null}
                       </div>
+
+                      <div className="onboarding-model-local-progress">
+                        {localSetupSteps.map((label, index) => {
+                          const stepNumber = index + 1;
+                          const state =
+                            stepNumber < localSetupProgress.currentStep
+                              ? "complete"
+                              : stepNumber === localSetupProgress.currentStep
+                                ? "active"
+                                : "pending";
+
+                          return (
+                            <div
+                              className={`onboarding-model-local-progress__step onboarding-model-local-progress__step--${state}`}
+                              key={label}
+                            >
+                              <div className="onboarding-model-local-progress__badge">
+                                {state === "complete" ? (
+                                  <CheckCircle2 size={18} />
+                                ) : state === "active" ? (
+                                  <LoaderCircle className="onboarding-inline-spinner" size={18} />
+                                ) : (
+                                  <span>{stepNumber}</span>
+                                )}
+                              </div>
+                              <div className="onboarding-model-local-progress__copy">
+                                <strong>{label}</strong>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {localRuntime && (localRuntime.status === "failed" || localRuntime.status === "degraded") ? (
+                        <div className="onboarding-inline-note onboarding-inline-note--warning">
+                          <strong>{copy.localAiRepairCta}</strong>
+                          <span>{localRuntimeMessage || localRuntime.detail}</span>
+                        </div>
+                      ) : null}
+
                       <div className="onboarding-model-actions onboarding-model-actions--picker">
                         <button className="onboarding-install-back" onClick={() => void goToStep("permissions")} type="button">
                           {common.back}
                         </button>
+                        {localRuntime && (localRuntime.status === "failed" || localRuntime.status === "degraded") ? (
+                          <Button
+                            fullWidth
+                            loading={localRuntimeBusy !== ""}
+                            onClick={() => void handleLocalRuntimeAction("repair")}
+                          >
+                            {copy.localAiRepairCta}
+                          </Button>
+                        ) : null}
                       </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <LoadingBlocker
+                  active={modelBusy !== ""}
+                  label={copy.modelTitle}
+                  description={copy.modelBody}
+                >
+                  <div className="onboarding-step onboarding-step--model onboarding-step--model-figma">
+                    <div className="onboarding-step__intro onboarding-step__intro--welcome onboarding-step__intro--model">
+                      <h2>{copy.modelTitle}</h2>
+                      <p>{copy.modelBody}</p>
                     </div>
-                  ) : selectedProviderPresentation ? (
-                    <div className={`onboarding-model-flow onboarding-model-flow--${modelViewState.kind}`}>
-                      <div className={`onboarding-model-provider-banner ${onboardingProviderThemeClass(selectedProviderPresentation.theme)}`}>
-                        <div className="onboarding-provider-mark onboarding-provider-mark--figma onboarding-provider-mark--banner">
-                          <Brain size={22} />
-                        </div>
-                        <strong>{selectedProviderPresentation.label}</strong>
-                      </div>
 
-                      {modelViewState.kind === "configure" ? (
-                        <>
-                          {shouldShowAuthMethodChooser ? (
-                            <div className="onboarding-model-connect">
-                              <h3>{copy.authTitle}</h3>
-                              <div
-                                className="onboarding-auth-method-grid"
-                                style={authMethodGridStyle}
-                                role="group"
-                                aria-label={copy.authTitle}
-                              >
-                                {selectedAuthMethods.map((method) => (
-                                  <button
-                                    type="button"
-                                    key={method.id}
-                                    className={`onboarding-auth-method-card onboarding-auth-method-card--figma ${
-                                      methodId === method.id ? "onboarding-auth-method-card--active" : ""
-                                    }`}
-                                    onClick={() => {
-                                      setMethodId(method.id);
-                                      setPageError(undefined);
-                                      setModelSession(undefined);
-                                      setModelSessionInput("");
-                                    }}
-                                  >
-                                    <div className="onboarding-auth-method-card__icon">{onboardingAuthMethodIcon(method)}</div>
-                                    <strong>{onboardingAuthMethodLabel(copy, method)}</strong>
-                                    <p>{onboardingAuthMethodBody(copy, method)}</p>
-                                  </button>
-                                ))}
+                    {localRuntimeConnected ? (
+                      <Card>
+                        <CardContent className="panel-stack">
+                          <div className="actions-row" style={{ justifyContent: "space-between", alignItems: "start" }}>
+                            <div className="panel-stack" style={{ gap: 8 }}>
+                              <div className="actions-row" style={{ gap: 8, alignItems: "center" }}>
+                                <Server size={18} />
+                                <strong>{copy.localAiTitle}</strong>
                               </div>
+                              <p className="card__description">{localRuntime?.summary}</p>
+                              <p className="card__description">{localRuntimeMessage || localRuntime?.detail}</p>
                             </div>
+                            <StatusBadge tone={localRuntimeStatusTone}>{localRuntimeStatusLabel}</StatusBadge>
+                          </div>
+                          {localRuntimeStorageLabel ? (
+                            <TagBadge tone="neutral">
+                              <Download size={14} />
+                              {localRuntimeStorageLabel}
+                            </TagBadge>
                           ) : null}
+                          <div className="actions-row">
+                            <Button fullWidth size="lg" onClick={() => void handleAdvanceToChannel()}>
+                              {common.continue}
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : modelViewState.kind === "picker" ? (
+                      <div className="onboarding-model-flow onboarding-model-flow--picker">
+                        <div className="onboarding-provider-picker__header">
+                          <p className="onboarding-provider-picker__hint">{copy.providerTitle}</p>
+                        </div>
+                        <div className="onboarding-provider-grid">
+                          {modelPickerProviders.map((providerOption) => (
+                            <button
+                              className={`onboarding-select-card onboarding-select-card--provider onboarding-select-card--provider-figma ${onboardingProviderThemeClass(providerOption.theme)}`}
+                              key={providerOption.id}
+                              onClick={() => {
+                                setProviderId(providerOption.id);
+                                setMethodId(providerOption.authMethods[0]?.id ?? "");
+                                setModelKey(providerOption.defaultModelKey);
+                                setModelLabel(providerOption.label);
+                                setModelValues({});
+                                setPageError(undefined);
+                                setModelSession(undefined);
+                                setModelSessionInput("");
+                              }}
+                              type="button"
+                            >
+                              <div className="onboarding-provider-mark onboarding-provider-mark--figma">
+                                <Brain size={22} />
+                              </div>
+                              <div className="onboarding-provider-copy onboarding-provider-copy--figma">
+                                <strong>{providerOption.label}</strong>
+                              </div>
+                              <ArrowRight className="onboarding-provider-arrow" size={18} />
+                            </button>
+                          ))}
+                        </div>
+                        <div className="onboarding-model-actions onboarding-model-actions--picker">
+                          <button className="onboarding-install-back" onClick={() => void goToStep("permissions")} type="button">
+                            {common.back}
+                          </button>
+                        </div>
+                      </div>
+                    ) : selectedProviderPresentation ? (
+                      <div className={`onboarding-model-flow onboarding-model-flow--${modelViewState.kind}`}>
+                        <div className={`onboarding-model-provider-banner ${onboardingProviderThemeClass(selectedProviderPresentation.theme)}`}>
+                          <div className="onboarding-provider-mark onboarding-provider-mark--figma onboarding-provider-mark--banner">
+                            <Brain size={22} />
+                          </div>
+                          <strong>{selectedProviderPresentation.label}</strong>
+                        </div>
 
-                          {selectedSetupVariant === "oauth" ? (
-                            <div className="onboarding-model-form">
-                              {modelSession?.message ? <p className="onboarding-model-input-help">{modelSession.message}</p> : null}
-                              {modelSession?.launchUrl ? (
-                                <Button
-                                  variant="outline"
-                                  fullWidth
-                                  onClick={() => window.open(modelSession.launchUrl, "_blank", "noopener,noreferrer")}
+                        {modelViewState.kind === "configure" ? (
+                          <>
+                            {shouldShowAuthMethodChooser ? (
+                              <div className="onboarding-model-connect">
+                                <h3>{copy.authTitle}</h3>
+                                <div
+                                  className="onboarding-auth-method-grid"
+                                  style={authMethodGridStyle}
+                                  role="group"
+                                  aria-label={copy.authTitle}
                                 >
-                                  <ExternalLink size={16} />
-                                  {copy.openAuthWindow}
-                                </Button>
-                              ) : null}
-                              {modelSession?.status === "awaiting-input" ? (
-                                <>
-                                  <div className="onboarding-model-field">
-                                    <FieldLabel htmlFor="onboarding-model-session-input">
-                                      {modelSession.inputPrompt ?? copy.submitAuthInput}
-                                    </FieldLabel>
-                                    <Input
-                                      id="onboarding-model-session-input"
-                                      value={modelSessionInput}
-                                      onChange={(event) => setModelSessionInput(event.target.value)}
-                                      placeholder={modelSession.inputPrompt ?? copy.submitAuthInput}
-                                    />
-                                  </div>
+                                  {selectedAuthMethods.map((method) => (
+                                    <button
+                                      type="button"
+                                      key={method.id}
+                                      className={`onboarding-auth-method-card onboarding-auth-method-card--figma ${
+                                        methodId === method.id ? "onboarding-auth-method-card--active" : ""
+                                      }`}
+                                      onClick={() => {
+                                        setMethodId(method.id);
+                                        setPageError(undefined);
+                                        setModelSession(undefined);
+                                        setModelSessionInput("");
+                                      }}
+                                    >
+                                      <div className="onboarding-auth-method-card__icon">{onboardingAuthMethodIcon(method)}</div>
+                                      <strong>{onboardingAuthMethodLabel(copy, method)}</strong>
+                                      <p>{onboardingAuthMethodBody(copy, method)}</p>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {selectedSetupVariant === "oauth" ? (
+                              <div className="onboarding-model-form">
+                                {modelSession?.message ? <p className="onboarding-model-input-help">{modelSession.message}</p> : null}
+                                {modelSession?.launchUrl ? (
                                   <Button
+                                    variant="outline"
                                     fullWidth
-                                    loading={modelBusy === "input"}
-                                    onClick={() => void handleModelSessionInput()}
-                                    disabled={!modelSessionInput.trim()}
+                                    onClick={() => window.open(modelSession.launchUrl, "_blank", "noopener,noreferrer")}
                                   >
-                                    {copy.submitAuthInput}
+                                    <ExternalLink size={16} />
+                                    {copy.openAuthWindow}
                                   </Button>
-                                </>
-                              ) : null}
-                            </div>
-                          ) : selectedSetupVariant === "guided-minimax-api-key" ? (
-                            <div className="onboarding-model-guided">
-                              <div className="onboarding-model-guide-card onboarding-model-guide-card--tutorial">
-                                <div className="onboarding-model-guide-card__header">
-                                  <div className="onboarding-model-guide-step onboarding-model-guide-step--tutorial">1</div>
-                                  <div className="onboarding-model-guide-card__copy">
-                                    <strong>{copy.minimaxTutorialTitle}</strong>
-                                    <p>{copy.minimaxTutorialBody}</p>
+                                ) : null}
+                                {modelSession?.status === "awaiting-input" ? (
+                                  <>
+                                    <div className="onboarding-model-field">
+                                      <FieldLabel htmlFor="onboarding-model-session-input">
+                                        {modelSession.inputPrompt ?? copy.submitAuthInput}
+                                      </FieldLabel>
+                                      <Input
+                                        id="onboarding-model-session-input"
+                                        value={modelSessionInput}
+                                        onChange={(event) => setModelSessionInput(event.target.value)}
+                                        placeholder={modelSession.inputPrompt ?? copy.submitAuthInput}
+                                      />
+                                    </div>
+                                    <Button
+                                      fullWidth
+                                      loading={modelBusy === "input"}
+                                      onClick={() => void handleModelSessionInput()}
+                                      disabled={!modelSessionInput.trim()}
+                                    >
+                                      {copy.submitAuthInput}
+                                    </Button>
+                                  </>
+                                ) : null}
+                              </div>
+                            ) : selectedSetupVariant === "guided-minimax-api-key" ? (
+                              <div className="onboarding-model-guided">
+                                <div className="onboarding-model-guide-card onboarding-model-guide-card--tutorial">
+                                  <div className="onboarding-model-guide-card__header">
+                                    <div className="onboarding-model-guide-step onboarding-model-guide-step--tutorial">1</div>
+                                    <div className="onboarding-model-guide-card__copy">
+                                      <strong>{copy.minimaxTutorialTitle}</strong>
+                                      <p>{copy.minimaxTutorialBody}</p>
+                                    </div>
+                                    <button
+                                      className="onboarding-model-guide-play"
+                                      onClick={() => setModelTutorialOpen(true)}
+                                      type="button"
+                                      aria-label={copy.minimaxTutorialTitle}
+                                    >
+                                      <PlayCircle size={32} />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="onboarding-model-guide-card onboarding-model-guide-card--get-key">
+                                  <div className="onboarding-model-guide-card__header onboarding-model-guide-card__header--stacked">
+                                    <div className="onboarding-model-guide-step onboarding-model-guide-step--get-key">2</div>
+                                    <div className="onboarding-model-guide-card__copy">
+                                      <strong>{copy.minimaxGetKeyTitle}</strong>
+                                      <p>{copy.minimaxGetKeyBody}</p>
+                                    </div>
                                   </div>
                                   <button
-                                    className="onboarding-model-guide-play"
-                                    onClick={() => setModelTutorialOpen(true)}
+                                    className="onboarding-model-guide-cta"
+                                    onClick={() => window.open(selectedProviderPresentation.platformUrl, "_blank", "noopener,noreferrer")}
                                     type="button"
-                                    aria-label={copy.minimaxTutorialTitle}
                                   >
-                                    <PlayCircle size={32} />
+                                    <ExternalLink size={18} />
+                                    {copy.minimaxGetKeyCTA}
+                                    <ArrowRight size={18} />
                                   </button>
                                 </div>
-                              </div>
 
-                              <div className="onboarding-model-guide-card onboarding-model-guide-card--get-key">
-                                <div className="onboarding-model-guide-card__header onboarding-model-guide-card__header--stacked">
-                                  <div className="onboarding-model-guide-step onboarding-model-guide-step--get-key">2</div>
-                                  <div className="onboarding-model-guide-card__copy">
-                                    <strong>{copy.minimaxGetKeyTitle}</strong>
-                                    <p>{copy.minimaxGetKeyBody}</p>
+                                <div className="onboarding-model-guide-card onboarding-model-guide-card--input">
+                                  <div className="onboarding-model-guide-card__header onboarding-model-guide-card__header--stacked">
+                                    <div className="onboarding-model-guide-step onboarding-model-guide-step--input">3</div>
+                                    <div className="onboarding-model-guide-card__copy">
+                                      <strong>{copy.minimaxEnterKeyTitle}</strong>
+                                      <p>{copy.minimaxEnterKeyBody}</p>
+                                    </div>
+                                  </div>
+                                  <div className="onboarding-model-field onboarding-model-field--guided">
+                                    {(selectedMethod?.fields ?? []).map((field, index) => (
+                                      <Input
+                                        key={field.id}
+                                        id={index === 0 ? "onboarding-model-api-key" : `onboarding-model-api-key-${field.id}`}
+                                        type={field.secret ? "password" : "text"}
+                                        value={onboardingFieldValue(modelValues, field.id)}
+                                        onChange={(event) =>
+                                          setModelValues((current) => ({
+                                            ...current,
+                                            [field.id]: event.target.value
+                                          }))
+                                        }
+                                        placeholder={field.placeholder ?? copy.modelApiKeyPlaceholder}
+                                      />
+                                    ))}
+                                    <p className="onboarding-model-input-help onboarding-model-input-help--guided">{copy.modelApiKeyHelp}</p>
                                   </div>
                                 </div>
-                                <button
-                                  className="onboarding-model-guide-cta"
-                                  onClick={() => window.open(selectedProviderPresentation.platformUrl, "_blank", "noopener,noreferrer")}
-                                  type="button"
-                                >
-                                  <ExternalLink size={18} />
-                                  {copy.minimaxGetKeyCTA}
-                                  <ArrowRight size={18} />
-                                </button>
                               </div>
-
-                              <div className="onboarding-model-guide-card onboarding-model-guide-card--input">
-                                <div className="onboarding-model-guide-card__header onboarding-model-guide-card__header--stacked">
-                                  <div className="onboarding-model-guide-step onboarding-model-guide-step--input">3</div>
-                                  <div className="onboarding-model-guide-card__copy">
-                                    <strong>{copy.minimaxEnterKeyTitle}</strong>
-                                    <p>{copy.minimaxEnterKeyBody}</p>
-                                  </div>
-                                </div>
-                                <div className="onboarding-model-field onboarding-model-field--guided">
+                            ) : (
+                              <div className="onboarding-model-form">
+                                <div className="onboarding-model-field">
+                                  <FieldLabel htmlFor="onboarding-model-api-key">{copy.modelApiKeyTitle}</FieldLabel>
                                   {(selectedMethod?.fields ?? []).map((field, index) => (
                                     <Input
                                       key={field.id}
@@ -1573,46 +1914,23 @@ export default function OnboardingPage() {
                                       placeholder={field.placeholder ?? copy.modelApiKeyPlaceholder}
                                     />
                                   ))}
-                                  <p className="onboarding-model-input-help onboarding-model-input-help--guided">{copy.modelApiKeyHelp}</p>
+                                  <p className="onboarding-model-input-help">{copy.modelApiKeyHelp}</p>
                                 </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="onboarding-model-form">
-                              <div className="onboarding-model-field">
-                                <FieldLabel htmlFor="onboarding-model-api-key">{copy.modelApiKeyTitle}</FieldLabel>
-                                {(selectedMethod?.fields ?? []).map((field, index) => (
-                                  <Input
-                                    key={field.id}
-                                    id={index === 0 ? "onboarding-model-api-key" : `onboarding-model-api-key-${field.id}`}
-                                    type={field.secret ? "password" : "text"}
-                                    value={onboardingFieldValue(modelValues, field.id)}
-                                    onChange={(event) =>
-                                      setModelValues((current) => ({
-                                        ...current,
-                                        [field.id]: event.target.value
-                                      }))
-                                    }
-                                    placeholder={field.placeholder ?? copy.modelApiKeyPlaceholder}
-                                  />
-                                ))}
-                                <p className="onboarding-model-input-help">{copy.modelApiKeyHelp}</p>
-                              </div>
 
-                              {selectedProviderPresentation.platformUrl ? (
-                                <Button
-                                  variant="outline"
-                                  fullWidth
-                                  onClick={() => window.open(selectedProviderPresentation.platformUrl, "_blank", "noopener,noreferrer")}
-                                >
-                                  <ExternalLink size={16} />
-                                  {copy.modelGetApiKey}
-                                </Button>
-                              ) : null}
-                            </div>
-                          )}
+                                {selectedProviderPresentation.platformUrl ? (
+                                  <Button
+                                    variant="outline"
+                                    fullWidth
+                                    onClick={() => window.open(selectedProviderPresentation.platformUrl, "_blank", "noopener,noreferrer")}
+                                  >
+                                    <ExternalLink size={16} />
+                                    {copy.modelGetApiKey}
+                                  </Button>
+                                ) : null}
+                              </div>
+                            )}
 
-                          <div className="onboarding-model-actions">
+                            <div className="onboarding-model-actions">
                               <Button variant="outline" fullWidth onClick={() => void handleReturnToModelPicker()}>
                                 {common.back}
                               </Button>
@@ -1623,32 +1941,33 @@ export default function OnboardingPage() {
                                 disabled={!selectedProviderPresentation || !selectedMethod || !modelKey.trim() || requiredModelFieldsMissing(selectedMethod, modelValues)}
                                 loading={modelBusy === "save"}
                               >
-                              {copy.modelSave}
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="onboarding-model-success">
-                            <div className="onboarding-model-success__icon">
-                              <CheckCircle2 size={28} />
+                                {copy.modelSave}
+                              </Button>
                             </div>
-                            <div>
-                              <strong>{copy.modelConnectedTitle}</strong>
-                              <p>{copy.modelConnectedBody.replace("{provider}", selectedProviderPresentation.label)}</p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="onboarding-model-success">
+                              <div className="onboarding-model-success__icon">
+                                <CheckCircle2 size={28} />
+                              </div>
+                              <div>
+                                <strong>{copy.modelConnectedTitle}</strong>
+                                <p>{copy.modelConnectedBody.replace("{provider}", selectedProviderPresentation.label)}</p>
+                              </div>
                             </div>
-                          </div>
-                          <div className="onboarding-model-actions onboarding-model-actions--connected">
-                            <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToChannel()}>
-                              {common.next}
-                            </Button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </LoadingBlocker>
+                            <div className="onboarding-model-actions onboarding-model-actions--connected">
+                              <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToChannel()}>
+                                {common.continue}
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </LoadingBlocker>
+              )
             ) : null}
 
             {currentStep === "channel" ? (

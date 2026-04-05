@@ -161,12 +161,17 @@ final class NativeOnboardingViewModel {
     private let daemonEventStreamFactory: DaemonEventStreamFactory
     private let openURL: URLOpener
     private var modelSessionTask: Task<Void, Never>?
+    private var modelBootstrapTask: Task<Void, Never>?
+    private var modelCloudHandoffTask: Task<Void, Never>?
     private var channelSessionTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var daemonEventTask: Task<Void, Never>?
     private var installProgressAnimationTask: Task<Void, Never>?
     private var employeeDraftAutosaveRevision = 0
     private var isApplyingDraft = false
+    private var modelStepBootstrapCompleted = false
+    private var autoLocalRuntimeActionKey = ""
+    private var shouldAutoAdvanceAfterLocalSetup = false
 
     var selectedLocaleIdentifier = resolveNativeOnboardingLocaleIdentifier()
 
@@ -210,6 +215,11 @@ final class NativeOnboardingViewModel {
     var modelSessionInput = ""
     var isModelTutorialPresented = false
     var modelTutorialURLString: String?
+    var localRuntimeBusy = ""
+    var localRuntimeSnapshot: LocalModelRuntimeOverview?
+    var localRuntimeMessage = ""
+    var modelBootstrapPending = false
+    var cloudHandoffComplete = false
     var isChannelTutorialPresented = false
     var channelTutorialURLString: String?
 
@@ -282,6 +292,10 @@ final class NativeOnboardingViewModel {
         curatedModelProviders.first(where: { $0.id == providerId })
     }
 
+    var localRuntime: LocalModelRuntimeOverview? {
+        appState.modelConfig?.localRuntime ?? appState.overview?.localRuntime ?? localRuntimeSnapshot
+    }
+
     var modelViewState: NativeOnboardingModelViewState {
         resolveNativeOnboardingModelViewState(
             providerId: providerId,
@@ -293,6 +307,68 @@ final class NativeOnboardingViewModel {
             summaryEntryID: onboardingState?.summary.model?.entryId,
             activeModelAuthSessionId: currentDraft.activeModelAuthSessionId
         )
+    }
+
+    var modelStepMode: NativeOnboardingModelStepMode {
+        let baseMode = resolveNativeOnboardingModelStepMode(
+            bootstrapPending: modelBootstrapPending,
+            providerId: providerId,
+            selectedProviderPresent: selectedProviderOption != nil,
+            modelViewKind: modelViewState.kind,
+            activeModelAuthSessionId: currentDraft.activeModelAuthSessionId,
+            draftModelEntryID: currentDraft.model?.entryId,
+            summaryModelEntryID: onboardingState?.summary.model?.entryId,
+            localRuntime: localRuntime
+        )
+
+        if baseMode == .cloudHandoff, cloudHandoffComplete {
+            return .cloudConfig
+        }
+
+        return baseMode
+    }
+
+    var localRuntimeConnected: Bool {
+        localRuntime?.activeInOpenClaw == true
+    }
+
+    var localRuntimeStatusTone: NativeStatusTone {
+        switch localRuntime?.status {
+        case "ready":
+            return .success
+        case "degraded", "failed":
+            return .warning
+        case "cloud-recommended":
+            return .neutral
+        default:
+            return .info
+        }
+    }
+
+    var localRuntimeStatusLabel: String {
+        switch localRuntime?.status {
+        case "ready":
+            return "Ready"
+        case "degraded", "failed":
+            return "Repair needed"
+        case "cloud-recommended":
+            return "Use cloud setup"
+        default:
+            return localRuntimeBusy.isEmpty ? "Available" : "Preparing"
+        }
+    }
+
+    var localSetupProgress: NativeOnboardingLocalSetupProgress {
+        resolveNativeOnboardingLocalSetupProgress(mode: modelStepMode, status: localRuntime?.status)
+    }
+
+    var localSetupStepLabels: [String] {
+        [
+            copy.localModelDetectStepLabel,
+            copy.localModelPrepareStepLabel,
+            copy.localModelDownloadStepLabel,
+            copy.localModelConnectStepLabel,
+        ]
     }
 
     var selectedCuratedProvider: OnboardingModelProviderPresentation? {
@@ -423,6 +499,7 @@ final class NativeOnboardingViewModel {
         clearCompletionWarmupState()
         onboardingState = state
         applyDraft(state.draft)
+        synchronizeModelStepFlow()
     }
 
     private func stageExistingInstall() async throws {
@@ -635,6 +712,9 @@ final class NativeOnboardingViewModel {
 
             appState.applyBanner(result.message)
         } catch {
+            if await recoverOnboardingInstallAfterTimeout(error) {
+                return
+            }
             presentErrorUnlessCancelled(error)
         }
     }
@@ -704,6 +784,9 @@ final class NativeOnboardingViewModel {
                 applyOnboardingState(onboarding)
             }
         } catch {
+            if await recoverOnboardingInstallAfterTimeout(error) {
+                return
+            }
             presentErrorUnlessCancelled(error)
         }
     }
@@ -1441,6 +1524,12 @@ final class NativeOnboardingViewModel {
         return modelConfig
     }
 
+    private func refreshOnboardingState() async throws -> OnboardingStateResponse {
+        let state = try await appState.client.fetchOnboardingState(fresh: true)
+        applyOnboardingState(state)
+        return state
+    }
+
     private func readFreshChannelConfig() async throws -> ChannelConfigOverview {
         let channelConfig = try await appState.client.fetchChannelConfig()
         appState.channelConfig = channelConfig
@@ -1451,6 +1540,263 @@ final class NativeOnboardingViewModel {
         let overview = try await appState.client.fetchAITeamOverview()
         appState.aiTeamOverview = overview
         return overview
+    }
+
+    private func shouldBootstrapLocalFirstModelFlow() -> Bool {
+        currentStep == .model &&
+            (currentDraft.activeModelAuthSessionId ?? "").isEmpty &&
+            currentDraft.model?.entryId == nil &&
+            onboardingState?.summary.model?.entryId == nil &&
+            localRuntime?.activeInOpenClaw != true &&
+            providerId.isEmpty &&
+            modelViewState.kind == .picker
+    }
+
+    private func resetModelStepFlowState() {
+        modelBootstrapTask?.cancel()
+        modelBootstrapTask = nil
+        modelCloudHandoffTask?.cancel()
+        modelCloudHandoffTask = nil
+        localRuntimeBusy = ""
+        localRuntimeSnapshot = nil
+        localRuntimeMessage = ""
+        modelBootstrapPending = false
+        cloudHandoffComplete = false
+        modelStepBootstrapCompleted = false
+        autoLocalRuntimeActionKey = ""
+        shouldAutoAdvanceAfterLocalSetup = false
+    }
+
+    private func synchronizeModelStepFlow() {
+        guard currentStep == .model else {
+            resetModelStepFlowState()
+            return
+        }
+
+        if shouldBootstrapLocalFirstModelFlow() && !modelStepBootstrapCompleted && !modelBootstrapPending && modelBootstrapTask == nil {
+            modelBootstrapPending = true
+            cloudHandoffComplete = false
+            autoLocalRuntimeActionKey = ""
+
+            modelBootstrapTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer {
+                    self.modelBootstrapTask = nil
+                    if self.currentStep == .model {
+                        self.modelBootstrapPending = false
+                        self.modelStepBootstrapCompleted = true
+                        self.synchronizeModelStepFlow()
+                    }
+                }
+
+                do {
+                    // Keep the local-first model bootstrap serialized on macOS.
+                    // Running both fresh reads concurrently here has triggered native aborts
+                    // during the detection screen, while the UI only needs both results before continuing.
+                    let nextOverview = try await self.readFreshOverview()
+                    let nextModelConfig = try await self.readFreshModelConfig()
+                    self.localRuntimeSnapshot = nextModelConfig.localRuntime ?? nextOverview.localRuntime
+                    self.pageError = nil
+                } catch {
+                    if error is CancellationError {
+                        return
+                    }
+                    self.presentErrorUnlessCancelled(error)
+                }
+            }
+        }
+
+        if modelStepMode == .cloudHandoff, !cloudHandoffComplete {
+            if modelCloudHandoffTask == nil {
+                modelCloudHandoffTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    try? await Task.sleep(nanoseconds: nativeOnboardingModelCloudHandoffDelayNanoseconds)
+                    guard !Task.isCancelled else { return }
+                    self.cloudHandoffComplete = true
+                    self.modelCloudHandoffTask = nil
+                    self.synchronizeModelStepFlow()
+                }
+            }
+        } else {
+            modelCloudHandoffTask?.cancel()
+            modelCloudHandoffTask = nil
+        }
+
+        if shouldAutoAdvanceAfterLocalSetup,
+           localRuntimeConnected,
+           currentDraft.model?.entryId != nil || onboardingState?.summary.model?.entryId != nil
+        {
+            shouldAutoAdvanceAfterLocalSetup = false
+            Task { @MainActor [weak self] in
+                await self?.goToStep(.channel)
+            }
+            return
+        }
+
+        guard modelStepMode == .localSetup, let localRuntime else { return }
+
+        let action: String?
+        switch localRuntime.status {
+        case "degraded", "failed":
+            action = "repair"
+        case "idle":
+            action = "install"
+        default:
+            action = nil
+        }
+
+        guard let action else { return }
+        let actionKey = "\(action):\(localRuntime.status):\(localRuntime.chosenModelKey ?? "")"
+        guard autoLocalRuntimeActionKey != actionKey else { return }
+
+        autoLocalRuntimeActionKey = actionKey
+        shouldAutoAdvanceAfterLocalSetup = true
+        Task { @MainActor [weak self] in
+            await self?.handleLocalRuntimeAction(action)
+        }
+    }
+
+    private func handleLocalRuntimeAction(_ action: String) async {
+        pageError = nil
+        localRuntimeBusy = action
+        localRuntimeMessage = localRuntime?.detail ?? (action == "repair" ? copy.localModelPrepareStepLabel : copy.localModelSetupBody)
+
+        do {
+            let result =
+                action == "repair"
+                ? try await appState.client.repairLocalModelRuntime()
+                : try await appState.client.installLocalModelRuntime()
+            appState.overview = result.overview
+            appState.modelConfig = result.modelConfig
+            localRuntimeSnapshot = result.localRuntime
+            localRuntimeMessage = result.message
+            let nextOnboarding = try await refreshOnboardingState()
+            if result.status == "completed",
+               nextOnboarding.draft.currentStep == .model,
+               nextOnboarding.summary.model?.entryId != nil
+            {
+                await goToStep(.channel)
+            }
+        } catch {
+            if await recoverLocalRuntimeActionAfterTimeout(error) {
+                localRuntimeBusy = ""
+                synchronizeModelStepFlow()
+                return
+            }
+            presentErrorUnlessCancelled(error)
+        }
+
+        localRuntimeBusy = ""
+        synchronizeModelStepFlow()
+    }
+
+    private func localRuntimeStatusShowsActiveOrCompletedSetup(_ status: String?) -> Bool {
+        switch status {
+        case "installing-runtime", "downloading-model", "starting-runtime", "configuring-openclaw", "ready":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func syncLocalRuntimeState(_ localRuntime: LocalModelRuntimeOverview, message: String?) {
+        localRuntimeSnapshot = localRuntime
+
+        if var overview = appState.overview {
+            overview.localRuntime = localRuntime
+            appState.overview = overview
+        }
+
+        if var modelConfig = appState.modelConfig {
+            modelConfig.localRuntime = localRuntime
+            appState.modelConfig = modelConfig
+        }
+
+        if let message {
+            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                localRuntimeMessage = trimmed
+            }
+        }
+    }
+
+    private func recoverLocalRuntimeActionAfterTimeout(_ error: Error) async -> Bool {
+        guard isRecoverableOnboardingCompletionTimeout(error) else {
+            return false
+        }
+
+        if localRuntimeStatusShowsActiveOrCompletedSetup(localRuntime?.status) {
+            pageError = nil
+            if localRuntime?.status == "ready" {
+                _ = try? await refreshOnboardingState()
+            }
+            return true
+        }
+
+        for attempt in 0..<6 {
+            if let modelConfig = try? await readFreshModelConfig(),
+               let refreshedLocalRuntime = modelConfig.localRuntime,
+               localRuntimeStatusShowsActiveOrCompletedSetup(refreshedLocalRuntime.status)
+            {
+                syncLocalRuntimeState(refreshedLocalRuntime, message: nil)
+                pageError = nil
+                if refreshedLocalRuntime.status == "ready" {
+                    _ = try? await refreshOnboardingState()
+                }
+                return true
+            }
+
+            if let overview = try? await readFreshOverview(),
+               let refreshedLocalRuntime = overview.localRuntime,
+               localRuntimeStatusShowsActiveOrCompletedSetup(refreshedLocalRuntime.status)
+            {
+                syncLocalRuntimeState(refreshedLocalRuntime, message: nil)
+                pageError = nil
+                if refreshedLocalRuntime.status == "ready" {
+                    _ = try? await refreshOnboardingState()
+                }
+                return true
+            }
+
+            if attempt < 5 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+
+        return false
+    }
+
+    private func recoverOnboardingInstallAfterTimeout(_ error: Error) async -> Bool {
+        guard isRecoverableOnboardingCompletionTimeout(error) else {
+            return false
+        }
+
+        for attempt in 0..<12 {
+            if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+                applyOnboardingState(next)
+                if next.draft.currentStep != .install, next.draft.install?.installed == true || next.summary.install?.installed == true {
+                    pageError = nil
+                    _ = try? await readFreshOverview()
+                    _ = try? await readFreshDeploymentTargets()
+                    return true
+                }
+            }
+
+            if let overview = try? await readFreshOverview(), overview.engine.installed,
+               let staged = try? await appState.client.reuseOnboardingRuntime()
+            {
+                applyOnboardingState(staged)
+                pageError = nil
+                _ = try? await readFreshDeploymentTargets()
+                return true
+            }
+
+            if attempt < 11 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+
+        return false
     }
 
     private func recoverOnboardingCompletionAfterTimeout(
@@ -1515,6 +1861,8 @@ final class NativeOnboardingViewModel {
             applyInstallProgressUpdate(phase: phase, percent: percent.map(Double.init), message: message)
         }
 
+        var shouldClearPageError = false
+
         switch event {
         case let .overviewUpdated(snapshot):
             appState.overview = snapshot.data
@@ -1544,12 +1892,28 @@ final class NativeOnboardingViewModel {
                 completionWarmupStatus = status
                 completionWarmupMessage = message
             }
+        case let .localRuntimeProgress(_, _, _, message, localRuntime),
+            let .localRuntimeCompleted(_, _, message, localRuntime):
+            syncLocalRuntimeState(localRuntime, message: message)
+            shouldClearPageError = true
         case .skillCatalogUpdated, .pluginConfigUpdated, .deployProgress, .deployCompleted, .gatewayStatus, .chatStream, .configApplied:
             break
         }
 
-        guard let currentStep = onboardingState?.draft.currentStep else { return }
-        guard let resource = onboardingRefreshResourceForEvent(currentStep, event) else { return }
+        guard let currentStep = onboardingState?.draft.currentStep else {
+            if shouldClearPageError {
+                pageError = nil
+            }
+            synchronizeModelStepFlow()
+            return
+        }
+        guard let resource = onboardingRefreshResourceForEvent(currentStep, event) else {
+            if shouldClearPageError {
+                pageError = nil
+            }
+            synchronizeModelStepFlow()
+            return
+        }
 
         do {
             switch resource {
@@ -1576,6 +1940,8 @@ final class NativeOnboardingViewModel {
         } catch {
             presentErrorUnlessCancelled(error)
         }
+
+        synchronizeModelStepFlow()
     }
 
     private func beginInstallProgress(_ snapshot: NativeOnboardingInstallProgressSnapshot) {

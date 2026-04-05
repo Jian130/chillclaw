@@ -2,6 +2,7 @@ import type {
   ChannelConfigOverview,
   ChannelSession,
   ConfiguredChannelEntry,
+  LocalModelRuntimeStatus,
   ModelConfigOverview,
   ModelAuthMethod,
   ModelProviderConfig,
@@ -219,6 +220,17 @@ export interface OnboardingModelViewState {
   entry?: SavedModelEntry;
 }
 
+export type OnboardingModelStepMode =
+  | "detecting-local"
+  | "cloud-handoff"
+  | "local-setup"
+  | "cloud-config"
+  | "connected";
+
+export interface OnboardingLocalSetupProgress {
+  currentStep: 1 | 2 | 3 | 4;
+}
+
 export type OnboardingModelSetupVariant = "default-api-key" | "guided-minimax-api-key" | "oauth";
 export type OnboardingChannelSetupVariant =
   | "wechat-work-guided"
@@ -328,6 +340,72 @@ export function resolveOnboardingModelViewState(
     provider,
     entry: selectedEntry
   };
+}
+
+export function resolveOnboardingModelStepMode(args: {
+  bootstrapPending: boolean;
+  providerId: string;
+  selectedProviderPresent: boolean;
+  modelViewKind: OnboardingModelViewState["kind"];
+  activeModelAuthSessionId?: string;
+  draftModelEntryId?: string;
+  summaryModelEntryId?: string;
+  localRuntime?: ModelConfigOverview["localRuntime"];
+}): OnboardingModelStepMode {
+  const hasPersistedModel = Boolean(args.draftModelEntryId || args.summaryModelEntryId);
+  const hasCloudFlow =
+    Boolean(args.providerId) ||
+    args.selectedProviderPresent ||
+    Boolean(args.activeModelAuthSessionId) ||
+    (args.modelViewKind === "configure" && !hasPersistedModel);
+
+  if (args.modelViewKind === "connected" || args.localRuntime?.activeInOpenClaw) {
+    return "connected";
+  }
+
+  if (hasCloudFlow || hasPersistedModel) {
+    return "cloud-config";
+  }
+
+  if (args.bootstrapPending) {
+    return "detecting-local";
+  }
+
+  if (args.localRuntime?.recommendation === "cloud" || args.localRuntime?.status === "cloud-recommended") {
+    return "cloud-handoff";
+  }
+
+  if (args.localRuntime?.recommendation === "local" && args.localRuntime?.status !== "ready") {
+    return "local-setup";
+  }
+
+  return "cloud-config";
+}
+
+export function resolveOnboardingLocalSetupProgress(
+  mode: OnboardingModelStepMode,
+  status: LocalModelRuntimeStatus | undefined
+): OnboardingLocalSetupProgress {
+  if (mode === "connected" || status === "ready") {
+    return { currentStep: 4 };
+  }
+
+  switch (status) {
+    case "installing-runtime":
+      return { currentStep: 2 };
+    case "downloading-model":
+      return { currentStep: 3 };
+    case "starting-runtime":
+    case "configuring-openclaw":
+      return { currentStep: 4 };
+    case "idle":
+    case "degraded":
+    case "failed":
+    case "cloud-recommended":
+    case "unchecked":
+    default:
+      return { currentStep: 1 };
+  }
 }
 
 export function resolveOnboardingModelSetupVariant(args: {

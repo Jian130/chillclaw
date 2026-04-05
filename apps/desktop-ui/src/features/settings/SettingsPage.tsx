@@ -7,6 +7,8 @@ import {
   checkEngineUpdates,
   exportDiagnostics,
   installAppService,
+  installLocalModelRuntime,
+  repairLocalModelRuntime,
   redoOnboarding,
   restartAppService,
   stopChillClawApp,
@@ -203,6 +205,67 @@ export default function SettingsPage() {
                     {busy === "engine-updates" ? copy.checkingEngineUpdates : copy.checkEngineUpdates}
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>{copy.localAiTitle ?? "Local AI on This Mac"}</CardTitle>
+              </CardHeader>
+              <CardContent className="panel-stack">
+                <p className="card__description">{copy.localAiBody ?? "ChillClaw can install or reconnect the managed Ollama runtime and keep OpenClaw pointed at it directly."}</p>
+                <div className="check-row">
+                  <div className="check-row__meta">
+                    <strong>{overview?.localRuntime?.summary ?? "Local AI has not been checked yet."}</strong>
+                    <p>{overview?.localRuntime?.detail ?? "Open the model step or install local AI from here."}</p>
+                    {overview?.localRuntime?.chosenModelKey ? (
+                      <p><strong>{copy.localAiModelLabel ?? "Connected model"}:</strong> {overview.localRuntime.chosenModelKey}</p>
+                    ) : null}
+                    {overview?.localRuntime?.requiredDiskGb ? (
+                      <p><strong>{copy.localAiStorageLabel ?? "Storage impact"}:</strong> {overview.localRuntime.requiredDiskGb} GB</p>
+                    ) : null}
+                  </div>
+                  <StatusBadge tone={overview?.localRuntime?.status === "ready" ? "success" : overview?.localRuntime?.status === "degraded" || overview?.localRuntime?.status === "failed" ? "warning" : "neutral"}>
+                    {overview?.localRuntime?.status === "ready"
+                      ? "Ready"
+                      : overview?.localRuntime?.status === "degraded" || overview?.localRuntime?.status === "failed"
+                        ? "Repair needed"
+                        : overview?.localRuntime?.status === "cloud-recommended"
+                          ? "Cloud recommended"
+                          : "Available"}
+                  </StatusBadge>
+                </div>
+                {overview?.localRuntime?.supported && overview.localRuntime.recommendation === "local" ? (
+                  <div className="actions-row">
+                    {overview.localRuntime.status === "degraded" || overview.localRuntime.status === "failed" ? (
+                      <Button
+                        loading={busy === "repair-local-runtime"}
+                        onClick={() =>
+                          void runAction("repair-local-runtime", async () => {
+                            const result = await repairLocalModelRuntime();
+                            return { message: result.message };
+                          })
+                        }
+                      >
+                        <RefreshCw size={14} />
+                        {copy.localAiRepair ?? "Repair Local AI"}
+                      </Button>
+                    ) : overview.localRuntime.status === "ready" ? null : (
+                      <Button
+                        loading={busy === "install-local-runtime"}
+                        onClick={() =>
+                          void runAction("install-local-runtime", async () => {
+                            const result = await installLocalModelRuntime();
+                            return { message: result.message };
+                          })
+                        }
+                      >
+                        <Download size={14} />
+                        {copy.localAiInstall ?? "Install Local AI"}
+                      </Button>
+                    )}
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           </div>

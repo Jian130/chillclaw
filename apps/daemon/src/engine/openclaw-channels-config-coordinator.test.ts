@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 
 import type { ChannelSession, ChannelSetupState, SaveChannelEntryRequest, SupportedChannelId } from "@chillclaw/contracts";
 
@@ -153,4 +154,70 @@ test("submitChannelSessionInput keeps WhatsApp approval policy in the coordinato
   assert.equal(result.status, "completed");
   assert.match(result.message ?? "", /pairing approved/i);
   assert.deepEqual(result.logs, ["Pairing started.", "WhatsApp pairing approved."]);
+});
+
+test("personal WeChat marks the session completed as soon as the runtime channel is saved", async () => {
+  let snapshotReads = 0;
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+
+  const coordinator = createCoordinator({
+    wechatRuntimeDetectionIntervalMs: 10,
+    resolveNpmInvocation: async () => ({
+      command: "npm",
+      argsPrefix: [],
+      display: "npm"
+    }),
+    readChannelSnapshot: async () => {
+      snapshotReads += 1;
+      return { list: undefined, status: undefined };
+    },
+    buildLiveChannelEntries: () =>
+      snapshotReads >= 2
+        ? [{
+            id: "wechat:default",
+            channelId: "wechat",
+            label: "WeChat",
+            status: "awaiting-pairing",
+            summary: "Saved for final gateway activation.",
+            detail: "ChillClaw will finish gateway activation after onboarding.",
+            maskedConfigSummary: [],
+            editableValues: {},
+            pairingRequired: false,
+            lastUpdatedAt: "2026-04-07T00:00:00.000Z"
+          }]
+        : [],
+    spawnInteractiveCommand: () => {
+      setTimeout(() => {
+        child.stdout.emit("data", Buffer.from("Starting the personal WeChat installer.\n"));
+      }, 0);
+      return child as unknown as ReturnType<typeof import("node:child_process").spawn>;
+    }
+  });
+
+  const result = await coordinator.saveChannelEntry({
+    channelId: "wechat",
+    action: "save",
+    values: {}
+  });
+
+  assert.ok(result.session);
+  let session = await coordinator.getChannelSession(result.session!.id);
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (session.status === "completed") {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    session = await coordinator.getChannelSession(result.session!.id);
+  }
+
+  assert.equal(session.status, "completed");
+  assert.match(session.message, /finish gateway activation after onboarding/i);
+  assert.equal(session.logs.some((line) => /saved this channel|saved for final gateway activation/i.test(line)), true);
 });

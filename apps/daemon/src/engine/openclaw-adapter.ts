@@ -381,6 +381,31 @@ interface OpenClawConfigFileJson {
       model?: string | { primary?: string; fallbacks?: string[] };
     }>;
   };
+  models?: {
+    mode?: string;
+    providers?: Record<
+      string,
+      {
+        baseUrl?: string;
+        api?: string;
+        apiKey?: string;
+        models?: Array<{
+          id?: string;
+          name?: string;
+          reasoning?: boolean;
+          input?: string[];
+          cost?: {
+            input?: number;
+            output?: number;
+            cacheRead?: number;
+            cacheWrite?: number;
+          };
+          contextWindow?: number;
+          maxTokens?: number;
+        }>;
+      }
+    >;
+  };
 }
 
 interface OpenClawAuthProfileStoreJson {
@@ -3420,6 +3445,7 @@ export class OpenClawAdapter implements EngineAdapter {
     this.runtimeLifecycleService = runtimeLifecycleService;
     this.config = new OpenClawConfigManager({
       getModelConfig: () => modelsConfigCoordinator.getModelConfig(),
+      getModelSelection: () => modelsConfigCoordinator.getModelSelection(),
       createSavedModelEntry: (request) => modelsConfigCoordinator.createSavedModelEntry(request),
       updateSavedModelEntry: (entryId, request) => modelsConfigCoordinator.updateSavedModelEntry(entryId, request),
       upsertManagedLocalModelEntry: (request) => modelsConfigCoordinator.upsertManagedLocalModelEntry(request),

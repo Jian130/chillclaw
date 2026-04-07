@@ -132,7 +132,7 @@ flowchart LR
 - Config and AI employee saves are staged changes. They write correct engine and workspace state first, then the gateway manager is responsible for applying them live.
 - `OpenClawAdapter` checks for an existing OpenClaw install, reuses it when available, and otherwise deploys a ChillClaw-managed local OpenClaw runtime under the user's ChillClaw data directory.
 - The adapter seam is intentionally future-facing: it should later support local-LLM runtimes and model families such as Qwen, MiniMax-exposed local runtimes, Llama, Mistral, and other OpenAI-compatible local gateways.
-- The current local-runtime slice uses Ollama as the managed daemon-owned local engine and configures OpenClaw against the selected `ollama/...` model entry rather than exposing raw local-model wiring directly to clients.
+- The current local-runtime slice uses Ollama as the managed daemon-owned local engine and writes an explicit OpenClaw native-Ollama provider config for the selected local `ollama/...` model instead of exposing raw local-model wiring directly to clients.
 - User state, diagnostics, and ChillClaw metadata live in `~/Library/Application Support/ChillClaw` when packaged.
 
 ### Packaging breakdown
@@ -313,6 +313,7 @@ When the OpenClaw CLI drifts in known ways for config-backed mutations, ChillCla
 - default-model config writes
 
 ChillClaw now also exposes an explicit `Deploy OpenClaw locally` action in the first-run setup page and the install panel. That path forces deployment into ChillClaw's managed local runtime instead of merely reusing a compatible system OpenClaw.
+Onboarding and first-run setup now also default to that managed local runtime path unless a caller explicitly opts into another deployment target.
 The service panel also now exposes app-level controls to stop the local ChillClaw daemon and uninstall the packaged app's managed service/data.
 
 ## Model management

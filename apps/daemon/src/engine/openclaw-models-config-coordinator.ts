@@ -25,6 +25,7 @@ import {
   resolveTokenAuthProvider,
   type InternalModelProviderConfig
 } from "../config/openclaw-model-provider-catalog.js";
+import { syncManagedLocalOllamaProviderConfig } from "./managed-local-ollama-config.js";
 import { getDataDir } from "../runtime-paths.js";
 import { appendGatewayApplyMessage } from "./openclaw-shared.js";
 
@@ -141,12 +142,65 @@ type OpenClawConfigSnapshotLike = {
     plugins?: {
       entries?: Record<string, { enabled?: boolean; config?: Record<string, unknown> }>;
     };
+    models?: {
+      mode?: string;
+      providers?: Record<
+        string,
+        {
+          baseUrl?: string;
+          api?: string;
+          apiKey?: string;
+          models?: Array<{
+            id?: string;
+            name?: string;
+            reasoning?: boolean;
+            input?: string[];
+            cost?: {
+              input?: number;
+              output?: number;
+              cacheRead?: number;
+              cacheWrite?: number;
+            };
+            contextWindow?: number;
+            maxTokens?: number;
+          }>;
+        }
+      >;
+    };
   };
   status?: {
     agentDir?: string;
     aliases?: Record<string, string>;
   };
 };
+
+function resolveConfigModelAlias(
+  raw: string | null | undefined,
+  aliases: Record<string, string>,
+  seen: Set<string> = new Set()
+): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (seen.has(trimmed)) {
+    return trimmed;
+  }
+
+  seen.add(trimmed);
+  const aliasTarget = aliases[trimmed];
+  if (aliasTarget?.trim()) {
+    return resolveConfigModelAlias(aliasTarget, aliases, seen);
+  }
+
+  return trimmed;
+}
+
+function resolveDefaultModelFromConfigSnapshot(snapshot: OpenClawConfigSnapshotLike): string | undefined {
+  const rawDefaultModel = snapshot.config.agents?.defaults?.model;
+  const primaryModel = typeof rawDefaultModel === "string" ? rawDefaultModel : rawDefaultModel?.primary;
+  return resolveConfigModelAlias(primaryModel, snapshot.status?.aliases ?? {});
+}
 
 type ModelsConfigAccess = {
   readModelSnapshot: () => Promise<ModelSnapshotLike>;
@@ -441,6 +495,17 @@ function removeProfileIdsFromConfig(
 
 export class ModelsConfigCoordinator {
   constructor(private readonly access: ModelsConfigAccess) {}
+
+  async getModelSelection(): Promise<Pick<ModelConfigOverview, "savedEntries" | "defaultEntryId" | "defaultModel">> {
+    const state = this.access.normalizeStateFlags(await this.access.readAdapterState());
+    const snapshot = await this.access.readOpenClawConfigSnapshot();
+
+    return {
+      savedEntries: state.modelEntries ?? [],
+      defaultEntryId: state.defaultModelEntryId,
+      defaultModel: resolveDefaultModelFromConfigSnapshot(snapshot)
+    };
+  }
 
   async getModelConfig(): Promise<ModelConfigOverview> {
     const snapshot = await this.access.readModelSnapshot();
@@ -1028,6 +1093,7 @@ export class ModelsConfigCoordinator {
         allModelKeys.map((modelKey) => [modelKey, snapshot.config.agents?.defaults?.models?.[modelKey] ?? {}])
       )
     };
+    syncManagedLocalOllamaProviderConfig(snapshot.config, state.modelEntries ?? []);
     pruneExplicitMainAgentEntry(snapshot.config);
 
     if (!defaultEntry.agentId || !defaultEntry.agentDir || !defaultEntry.workspaceDir) {

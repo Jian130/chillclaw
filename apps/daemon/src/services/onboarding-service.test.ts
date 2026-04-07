@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
-import type { OnboardingStateResponse } from "@chillclaw/contracts";
+import type { ChannelConfigOverview, OnboardingStateResponse } from "@chillclaw/contracts";
 
 import { MockAdapter } from "../engine/mock-adapter.js";
 import { AITeamService } from "./ai-team-service.js";
 import { ChannelSetupService } from "./channel-setup-service.js";
 import { EventBusService } from "./event-bus-service.js";
 import { EventPublisher } from "./event-publisher.js";
+import { LocalModelRuntimeService } from "./local-model-runtime-service.js";
 import { OnboardingService } from "./onboarding-service.js";
 import { OverviewService } from "./overview-service.js";
 import { PresetSkillService } from "./preset-skill-service.js";
@@ -93,6 +94,25 @@ test("installRuntime advances onboarding to permissions when the managed runtime
   assert.equal(result.onboarding?.draft.currentStep, "permissions");
   assert.equal(result.onboarding?.draft.install?.installed, true);
   assert.equal(result.onboarding?.summary.install?.installed, true);
+});
+
+test("installRuntime defaults onboarding installs to the managed local runtime", async () => {
+  const { adapter, service } = createService("onboarding-service-install-runtime-managed-local");
+  let installOptions: { forceLocal?: boolean } | undefined;
+
+  adapter.install = async (_autoConfigure = true, options?: { forceLocal?: boolean }) => {
+    installOptions = options;
+    return {
+      status: "installed",
+      message: "Mock OpenClaw runtime is deployed and ready for onboarding.",
+      engineStatus: await adapter.status()
+    };
+  };
+
+  const result = await service.installRuntime();
+
+  assert.equal(result.status, "completed");
+  assert.equal(installOptions?.forceLocal, true);
 });
 
 test("updateRuntime advances onboarding to permissions when the managed runtime is ready", async () => {
@@ -211,6 +231,164 @@ test("onboarding state repairs later steps from an already configured default mo
   assert.equal(repaired.draft.model?.providerId, "ollama");
   assert.equal(repaired.draft.model?.modelKey, "ollama/gemma4:e4b");
   assert.equal(repaired.summary.model?.entryId, repaired.draft.model?.entryId);
+});
+
+test("navigating from the local model step to the channel step recovers the managed local model entry", async () => {
+  const { adapter, service } = createService("onboarding-service-navigate-local-model");
+
+  await adapter.config.createSavedModelEntry({
+    label: "Local AI on this Mac",
+    providerId: "ollama",
+    methodId: "ollama-local",
+    modelKey: "ollama/gemma4:e2b",
+    values: {},
+    makeDefault: true
+  });
+
+  await service.updateState({
+    currentStep: "model",
+    install: {
+      installed: true,
+      version: "2026.4.5",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: new Date().toISOString()
+    },
+    model: undefined
+  });
+
+  const updated = await service.navigateStep({ step: "channel" });
+
+  assert.equal(updated.draft.currentStep, "channel");
+  assert.equal(updated.draft.model?.providerId, "ollama");
+  assert.equal(updated.draft.model?.modelKey, "ollama/gemma4:e2b");
+  assert.ok(updated.draft.model?.entryId);
+  assert.equal(updated.summary.model?.entryId, updated.draft.model?.entryId);
+});
+
+test("onboarding state includes the daemon-owned local runtime for the model step", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-model-local-runtime-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store);
+  let localRuntimeCalls = 0;
+  const localRuntimeService = {
+    async getOverview() {
+      localRuntimeCalls += 1;
+      return {
+        supported: true,
+        recommendation: "local" as const,
+        supportCode: "supported" as const,
+        status: "idle" as const,
+        runtimeInstalled: false,
+        runtimeReachable: false,
+        modelDownloaded: false,
+        activeInOpenClaw: false,
+        summary: "Local AI is available on this Mac.",
+        detail: "ChillClaw recommends a starter Ollama tier for this Apple Silicon Mac."
+      };
+    }
+  } as Pick<LocalModelRuntimeService, "getOverview"> as LocalModelRuntimeService;
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, undefined, undefined, localRuntimeService);
+
+  await service.updateState({
+    currentStep: "model",
+    install: {
+      installed: true,
+      version: "2026.4.5",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: new Date().toISOString()
+    }
+  });
+
+  const state = await service.getState();
+
+  assert.equal(state.draft.currentStep, "model");
+  assert.equal(state.localRuntime?.recommendation, "local");
+  assert.equal(state.localRuntime?.status, "idle");
+  assert.equal(localRuntimeCalls, 1);
+});
+
+test("onboarding state skips local runtime probing outside the model step", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-non-model-lightweight-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store);
+  let localRuntimeCalls = 0;
+  const localRuntimeService = {
+    async getOverview() {
+      localRuntimeCalls += 1;
+      throw new Error("Non-model onboarding reads should not fetch the local runtime.");
+    }
+  } as Pick<LocalModelRuntimeService, "getOverview"> as LocalModelRuntimeService;
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, undefined, undefined, localRuntimeService);
+
+  await service.updateState({
+    currentStep: "channel",
+    install: {
+      installed: true,
+      version: "2026.4.5",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: new Date().toISOString()
+    }
+  });
+
+  const state = await service.getState();
+
+  assert.equal(state.draft.currentStep, "channel");
+  assert.equal(state.localRuntime, undefined);
+  assert.equal(localRuntimeCalls, 0);
+});
+
+test("model-step onboarding state reuses the staged install summary instead of rechecking engine status", async () => {
+  const { adapter, service } = createService("onboarding-service-model-step-install-summary");
+  let statusCalls = 0;
+  let deploymentTargetCalls = 0;
+  const originalStatus = adapter.instances.status.bind(adapter.instances);
+  const originalDeploymentTargets = adapter.instances.getDeploymentTargets.bind(adapter.instances);
+  adapter.instances.status = async () => {
+    statusCalls += 1;
+    return originalStatus();
+  };
+  adapter.instances.getDeploymentTargets = async () => {
+    deploymentTargetCalls += 1;
+    return originalDeploymentTargets();
+  };
+
+  await service.updateState({
+    currentStep: "model",
+    install: {
+      installed: true,
+      version: "2026.4.6",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: new Date().toISOString()
+    }
+  });
+
+  statusCalls = 0;
+  deploymentTargetCalls = 0;
+
+  const state = await service.getState();
+
+  assert.equal(state.summary.install?.installed, true);
+  assert.equal(state.summary.install?.version, "2026.4.6");
+  assert.equal(statusCalls, 0);
+  assert.equal(deploymentTargetCalls, 0);
 });
 
 test("saving the employee draft reuses the staged model snapshot without refetching model config", async () => {
@@ -1170,6 +1348,162 @@ test("missing onboarding channel sessions clear the stale session id before surf
   assert.equal(persisted.onboarding?.draft.activeChannelSessionId, undefined);
   assert.equal(persisted.onboarding?.draft.channel?.channelId, "wechat");
   assert.equal(persisted.onboarding?.draft.channelProgress?.status, "idle");
+});
+
+test("missing personal WeChat sessions keep the saved channel staged and advance onboarding", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-missing-wechat-session-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  const wechatConfig: ChannelConfigOverview = {
+    baseOnboardingCompleted: true,
+    capabilities: [],
+    entries: [
+      {
+        id: "wechat:default",
+        channelId: "wechat",
+        label: "WeChat",
+        status: "awaiting-pairing",
+        summary: "Saved for final gateway activation.",
+        detail: "ChillClaw will finish gateway activation after onboarding.",
+        editableValues: {},
+        maskedConfigSummary: [],
+        pairingRequired: false,
+        lastUpdatedAt: "2026-04-07T06:04:48.605Z"
+      }
+    ],
+    gatewaySummary: "Gateway ready"
+  };
+  Object.assign(channelSetupService, {
+    async getSession() {
+      throw new Error("Channel session not found.");
+    },
+    async getConfigOverview() {
+      return wechatConfig;
+    }
+  });
+  const aiTeamService = new AITeamService(adapter, store);
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
+
+  await service.updateState({
+    currentStep: "channel",
+    install: {
+      installed: true,
+      version: "2026.4.2",
+      disposition: "installed-managed"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-04-07T05:59:00.000Z"
+    },
+    model: {
+      providerId: "ollama",
+      modelKey: "ollama/gemma4:e2b",
+      methodId: "ollama-local",
+      entryId: "ea84d532-304a-451a-a653-01a69787a3ea"
+    },
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "capturing",
+      sessionId: "wechat:default:login",
+      message: "Waiting for QR confirmation."
+    },
+    activeChannelSessionId: "wechat:default:login"
+  });
+
+  await assert.rejects(() => service.getChannelSession("wechat:default:login"), /start the login again/i);
+
+  const recovered = await service.getState();
+  assert.equal(recovered.draft.currentStep, "employee");
+  assert.equal(recovered.draft.channel?.entryId, "wechat:default");
+  assert.equal(recovered.draft.channelProgress?.status, "staged");
+  assert.equal(recovered.draft.channelProgress?.message, "Saved for final gateway activation.");
+  assert.equal(recovered.draft.activeChannelSessionId, undefined);
+
+  const persisted = await store.read();
+  assert.equal(persisted.onboarding?.draft.currentStep, "employee");
+  assert.equal(persisted.onboarding?.draft.channelProgress?.status, "staged");
+});
+
+test("onboarding state repairs a saved personal WeChat handoff back to the employee step", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-repair-wechat-handoff-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  Object.assign(channelSetupService, {
+    async getConfigOverview() {
+      return {
+        baseOnboardingCompleted: true,
+        capabilities: [],
+        entries: [
+          {
+            id: "wechat:default",
+            channelId: "wechat",
+            label: "WeChat",
+            status: "awaiting-pairing",
+            summary: "WeChat login is staged and waiting for pairing.",
+            detail: "Complete the remaining WeChat pairing steps before using chat.",
+            editableValues: {},
+            maskedConfigSummary: [],
+            pairingRequired: false,
+            lastUpdatedAt: "2026-04-07T06:04:48.605Z"
+          }
+        ],
+        gatewaySummary: "Gateway ready"
+      } satisfies ChannelConfigOverview;
+    }
+  });
+  const aiTeamService = new AITeamService(adapter, store);
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService);
+
+  await store.update((state) => ({
+    ...state,
+    onboarding: {
+      draft: {
+        currentStep: "channel",
+        install: {
+          installed: true,
+          version: "OpenClaw 2026.4.2 (d74a122)",
+          disposition: "installed-managed"
+        },
+        permissions: {
+          confirmed: true,
+          confirmedAt: "2026-04-05T12:13:15.595Z"
+        },
+        model: {
+          providerId: "ollama",
+          modelKey: "ollama/gemma4:e2b",
+          methodId: "ollama-local",
+          entryId: "ea84d532-304a-451a-a653-01a69787a3ea"
+        },
+        channel: {
+          channelId: "wechat",
+          entryId: "wechat:default"
+        },
+        channelProgress: {
+          status: "idle",
+          message: "The channel login session ended. Start the login again."
+        },
+        activeChannelSessionId: ""
+      }
+    }
+  }));
+
+  const recovered = await service.getState();
+
+  assert.equal(recovered.draft.currentStep, "employee");
+  assert.equal(recovered.draft.channel?.entryId, "wechat:default");
+  assert.equal(recovered.draft.channelProgress?.status, "staged");
+  assert.equal(recovered.draft.channelProgress?.message, "WeChat login is staged and waiting for pairing.");
+
+  const persisted = await store.read();
+  assert.equal(persisted.onboarding?.draft.currentStep, "employee");
+  assert.equal(persisted.onboarding?.draft.channelProgress?.status, "staged");
 });
 
 test("missing onboarding model auth sessions clear the stale session id and preserve saved model progress", async () => {

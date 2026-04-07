@@ -15,6 +15,7 @@ import {
   type InternalModelProviderConfig
 } from "../config/openclaw-model-provider-catalog.js";
 import { modelAuthSecretName } from "../platform/secrets-adapter.js";
+import { syncManagedLocalOllamaProviderConfig } from "./managed-local-ollama-config.js";
 import { resolveReadableMemberAgentId } from "./member-agent-id.js";
 import type {
   AIMemberRuntimeCandidate,
@@ -630,6 +631,7 @@ export class AgentsConfigCoordinator {
     }
 
     const snapshot = await this.access.readOpenClawConfigSnapshot();
+    syncManagedLocalOllamaProviderConfig(snapshot.config, [sourceEntry]);
     await this.access.upsertAgentConfigEntry(
       snapshot.configPath,
       snapshot.config,
@@ -648,6 +650,9 @@ export class AgentsConfigCoordinator {
 
     const sourceAuthDir = sourceEntry.agentDir || snapshot.status?.agentDir || this.access.getMainOpenClawAgentDir();
     const provider = providerDefinitionById(sourceEntry.providerId);
+    const authMethod = sourceEntry.authMethodId
+      ? provider?.authMethods.find((item) => item.id === sourceEntry.authMethodId)
+      : undefined;
     let sourceStore = sourceAuthDir ? await this.access.readAuthStore(sourceAuthDir) : undefined;
     let profileIdsToCopy =
       (sourceEntry.profileIds ?? []).length > 0
@@ -683,7 +688,7 @@ export class AgentsConfigCoordinator {
     }
 
     if (!sourceStore?.profiles || Object.keys(sourceStore.profiles).length === 0 || profileIdsToCopy.length === 0) {
-      if (sourceEntry.authMethodId) {
+      if (sourceEntry.authMethodId && authMethod?.kind !== "local") {
         throw new Error(
           `ChillClaw could not find saved ${sourceEntry.providerId} credentials for ${request.name}. Re-save that model in Configuration first.`
         );

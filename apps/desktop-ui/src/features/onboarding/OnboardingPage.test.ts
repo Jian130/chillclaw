@@ -77,4 +77,25 @@ describe("OnboardingPage CTA styling", () => {
     expect(source).toContain("void handleLocalRuntimeAction(autoLocalRuntimeAction);");
     expect(source).toContain('action === "repair" ? await repairLocalModelRuntime() : await installLocalModelRuntime()');
   });
+
+  it("hydrates step 4 from onboarding state instead of fetching overview and model config together", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain("const nextState = await fetchOnboardingState({ fresh: true });");
+    expect(source).not.toContain("Promise.all([readFreshOverview(), readFreshModelConfig()])");
+  });
+
+  it("does not retry onboarding state forever when the provider catalog is empty", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).not.toContain('if (currentStep !== "model" || !onboardingState || modelPickerProviders.length > 0)');
+  });
+
+  it("shows structured local-model download info instead of only the raw daemon detail line", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain("describeOnboardingLocalModelDownload");
+    expect(source).toContain("onboarding-model-download-card");
+    expect(source).toContain("copy.localModelDownloadResumeNote");
+  });
 });

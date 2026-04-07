@@ -260,9 +260,24 @@ test("authenticateModelProvider starts MiniMax China OAuth with an explicit meth
 
 test("upsertManagedLocalModelEntry configures an Ollama default without starting interactive auth", async () => {
   let gatewayApplyMarks = 0;
+  const configWrites: Array<Record<string, unknown>> = [];
   const { coordinator, interactiveCalls, runCalls, getAdapterState } = createCoordinatorTestHarness({
     markGatewayApplyPending: async () => {
       gatewayApplyMarks += 1;
+    },
+    readOpenClawConfigSnapshot: async () => ({
+      configPath: "/tmp/openclaw.json",
+      config: {
+        agents: {
+          defaults: {
+            models: {}
+          }
+        }
+      },
+      status: { agentDir: "/tmp/default-agent", aliases: {} }
+    }),
+    writeOpenClawConfigSnapshot: async (_configPath, config) => {
+      configWrites.push(structuredClone(config) as Record<string, unknown>);
     },
     buildModelConfigOverview: (_allModels, _configuredModels, _configuredAuthProviders, modelEntries, defaultEntryId, fallbackEntryIds) => ({
       ...createEmptyModelConfig(),
@@ -303,6 +318,93 @@ test("upsertManagedLocalModelEntry configures an Ollama default without starting
   assert.equal(getAdapterState().defaultModelEntryId, "managed-ollama-entry");
   assert.equal(getAdapterState().modelEntries?.[0]?.providerId, "ollama");
   assert.equal(getAdapterState().modelEntries?.[0]?.authMethodId, "ollama-local");
+
+  const writtenConfig = configWrites.at(-1) as
+    | {
+        models?: {
+          mode?: string;
+          providers?: {
+            ollama?: {
+              baseUrl?: string;
+              api?: string;
+              apiKey?: string;
+              models?: Array<Record<string, unknown>>;
+            };
+          };
+        };
+      }
+    | undefined;
+  assert.equal(writtenConfig?.models?.mode, "merge");
+  assert.deepEqual(writtenConfig?.models?.providers?.ollama, {
+    baseUrl: "http://127.0.0.1:11434",
+    api: "ollama",
+    apiKey: "ollama-local",
+    models: [
+      {
+        id: "gemma4:e4b",
+        name: "gemma4:e4b",
+        reasoning: false,
+        input: ["text"],
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        contextWindow: 131072,
+        maxTokens: 8192
+      }
+    ]
+  });
+});
+
+test("getModelSelection resolves the default model from config aliases without loading the full catalog", async () => {
+  const { coordinator, setAdapterState } = createCoordinatorTestHarness({
+    readOpenClawConfigSnapshot: async () => ({
+      configPath: "/tmp/openclaw.json",
+      config: {
+        agents: {
+          defaults: {
+            model: "starter-local"
+          }
+        }
+      },
+      status: {
+        agentDir: "/tmp/default-agent",
+        aliases: {
+          "starter-local": "ollama/gemma4:e4b"
+        }
+      }
+    })
+  });
+
+  setAdapterState({
+    modelEntries: [
+      {
+        id: "managed-ollama-entry",
+        label: "Local AI on this Mac",
+        providerId: "ollama",
+        modelKey: "ollama/gemma4:e4b",
+        agentId: "",
+        agentDir: "",
+        workspaceDir: "",
+        authMethodId: "ollama-local",
+        profileIds: [],
+        isDefault: true,
+        isFallback: false,
+        createdAt: "2026-04-07T00:00:00.000Z",
+        updatedAt: "2026-04-07T00:00:00.000Z"
+      }
+    ],
+    defaultModelEntryId: "managed-ollama-entry",
+    fallbackModelEntryIds: []
+  });
+
+  const selection = await coordinator.getModelSelection();
+
+  assert.equal(selection.defaultEntryId, "managed-ollama-entry");
+  assert.equal(selection.defaultModel, "ollama/gemma4:e4b");
+  assert.equal(selection.savedEntries.length, 1);
 });
 
 test("removeSavedModelEntry removes a runtime-derived default entry through coordinator-owned runtime cleanup", async () => {

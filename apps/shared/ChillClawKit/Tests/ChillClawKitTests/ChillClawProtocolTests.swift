@@ -459,6 +459,18 @@ struct ChillClawProtocolTests {
               "modelKey": "openai/gpt-5.1-codex",
               "entryId": "entry-1"
             }
+          },
+          "localRuntime": {
+            "supported": true,
+            "recommendation": "local",
+            "supportCode": "supported",
+            "status": "installing-runtime",
+            "runtimeInstalled": false,
+            "runtimeReachable": false,
+            "modelDownloaded": false,
+            "activeInOpenClaw": false,
+            "summary": "Local AI is available on this Mac.",
+            "detail": "ChillClaw recommends a starter Ollama tier for this Apple Silicon Mac."
           }
         }
         """.data(using: .utf8)!
@@ -489,6 +501,8 @@ struct ChillClawProtocolTests {
         #expect(response.draft.activeModelAuthSessionId == "session-1")
         #expect(response.presetSkillSync?.entries.first?.status == .verified)
         #expect(response.summary.model?.entryId == "entry-1")
+        #expect(response.localRuntime?.recommendation == "local")
+        #expect(response.localRuntime?.status == "installing-runtime")
     }
 
     @Test

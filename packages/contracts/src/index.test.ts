@@ -195,6 +195,42 @@ test("default product overview exposes an unchecked local runtime summary", () =
   assert.equal(overview.localRuntime?.supportCode, "unchecked");
 });
 
+test("onboarding state response serializes the optional local runtime snapshot", () => {
+  const response: OnboardingStateResponse = {
+    firstRun: {
+      introCompleted: true,
+      setupCompleted: false
+    },
+    draft: {
+      currentStep: "model"
+    },
+    config: {
+      modelProviders: [],
+      channels: [],
+      employeePresets: []
+    },
+    summary: {},
+    localRuntime: {
+      supported: true,
+      recommendation: "local",
+      supportCode: "supported",
+      status: "installing-runtime",
+      runtimeInstalled: false,
+      runtimeReachable: false,
+      modelDownloaded: false,
+      activeInOpenClaw: false,
+      summary: "Local AI is available on this Mac.",
+      detail: "ChillClaw recommends a starter Ollama tier for this Apple Silicon Mac."
+    }
+  };
+
+  const parsed = JSON.parse(JSON.stringify(response)) as OnboardingStateResponse;
+
+  assert.equal(parsed.draft.currentStep, "model");
+  assert.equal(parsed.localRuntime?.recommendation, "local");
+  assert.equal(parsed.localRuntime?.status, "installing-runtime");
+});
+
 test("generic channel config shapes serialize with masked summaries and capabilities", () => {
   const overview: ChannelConfigOverview = {
     baseOnboardingCompleted: true,

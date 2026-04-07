@@ -471,19 +471,6 @@ func onboardingDestinationSection(_ destination: OnboardingDestination) -> Nativ
     }
 }
 
-func buildExistingInstallAdvanceRequest(
-    overview: ProductOverview?
-) -> UpdateOnboardingStateRequest {
-    .init(
-        currentStep: .permissions,
-        install: .init(
-            installed: true,
-            version: overview?.engine.version,
-            disposition: "reused-existing"
-        )
-    )
-}
-
 func resolveNativeOnboardingInstallTarget(
     overview: ProductOverview?,
     deploymentTargets: DeploymentTargetsResponse?
@@ -548,12 +535,6 @@ func resolveOnboardingChannelSetupVariant(_ setupKind: OnboardingChannelSetupKin
     default:
         return .feishuGuided
     }
-}
-
-private let nativeOnboardingRandomAlphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
-
-private func randomBase62(length: Int) -> String {
-    String((0 ..< length).map { _ in nativeOnboardingRandomAlphabet.randomElement()! })
 }
 
 private func nonEmptyTrimmed(_ value: String?) -> String? {
@@ -693,10 +674,6 @@ func onboardingStepIndex(_ step: OnboardingStep) -> Int {
     nativeOnboardingStepOrder.firstIndex(of: step) ?? 0
 }
 
-func nativeOnboardingNextStepAfterModelSave(requiresInteraction: Bool) -> OnboardingStep {
-    requiresInteraction ? .model : .channel
-}
-
 func onboardingIsCurrentOrLater(_ step: OnboardingStep, target: OnboardingStep) -> Bool {
     onboardingStepIndex(step) >= onboardingStepIndex(target)
 }
@@ -748,18 +725,6 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
             return nil
         }
     }
-}
-
-func installDisposition(overview: ProductOverview?, setup: SetupRunResponse) -> String {
-    if setup.install?.disposition == "reused-existing" {
-        return "reused-existing"
-    }
-
-    if overview?.engine.installed == true {
-        return "installed-managed"
-    }
-
-    return "not-installed"
 }
 
 enum NativeOnboardingInstallScreenKind: Sendable {
@@ -1047,6 +1012,114 @@ func resolveNativeOnboardingLocalSetupProgress(
     }
 }
 
+struct NativeOnboardingLocalModelDownloadInfo: Sendable, Equatable {
+    let modelLabel: String?
+    let amountLabel: String
+    let remainingLabel: String?
+    let percentLabel: String?
+    let progressPercent: Int?
+}
+
+private func trimNativeOnboardingText(_ value: String?) -> String? {
+    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
+
+    return trimmed
+}
+
+private func nativeOnboardingDownloadMessageIsTechnical(_ value: String?) -> Bool {
+    (value ?? "").localizedCaseInsensitiveContains("sha256:")
+}
+
+private func formatNativeOnboardingTemplate(
+    _ template: String,
+    replacements: [String: String]
+) -> String {
+    replacements.reduce(template) { partialResult, replacement in
+        partialResult.replacingOccurrences(of: "{\(replacement.key)}", with: replacement.value)
+    }
+}
+
+private func formatNativeOnboardingGigabytes(_ bytes: Int, locale: Locale) -> String {
+    let gigabytes = (Double(bytes) / 1_000_000_000.0 * 10).rounded() / 10
+    let formatter = NumberFormatter()
+    formatter.locale = locale
+    formatter.numberStyle = .decimal
+    formatter.minimumFractionDigits = gigabytes.rounded() == gigabytes ? 0 : 1
+    formatter.maximumFractionDigits = 1
+    let value = formatter.string(from: NSNumber(value: gigabytes)) ?? String(format: "%.1f", gigabytes)
+    return "\(value) GB"
+}
+
+private func normalizeNativeOnboardingModelLabel(_ modelKey: String?) -> String? {
+    guard let trimmed = trimNativeOnboardingText(modelKey) else {
+        return nil
+    }
+
+    guard let slashIndex = trimmed.firstIndex(of: "/") else {
+        return trimmed
+    }
+
+    return String(trimmed[trimmed.index(after: slashIndex)...])
+}
+
+func describeNativeOnboardingLocalModelDownload(
+    localRuntime: LocalModelRuntimeOverview?,
+    copy: NativeOnboardingCopy
+) -> NativeOnboardingLocalModelDownloadInfo? {
+    guard let localRuntime, localRuntime.status == "downloading-model" else {
+        return nil
+    }
+
+    let modelLabel = normalizeNativeOnboardingModelLabel(localRuntime.chosenModelKey)
+    let locale = Locale(identifier: copy.localeIdentifier)
+    if let completedBytes = localRuntime.progressCompletedBytes,
+       let totalBytes = localRuntime.progressTotalBytes,
+       totalBytes > 0,
+       completedBytes >= 0
+    {
+        let clampedCompleted = min(completedBytes, totalBytes)
+        let progressPercent = max(0, min(100, localRuntime.progressPercent ?? Int(round((Double(clampedCompleted) / Double(totalBytes)) * 100))))
+
+        return .init(
+            modelLabel: modelLabel,
+            amountLabel: formatNativeOnboardingTemplate(
+                copy.localModelDownloadAmountLabel,
+                replacements: [
+                    "downloaded": formatNativeOnboardingGigabytes(clampedCompleted, locale: locale),
+                    "total": formatNativeOnboardingGigabytes(totalBytes, locale: locale),
+                ]
+            ),
+            remainingLabel: formatNativeOnboardingTemplate(
+                copy.localModelDownloadRemainingLabel,
+                replacements: [
+                    "remaining": formatNativeOnboardingGigabytes(max(totalBytes - clampedCompleted, 0), locale: locale),
+                ]
+            ),
+            percentLabel: formatNativeOnboardingTemplate(
+                copy.localModelDownloadPercentLabel,
+                replacements: ["percent": String(progressPercent)]
+            ),
+            progressPercent: progressPercent
+        )
+    }
+
+    let fallbackMessage =
+        trimNativeOnboardingText(localRuntime.progressMessage) ??
+        (nativeOnboardingDownloadMessageIsTechnical(localRuntime.detail) ? nil : trimNativeOnboardingText(localRuntime.detail)) ??
+        (nativeOnboardingDownloadMessageIsTechnical(localRuntime.summary) ? nil : trimNativeOnboardingText(localRuntime.summary)) ??
+        copy.localModelDownloadStepLabel
+
+    return .init(
+        modelLabel: modelLabel,
+        amountLabel: fallbackMessage,
+        remainingLabel: nil,
+        percentLabel: nil,
+        progressPercent: nil
+    )
+}
+
 func resolveNativeOnboardingModelSetupVariant(providerID: String, methodKind: String?) -> NativeOnboardingModelSetupVariant {
     if methodKind == "oauth" {
         return .oauth
@@ -1070,49 +1143,13 @@ func requiredModelFieldsMissing(_ method: ModelAuthMethod?, values: [String: Str
     }
 }
 
-func saveEntrySignature(_ entry: SavedModelEntry?) -> String {
-    guard let entry else { return "" }
-    return [
-        entry.id,
-        entry.providerId,
-        entry.modelKey,
-        entry.authMethodId ?? "",
-        String(entry.isDefault),
-        String(entry.isFallback),
-        entry.updatedAt,
-    ].joined(separator: "|")
-}
-
-func channelEntrySignature(_ entry: ConfiguredChannelEntry?) -> String {
-    guard let entry else { return "" }
-    return [
-        entry.id,
-        entry.channelId.rawValue,
-        entry.status,
-        entry.summary,
-        String(entry.pairingRequired),
-        entry.lastUpdatedAt ?? "",
-    ].joined(separator: "|")
-}
-
-func findCreatedSavedEntry(previousEntries: [SavedModelEntry], nextEntries: [SavedModelEntry]) -> SavedModelEntry? {
-    nextEntries.first(where: { next in !previousEntries.contains(where: { $0.id == next.id }) })
-}
-
-func findCreatedChannelEntry(previousEntries: [ConfiguredChannelEntry], nextEntries: [ConfiguredChannelEntry]) -> ConfiguredChannelEntry? {
-    nextEntries.first(where: { next in !previousEntries.contains(where: { $0.id == next.id }) })
-}
-
-func findCreatedMember(previousMembers: [AIMemberDetail], nextMembers: [AIMemberDetail]) -> AIMemberDetail? {
-    nextMembers.first(where: { next in !previousMembers.contains(where: { $0.id == next.id }) })
-}
-
 struct NativeOnboardingHighlight: Sendable {
     let title: String
     let body: String
 }
 
 struct NativeOnboardingCopy: Sendable {
+    let localeIdentifier: String
     let brand: String
     let subtitle: String
     let skip: String
@@ -1169,6 +1206,10 @@ struct NativeOnboardingCopy: Sendable {
     let localModelPrepareStepLabel: String
     let localModelDownloadStepLabel: String
     let localModelConnectStepLabel: String
+    let localModelDownloadAmountLabel: String
+    let localModelDownloadRemainingLabel: String
+    let localModelDownloadPercentLabel: String
+    let localModelDownloadResumeNote: String
     let providerTitle: String
     let authTitle: String
     let authApiKeyLabel: String
@@ -1302,6 +1343,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
     switch locale {
     case .zh:
         return .init(
+            localeIdentifier: "zh",
             brand: "ChillClaw",
             subtitle: "几分钟内搭建你的 OpenClaw 数字员工工作区",
             skip: "跳过引导",
@@ -1362,6 +1404,10 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             localModelPrepareStepLabel: "准备 Ollama",
             localModelDownloadStepLabel: "下载本地模型",
             localModelConnectStepLabel: "将 ChillClaw 连接到本地 AI",
+            localModelDownloadAmountLabel: "已下载 {downloaded} / {total}",
+            localModelDownloadRemainingLabel: "剩余 {remaining}",
+            localModelDownloadPercentLabel: "已完成 {percent}%",
+            localModelDownloadResumeNote: "你可以离开此页面。如果下载中断，ChillClaw 会自动继续。",
             providerTitle: "选择一个供应商开始",
             authTitle: "你希望如何连接？",
             authApiKeyLabel: "API Key",
@@ -1471,6 +1517,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
         )
     case .ja:
         return .init(
+            localeIdentifier: "ja",
             brand: "ChillClaw",
             subtitle: "数分で OpenClaw ベースのデジタル従業員ワークスペースを構築します",
             skip: "オンボーディングをスキップ",
@@ -1531,6 +1578,10 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             localModelPrepareStepLabel: "Ollama を準備",
             localModelDownloadStepLabel: "ローカルモデルをダウンロード",
             localModelConnectStepLabel: "ChillClaw をローカル AI に接続",
+            localModelDownloadAmountLabel: "{downloaded} / {total} をダウンロード済み",
+            localModelDownloadRemainingLabel: "残り {remaining}",
+            localModelDownloadPercentLabel: "{percent}% 完了",
+            localModelDownloadResumeNote: "この画面を離れても大丈夫です。ダウンロードが中断しても、ChillClaw が自動で再開します。",
             providerTitle: "開始するプロバイダーを選択",
             authTitle: "どの方法で接続しますか？",
             authApiKeyLabel: "API Key",
@@ -1640,6 +1691,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
         )
     case .ko:
         return .init(
+            localeIdentifier: "ko",
             brand: "ChillClaw",
             subtitle: "몇 분 안에 OpenClaw 기반 디지털 직원 작업 공간을 만드세요",
             skip: "온보딩 건너뛰기",
@@ -1700,6 +1752,10 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             localModelPrepareStepLabel: "Ollama 준비",
             localModelDownloadStepLabel: "로컬 모델 다운로드",
             localModelConnectStepLabel: "ChillClaw를 로컬 AI에 연결",
+            localModelDownloadAmountLabel: "{downloaded} / {total} 다운로드됨",
+            localModelDownloadRemainingLabel: "{remaining} 남음",
+            localModelDownloadPercentLabel: "{percent}% 완료",
+            localModelDownloadResumeNote: "이 화면을 떠나도 됩니다. 다운로드가 중단되면 ChillClaw가 자동으로 이어받습니다.",
             providerTitle: "시작할 제공자를 선택하세요",
             authTitle: "어떻게 연결하시겠어요?",
             authApiKeyLabel: "API Key",
@@ -1809,6 +1865,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
         )
     case .es:
         return .init(
+            localeIdentifier: "es",
             brand: "ChillClaw",
             subtitle: "Construye en minutos tu espacio de trabajo de empleados digitales impulsado por OpenClaw",
             skip: "Omitir onboarding",
@@ -1869,6 +1926,10 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             localModelPrepareStepLabel: "Preparar Ollama",
             localModelDownloadStepLabel: "Descargar modelo local",
             localModelConnectStepLabel: "Conectar ChillClaw a la IA local",
+            localModelDownloadAmountLabel: "{downloaded} de {total} descargados",
+            localModelDownloadRemainingLabel: "{remaining} restantes",
+            localModelDownloadPercentLabel: "{percent}% completado",
+            localModelDownloadResumeNote: "Puedes salir de esta pantalla. ChillClaw reanudará la descarga automáticamente si se interrumpe.",
             providerTitle: "Selecciona un proveedor para empezar",
             authTitle: "¿Cómo te gustaría conectarte?",
             authApiKeyLabel: "API Key",
@@ -1978,6 +2039,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
         )
     case .en:
         return .init(
+            localeIdentifier: "en",
             brand: "ChillClaw",
             subtitle: "Build your OpenClaw-powered digital employee workspace in minutes",
             skip: "Skip onboarding",
@@ -2038,6 +2100,10 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             localModelPrepareStepLabel: "Prepare Ollama",
             localModelDownloadStepLabel: "Download local model",
             localModelConnectStepLabel: "Connect ChillClaw to local AI",
+            localModelDownloadAmountLabel: "{downloaded} of {total} downloaded",
+            localModelDownloadRemainingLabel: "{remaining} remaining",
+            localModelDownloadPercentLabel: "{percent}% complete",
+            localModelDownloadResumeNote: "You can leave this screen. ChillClaw will resume automatically if the download is interrupted.",
             providerTitle: "Select a provider to get started",
             authTitle: "How would you like to connect?",
             authApiKeyLabel: "API Key",

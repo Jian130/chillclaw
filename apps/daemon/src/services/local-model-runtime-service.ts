@@ -59,7 +59,7 @@ export type LocalModelRuntimeAccess = {
   inspectHost: () => Promise<LocalModelHostSnapshot>;
   readPersistedState: () => Promise<PersistedLocalModelRuntimeState | undefined>;
   writePersistedState: (nextState: PersistedLocalModelRuntimeState) => Promise<void>;
-  fetchModelConfig: () => Promise<ModelConfigOverview>;
+  fetchModelSelection: () => Promise<Pick<ModelConfigOverview, "savedEntries" | "defaultEntryId" | "defaultModel">>;
   resolveInstalledRuntime: () => Promise<ResolvedOllamaRuntime | undefined>;
   installManagedRuntime: () => Promise<ResolvedOllamaRuntime>;
   isRuntimeReachable: (runtime: ResolvedOllamaRuntime | undefined) => Promise<boolean>;
@@ -161,12 +161,18 @@ export async function resolveDiskProbePath(targetPath: string): Promise<string> 
   }
 }
 
-function activeLocalEntry(modelConfig: ModelConfigOverview) {
-  const defaultEntry =
-    modelConfig.savedEntries.find((entry) => entry.id === modelConfig.defaultEntryId) ??
-    modelConfig.savedEntries.find((entry) => entry.modelKey === modelConfig.defaultModel);
+function activeLocalEntry(modelSelection: Pick<ModelConfigOverview, "savedEntries" | "defaultEntryId" | "defaultModel">) {
+  const defaultModel = modelSelection.defaultModel?.trim();
+  const defaultModelEntry = defaultModel
+    ? modelSelection.savedEntries.find((entry) => entry.modelKey === defaultModel)
+    : undefined;
+  const defaultEntry = defaultModelEntry ?? (
+    defaultModel
+      ? undefined
+      : modelSelection.savedEntries.find((entry) => entry.id === modelSelection.defaultEntryId)
+  );
 
-  return defaultEntry?.providerId === "ollama" || defaultEntry?.modelKey.startsWith("ollama/") || modelConfig.defaultModel?.startsWith("ollama/")
+  return defaultEntry?.providerId === "ollama" || defaultEntry?.modelKey.startsWith("ollama/")
     ? defaultEntry
     : undefined;
 }
@@ -249,13 +255,17 @@ export class LocalModelRuntimeService {
       );
     }
 
-    const modelConfig = existingModelConfig ?? (await this.access.fetchModelConfig());
+    const modelSelection = existingModelConfig ?? (await this.access.fetchModelSelection());
     const runtime = await this.access.resolveInstalledRuntime();
-    const activeEntry = activeLocalEntry(modelConfig);
-    const chosenModelKey = persisted?.selectedModelKey ?? activeEntry?.modelKey ?? recommendedTier.modelKey;
+    const activeEntry = activeLocalEntry(modelSelection);
+    const activeDefaultLocalModelKey = modelSelection.defaultModel?.startsWith("ollama/") ? modelSelection.defaultModel : undefined;
+    const chosenModelKey = persisted?.selectedModelKey ?? activeEntry?.modelKey ?? activeDefaultLocalModelKey ?? recommendedTier.modelKey;
     const runtimeReachable = runtime ? await this.access.isRuntimeReachable(runtime) : false;
-    const modelDownloaded = runtime && chosenModelKey ? await this.access.isModelAvailable(runtime, modelTagFromKey(chosenModelKey)) : false;
-    const activeInOpenClaw = Boolean(activeEntry || modelConfig.defaultModel?.startsWith("ollama/"));
+    const modelDownloaded =
+      runtime && runtimeReachable && chosenModelKey
+        ? await this.access.isModelAvailable(runtime, modelTagFromKey(chosenModelKey))
+        : false;
+    const activeInOpenClaw = Boolean(activeEntry || activeDefaultLocalModelKey);
 
     let status: LocalModelRuntimeStatus = "idle";
     if (inFlightStatus(persisted?.status)) {
@@ -774,7 +784,7 @@ export function createLocalModelRuntimeService(
         localModelRuntime: nextState
       }));
     },
-    fetchModelConfig: async () => adapter.config.getModelConfig(),
+    fetchModelSelection: async () => adapter.config.getModelSelection(),
     resolveInstalledRuntime: async () => {
       return resolveInstalledRuntimeCandidate([
         { command: getManagedOllamaCliPath(), source: "managed-install" as const, managed: true },

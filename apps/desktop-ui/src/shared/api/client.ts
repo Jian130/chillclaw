@@ -252,7 +252,7 @@ export function detectOnboardingRuntime(): Promise<OnboardingStateResponse> {
   });
 }
 
-export function installOnboardingRuntime(forceLocal = false): Promise<SetupRunResponse> {
+export function installOnboardingRuntime(forceLocal = true): Promise<SetupRunResponse> {
   return readJson<SetupRunResponse>("/onboarding/runtime/install", {
     method: "POST",
     body: JSON.stringify({ autoConfigure: true, forceLocal })
@@ -436,7 +436,7 @@ export function repairLocalModelRuntime(): Promise<LocalModelRuntimeActionRespon
   });
 }
 
-export function runFirstRunSetup(forceLocal = false): Promise<SetupRunResponse> {
+export function runFirstRunSetup(forceLocal = true): Promise<SetupRunResponse> {
   return readJson<SetupRunResponse>("/first-run/setup", {
     method: "POST",
     body: JSON.stringify({ autoConfigure: true, forceLocal })

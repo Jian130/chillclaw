@@ -29,6 +29,11 @@ test("config manager stores model auth secrets through the secrets adapter befor
   const manager = new OpenClawConfigManager(
     {
       getModelConfig: async () => response.modelConfig,
+      getModelSelection: async () => ({
+        savedEntries: response.modelConfig.savedEntries,
+        defaultModel: response.modelConfig.defaultModel,
+        defaultEntryId: response.modelConfig.defaultEntryId
+      }),
       createSavedModelEntry: async () => response,
       updateSavedModelEntry: async () => response,
       upsertManagedLocalModelEntry: async () => response,

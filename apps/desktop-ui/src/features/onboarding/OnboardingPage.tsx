@@ -78,6 +78,7 @@ import {
   applyOnboardingChannelSessionToConfig,
   applyPresetSkillSyncToOnboardingState,
   buildOnboardingChannelSaveValues,
+  describeOnboardingLocalModelDownload,
   onboardingDestinationPath,
   resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingEmployeePresets,
@@ -364,7 +365,17 @@ export default function OnboardingPage() {
       selectedModelEntry
     ]
   );
-  const localRuntime = localRuntimeSnapshot ?? modelConfig?.localRuntime ?? overview?.localRuntime;
+  const localRuntime = localRuntimeSnapshot ?? modelConfig?.localRuntime ?? onboardingState?.localRuntime;
+  const localRuntimeForDisplay = useMemo(
+    () =>
+      localRuntime
+        ? {
+            ...localRuntime,
+            progressMessage: localRuntimeMessage || localRuntime.progressMessage
+          }
+        : localRuntime,
+    [localRuntime, localRuntimeMessage]
+  );
   const localRuntimeConnected = Boolean(localRuntime?.activeInOpenClaw);
   const localRuntimeStatusTone =
     localRuntime?.status === "ready"
@@ -387,6 +398,10 @@ export default function OnboardingPage() {
   const localRuntimeStorageLabel = localRuntime?.requiredDiskGb
     ? copy.localAiStorageLabel.replace("{gb}", String(localRuntime.requiredDiskGb))
     : undefined;
+  const localModelDownloadInfo = useMemo(
+    () => describeOnboardingLocalModelDownload(localRuntimeForDisplay, locale, copy),
+    [copy, localRuntimeForDisplay, locale]
+  );
   const baseModelStepMode = resolveOnboardingModelStepMode({
     bootstrapPending: modelBootstrapPending,
     providerId,
@@ -605,14 +620,6 @@ export default function OnboardingPage() {
   ]);
 
   useEffect(() => {
-    if (currentStep !== "model" || !onboardingState || modelPickerProviders.length > 0) {
-      return;
-    }
-
-    void refreshOnboardingState().catch(() => undefined);
-  }, [currentStep, modelPickerProviders.length, onboardingState]);
-
-  useEffect(() => {
     if (!modelPickerProviders.length) {
       setProviderId("");
       return;
@@ -754,11 +761,11 @@ export default function OnboardingPage() {
 
     void (async () => {
       try {
-        const [nextOverview, nextModelConfig] = await Promise.all([readFreshOverview(), readFreshModelConfig()]);
+        const nextState = await fetchOnboardingState({ fresh: true });
         if (cancelled) {
           return;
         }
-        setLocalRuntimeSnapshot(nextModelConfig.localRuntime ?? nextOverview.localRuntime);
+        await applyOnboardingState(nextState);
       } catch (loadError) {
         if (!cancelled) {
           setPageError(loadError instanceof Error ? loadError.message : "ChillClaw could not inspect local AI support.");
@@ -1604,7 +1611,7 @@ export default function OnboardingPage() {
                           <p>
                             {modelStepMode === "detecting-local"
                               ? copy.localModelDetectingBody
-                              : localRuntimeMessage || localRuntime?.detail || copy.localModelDetectingBody}
+                              : localModelDownloadInfo?.amountLabel || localRuntimeMessage || localRuntime?.detail || copy.localModelDetectingBody}
                           </p>
                         </div>
                         {localRuntimeStorageLabel && modelStepMode === "local-setup" ? (
@@ -1614,6 +1621,34 @@ export default function OnboardingPage() {
                           </TagBadge>
                         ) : null}
                       </div>
+
+                      {localModelDownloadInfo ? (
+                        <div className="onboarding-model-download-card">
+                          <div className="onboarding-model-download-card__header">
+                            <div className="onboarding-model-download-card__copy">
+                              <strong>{localModelDownloadInfo.amountLabel}</strong>
+                              {localModelDownloadInfo.remainingLabel ? (
+                                <span>{localModelDownloadInfo.remainingLabel}</span>
+                              ) : null}
+                            </div>
+                            {localModelDownloadInfo.modelLabel ? (
+                              <TagBadge tone="neutral">
+                                <Server size={14} />
+                                {localModelDownloadInfo.modelLabel}
+                              </TagBadge>
+                            ) : null}
+                          </div>
+                          {typeof localModelDownloadInfo.progressPercent === "number" ? (
+                            <Progress value={localModelDownloadInfo.progressPercent} />
+                          ) : null}
+                          <div className="onboarding-model-download-card__meta">
+                            <span>{localModelDownloadInfo.percentLabel ?? copy.localModelDownloadResumeNote}</span>
+                            {localModelDownloadInfo.percentLabel ? (
+                              <span>{copy.localModelDownloadResumeNote}</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
 
                       <div className="onboarding-model-local-progress">
                         {localSetupSteps.map((label, index) => {

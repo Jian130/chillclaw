@@ -32,13 +32,12 @@ export const onboardingRoutes: RouteDefinition[] = [
     match: createPathMatcher("/api/first-run/setup"),
     async handle({ context, request }) {
       const body = await readJson<InstallRequest>(request);
-      return jsonResponse(await context.setupService.runFirstRunSetup({ forceLocal: body.forceLocal ?? false }));
+      return jsonResponse(await context.setupService.runFirstRunSetup({ forceLocal: body.forceLocal ?? true }));
     }
   },
   {
     method: "GET",
     match: createPathMatcher("/api/onboarding/state"),
-    freshReadInvalidationTargets: ["engine", "channels", "models", "skills", "ai-members"],
     async handle({ context }) {
       return jsonResponse(await context.onboardingService.getState());
     }
@@ -63,7 +62,7 @@ export const onboardingRoutes: RouteDefinition[] = [
     match: createPathMatcher("/api/onboarding/runtime/install"),
     async handle({ context, request }) {
       const body = await readJson<InstallRequest>(request);
-      return jsonResponse(await context.onboardingService.installRuntime({ forceLocal: body.forceLocal ?? false }));
+      return jsonResponse(await context.onboardingService.installRuntime({ forceLocal: body.forceLocal ?? true }));
     }
   },
   {

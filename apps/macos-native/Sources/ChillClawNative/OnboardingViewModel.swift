@@ -293,7 +293,7 @@ final class NativeOnboardingViewModel {
     }
 
     var localRuntime: LocalModelRuntimeOverview? {
-        appState.modelConfig?.localRuntime ?? appState.overview?.localRuntime ?? localRuntimeSnapshot
+        localRuntimeSnapshot ?? appState.modelConfig?.localRuntime ?? onboardingState?.localRuntime
     }
 
     var modelViewState: NativeOnboardingModelViewState {
@@ -369,6 +369,27 @@ final class NativeOnboardingViewModel {
             copy.localModelDownloadStepLabel,
             copy.localModelConnectStepLabel,
         ]
+    }
+
+    var localModelDownloadInfo: NativeOnboardingLocalModelDownloadInfo? {
+        guard var localRuntime else {
+            return nil
+        }
+
+        let trimmedMessage = localRuntimeMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMessage.isEmpty {
+            localRuntime.progressMessage = trimmedMessage
+        }
+
+        return describeNativeOnboardingLocalModelDownload(localRuntime: localRuntime, copy: copy)
+    }
+
+    var localRuntimeSetupDetailText: String {
+        if let localModelDownloadInfo {
+            return localModelDownloadInfo.amountLabel
+        }
+
+        return localRuntimeMessage.isEmpty ? localRuntime?.detail ?? copy.localModelDetectingBody : localRuntimeMessage
     }
 
     var selectedCuratedProvider: OnboardingModelProviderPresentation? {
@@ -630,10 +651,6 @@ final class NativeOnboardingViewModel {
                         throw error
                     }
                 }
-            }
-
-            if currentStep == .model && modelPickerProviders.isEmpty {
-                applyOnboardingState(try await appState.client.fetchOnboardingState(fresh: true))
             }
 
             if currentStep == .channel && curatedChannels.isEmpty {
@@ -1590,12 +1607,8 @@ final class NativeOnboardingViewModel {
                 }
 
                 do {
-                    // Keep the local-first model bootstrap serialized on macOS.
-                    // Running both fresh reads concurrently here has triggered native aborts
-                    // during the detection screen, while the UI only needs both results before continuing.
-                    let nextOverview = try await self.readFreshOverview()
-                    let nextModelConfig = try await self.readFreshModelConfig()
-                    self.localRuntimeSnapshot = nextModelConfig.localRuntime ?? nextOverview.localRuntime
+                    let nextState = try await self.appState.client.fetchOnboardingState(fresh: true)
+                    self.applyOnboardingState(nextState)
                     self.pageError = nil
                 } catch {
                     if error is CancellationError {
@@ -1884,6 +1897,7 @@ final class NativeOnboardingViewModel {
                     draft: currentOnboardingState.draft,
                     config: currentOnboardingState.config,
                     summary: currentOnboardingState.summary,
+                    localRuntime: currentOnboardingState.localRuntime,
                     presetSkillSync: snapshot.data
                 )
             }

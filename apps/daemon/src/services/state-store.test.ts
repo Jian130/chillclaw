@@ -270,3 +270,56 @@ test("state store serializes concurrent updates so later writes do not drop earl
   assert.equal(persisted.introCompletedAt, "2026-04-05T00:00:00.000Z");
   assert.equal(persisted.setupCompletedAt, "2026-04-05T00:01:00.000Z");
 });
+
+test("state store normalizes oversized persisted local runtime text on read", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/state-store-local-runtime-read-${randomUUID()}.json`);
+  const filesystem = new FilesystemStateAdapter();
+  const store = new StateStore(filePath, filesystem);
+  const oversizedError = `${"\u001b[2Kpulling manifest\r".repeat(500)}fatal: could not connect to ollama server`;
+  const oversizedProgress = `${"\u001b[1Apulling layer\r".repeat(500)}resuming local model download`;
+
+  await filesystem.writeJson(filePath, {
+    tasks: [],
+    localModelRuntime: {
+      status: "failed",
+      lastError: oversizedError,
+      progressMessage: oversizedProgress
+    }
+  } satisfies AppState);
+
+  const persisted = await store.read();
+
+  assert.equal(persisted.localModelRuntime?.status, "failed");
+  assert.ok((persisted.localModelRuntime?.lastError?.length ?? 0) < oversizedError.length);
+  assert.ok((persisted.localModelRuntime?.progressMessage?.length ?? 0) < oversizedProgress.length);
+  assert.doesNotMatch(persisted.localModelRuntime?.lastError ?? "", /\u001b\[[0-9;]*[A-Za-z]/);
+  assert.doesNotMatch(persisted.localModelRuntime?.progressMessage ?? "", /\u001b\[[0-9;]*[A-Za-z]/);
+  assert.match(persisted.localModelRuntime?.lastError ?? "", /fatal: could not connect to ollama server/);
+  assert.match(persisted.localModelRuntime?.progressMessage ?? "", /resuming local model download/);
+});
+
+test("state store persists normalized local runtime text on write", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/state-store-local-runtime-write-${randomUUID()}.json`);
+  const filesystem = new FilesystemStateAdapter();
+  const store = new StateStore(filePath, filesystem);
+  const oversizedError = `${"\u001b[2Kdownloading\r".repeat(500)}repair failed`;
+  const oversizedProgress = `${"\u001b[1Averifying\r".repeat(500)}verifying downloaded model`;
+
+  await store.write({
+    tasks: [],
+    localModelRuntime: {
+      status: "downloading-model",
+      lastError: oversizedError,
+      progressMessage: oversizedProgress
+    }
+  });
+
+  const rawPersisted = await filesystem.readJson<AppState>(filePath, { tasks: [] });
+
+  assert.ok((rawPersisted.localModelRuntime?.lastError?.length ?? 0) < oversizedError.length);
+  assert.ok((rawPersisted.localModelRuntime?.progressMessage?.length ?? 0) < oversizedProgress.length);
+  assert.doesNotMatch(rawPersisted.localModelRuntime?.lastError ?? "", /\u001b\[[0-9;]*[A-Za-z]/);
+  assert.doesNotMatch(rawPersisted.localModelRuntime?.progressMessage ?? "", /\u001b\[[0-9;]*[A-Za-z]/);
+  assert.match(rawPersisted.localModelRuntime?.lastError ?? "", /repair failed/);
+  assert.match(rawPersisted.localModelRuntime?.progressMessage ?? "", /verifying downloaded model/);
+});

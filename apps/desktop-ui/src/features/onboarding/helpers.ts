@@ -231,6 +231,14 @@ export interface OnboardingLocalSetupProgress {
   currentStep: 1 | 2 | 3 | 4;
 }
 
+export interface OnboardingLocalModelDownloadInfo {
+  modelLabel?: string;
+  amountLabel: string;
+  remainingLabel?: string;
+  percentLabel?: string;
+  progressPercent?: number;
+}
+
 export type OnboardingModelSetupVariant = "default-api-key" | "guided-minimax-api-key" | "oauth";
 export type OnboardingChannelSetupVariant =
   | "wechat-work-guided"
@@ -406,6 +414,98 @@ export function resolveOnboardingLocalSetupProgress(
     default:
       return { currentStep: 1 };
   }
+}
+
+function trimOnboardingText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function localModelMessageIsTechnical(value: string | undefined) {
+  return /sha256:/i.test(value ?? "");
+}
+
+function formatOnboardingDownloadTemplate(
+  template: string,
+  replacements: Record<string, string | number>
+) {
+  return Object.entries(replacements).reduce(
+    (resolved, [key, value]) => resolved.replace(`{${key}}`, String(value)),
+    template
+  );
+}
+
+function formatOnboardingGigabytes(bytes: number, locale: string) {
+  const gigabytes = Math.round((bytes / 1_000_000_000) * 10) / 10;
+  const formatted = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: Number.isInteger(gigabytes) ? 0 : 1,
+    maximumFractionDigits: 1
+  }).format(gigabytes);
+
+  return `${formatted} GB`;
+}
+
+function normalizeOnboardingModelLabel(modelKey: string | undefined) {
+  const trimmed = trimOnboardingText(modelKey);
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const slashIndex = trimmed.indexOf("/");
+  return slashIndex >= 0 ? trimmed.slice(slashIndex + 1) : trimmed;
+}
+
+export function describeOnboardingLocalModelDownload(
+  localRuntime: ModelConfigOverview["localRuntime"] | undefined,
+  locale: string,
+  copy: Pick<
+    OnboardingCopy,
+    | "localModelDownloadAmountLabel"
+    | "localModelDownloadRemainingLabel"
+    | "localModelDownloadPercentLabel"
+    | "localModelDownloadStepLabel"
+  >
+): OnboardingLocalModelDownloadInfo | undefined {
+  if (!localRuntime || localRuntime.status !== "downloading-model") {
+    return undefined;
+  }
+
+  const modelLabel = normalizeOnboardingModelLabel(localRuntime.chosenModelKey);
+  const completedBytes = localRuntime.progressCompletedBytes;
+  const totalBytes = localRuntime.progressTotalBytes;
+  if (typeof completedBytes === "number" && typeof totalBytes === "number" && totalBytes > 0 && completedBytes >= 0) {
+    const clampedCompleted = Math.min(completedBytes, totalBytes);
+    const progressPercent = Math.max(
+      0,
+      Math.min(100, localRuntime.progressPercent ?? Math.round((clampedCompleted / totalBytes) * 100))
+    );
+
+    return {
+      modelLabel,
+      amountLabel: formatOnboardingDownloadTemplate(copy.localModelDownloadAmountLabel, {
+        downloaded: formatOnboardingGigabytes(clampedCompleted, locale),
+        total: formatOnboardingGigabytes(totalBytes, locale)
+      }),
+      remainingLabel: formatOnboardingDownloadTemplate(copy.localModelDownloadRemainingLabel, {
+        remaining: formatOnboardingGigabytes(Math.max(totalBytes - clampedCompleted, 0), locale)
+      }),
+      percentLabel: formatOnboardingDownloadTemplate(copy.localModelDownloadPercentLabel, {
+        percent: progressPercent
+      }),
+      progressPercent
+    };
+  }
+
+  const fallbackMessage =
+    trimOnboardingText(localRuntime.progressMessage) ??
+    (localModelMessageIsTechnical(localRuntime.detail) ? undefined : trimOnboardingText(localRuntime.detail)) ??
+    (localModelMessageIsTechnical(localRuntime.summary) ? undefined : trimOnboardingText(localRuntime.summary)) ??
+    copy.localModelDownloadStepLabel;
+
+  return {
+    modelLabel,
+    amountLabel: fallbackMessage
+  };
 }
 
 export function resolveOnboardingModelSetupVariant(args: {

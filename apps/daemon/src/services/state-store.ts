@@ -150,8 +150,55 @@ const DEFAULT_STATE: AppState = {
   tasks: []
 };
 
+const LOCAL_MODEL_RUNTIME_TEXT_MAX_LENGTH = 4_000;
+const ANSI_ESCAPE_SEQUENCE_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const NON_PRINTABLE_RUNTIME_TEXT_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
 const LEGACY_WECHAT_WORK_FIELD_IDS = new Set(["corpId", "agentId", "token", "encodingAesKey"]);
 const LEGACY_WECHAT_WORK_SUMMARY_LABELS = new Set(["Corp ID", "Agent ID", "Webhook token", "Encoding AES key"]);
+
+function normalizeLocalRuntimeText(value: string | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const stripped = value
+    .replace(ANSI_ESCAPE_SEQUENCE_PATTERN, "")
+    .replace(/\r+/g, "\n")
+    .replace(NON_PRINTABLE_RUNTIME_TEXT_PATTERN, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!stripped) {
+    return undefined;
+  }
+
+  if (stripped.length <= LOCAL_MODEL_RUNTIME_TEXT_MAX_LENGTH) {
+    return stripped;
+  }
+
+  return `...${stripped.slice(-(LOCAL_MODEL_RUNTIME_TEXT_MAX_LENGTH - 3))}`;
+}
+
+function normalizeLocalModelRuntimeState(state: LocalModelRuntimeState | undefined): LocalModelRuntimeState | undefined {
+  if (!state) {
+    return undefined;
+  }
+
+  return {
+    ...state,
+    lastError: normalizeLocalRuntimeText(state.lastError),
+    progressMessage: normalizeLocalRuntimeText(state.progressMessage)
+  };
+}
+
+function normalizeAppState(state: AppState): AppState {
+  return {
+    ...state,
+    localModelRuntime: normalizeLocalModelRuntimeState(state.localModelRuntime)
+  };
+}
 
 function containsLegacyWechatWorkMetadata(value: string | undefined): boolean {
   return /wechat work|wecom|workaround/i.test(value ?? "");
@@ -365,7 +412,7 @@ export class StateStore {
 
   private async readPersisted(): Promise<AppState> {
     const persisted = await this.filesystem.readJson(this.filePath, DEFAULT_STATE);
-    return migrateLegacyWechatChannelOnboarding(migrateLegacyOnboardingPresetSkills({ ...DEFAULT_STATE, ...persisted } as AppState));
+    return normalizeAppState(migrateLegacyWechatChannelOnboarding(migrateLegacyOnboardingPresetSkills({ ...DEFAULT_STATE, ...persisted } as AppState)));
   }
 
   private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -380,13 +427,13 @@ export class StateStore {
   }
 
   async write(nextState: AppState): Promise<void> {
-    await this.enqueueMutation(() => this.filesystem.writeJson(this.filePath, nextState));
+    await this.enqueueMutation(() => this.filesystem.writeJson(this.filePath, normalizeAppState(nextState)));
   }
 
   async update(updater: (current: AppState) => AppState): Promise<AppState> {
     return this.enqueueMutation(async () => {
       const current = await this.readPersisted();
-      const next = updater(current);
+      const next = normalizeAppState(updater(current));
       await this.filesystem.writeJson(this.filePath, next);
       return next;
     });

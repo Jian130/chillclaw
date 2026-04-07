@@ -60,6 +60,10 @@ export interface OnboardingCopy {
   localModelPrepareStepLabel: string;
   localModelDownloadStepLabel: string;
   localModelConnectStepLabel: string;
+  localModelDownloadAmountLabel: string;
+  localModelDownloadRemainingLabel: string;
+  localModelDownloadPercentLabel: string;
+  localModelDownloadResumeNote: string;
   providerTitle: string;
   authTitle: string;
   authApiKeyLabel: string;
@@ -218,6 +222,10 @@ const en: OnboardingCopy = {
   localModelPrepareStepLabel: "Prepare Ollama",
   localModelDownloadStepLabel: "Download local model",
   localModelConnectStepLabel: "Connect ChillClaw to local AI",
+  localModelDownloadAmountLabel: "{downloaded} of {total} downloaded",
+  localModelDownloadRemainingLabel: "{remaining} remaining",
+  localModelDownloadPercentLabel: "{percent}% complete",
+  localModelDownloadResumeNote: "You can leave this screen. ChillClaw will resume automatically if the download is interrupted.",
   providerTitle: "Select a provider to get started",
   authTitle: "How would you like to connect?",
   authApiKeyLabel: "API Key",
@@ -385,6 +393,10 @@ const zh: OnboardingCopy = {
   localModelPrepareStepLabel: "准备 Ollama",
   localModelDownloadStepLabel: "下载本地模型",
   localModelConnectStepLabel: "连接 ChillClaw 到本地 AI",
+  localModelDownloadAmountLabel: "已下载 {downloaded} / {total}",
+  localModelDownloadRemainingLabel: "剩余 {remaining}",
+  localModelDownloadPercentLabel: "已完成 {percent}%",
+  localModelDownloadResumeNote: "你可以离开此页面。如果下载中断，ChillClaw 会自动继续。",
   providerTitle: "选择一个供应商开始",
   authTitle: "你希望如何连接？",
   authApiKeyLabel: "API Key",
@@ -552,6 +564,10 @@ const ja: OnboardingCopy = {
   localModelPrepareStepLabel: "Ollama を準備",
   localModelDownloadStepLabel: "ローカルモデルをダウンロード",
   localModelConnectStepLabel: "ChillClaw をローカル AI に接続",
+  localModelDownloadAmountLabel: "{downloaded} / {total} をダウンロード済み",
+  localModelDownloadRemainingLabel: "残り {remaining}",
+  localModelDownloadPercentLabel: "{percent}% 完了",
+  localModelDownloadResumeNote: "この画面を離れても大丈夫です。ダウンロードが中断しても、ChillClaw が自動で再開します。",
   providerTitle: "プロバイダーを選んで開始",
   authTitle: "どの方法で接続しますか？",
   authApiKeyLabel: "API Key",
@@ -719,6 +735,10 @@ const ko: OnboardingCopy = {
   localModelPrepareStepLabel: "Ollama 준비",
   localModelDownloadStepLabel: "로컬 모델 다운로드",
   localModelConnectStepLabel: "ChillClaw를 로컬 AI에 연결",
+  localModelDownloadAmountLabel: "{downloaded} / {total} 다운로드됨",
+  localModelDownloadRemainingLabel: "{remaining} 남음",
+  localModelDownloadPercentLabel: "{percent}% 완료",
+  localModelDownloadResumeNote: "이 화면을 떠나도 됩니다. 다운로드가 중단되면 ChillClaw가 자동으로 이어받습니다.",
   providerTitle: "시작할 제공자를 선택하세요",
   authTitle: "어떤 방식으로 연결하시겠어요?",
   authApiKeyLabel: "API Key",
@@ -886,6 +906,10 @@ const es: OnboardingCopy = {
   localModelPrepareStepLabel: "Preparar Ollama",
   localModelDownloadStepLabel: "Descargar modelo local",
   localModelConnectStepLabel: "Conectar ChillClaw a la IA local",
+  localModelDownloadAmountLabel: "{downloaded} de {total} descargados",
+  localModelDownloadRemainingLabel: "{remaining} restantes",
+  localModelDownloadPercentLabel: "{percent}% completado",
+  localModelDownloadResumeNote: "Puedes salir de esta pantalla. ChillClaw reanudará la descarga automáticamente si se interrumpe.",
   providerTitle: "Selecciona un proveedor para empezar",
   authTitle: "¿Cómo te gustaría conectarte?",
   authApiKeyLabel: "API Key",

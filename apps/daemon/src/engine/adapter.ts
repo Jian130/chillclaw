@@ -200,6 +200,7 @@ export interface InstanceManager {
 
 export interface ConfigManager {
   getModelConfig(): Promise<ModelConfigOverview>;
+  getModelSelection(): Promise<Pick<ModelConfigOverview, "savedEntries" | "defaultEntryId" | "defaultModel">>;
   createSavedModelEntry(request: SaveModelEntryRequest): Promise<ModelConfigActionResponse>;
   updateSavedModelEntry(entryId: string, request: SaveModelEntryRequest): Promise<ModelConfigActionResponse>;
   upsertManagedLocalModelEntry(request: ManagedLocalModelEntryRequest): Promise<ModelConfigActionResponse>;

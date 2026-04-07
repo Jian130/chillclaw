@@ -1,0 +1,80 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="512"
+  height="512"
+  viewBox="0 0 512 512"
+  fill="none"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">Animated ChillClaw claw (2D)</title>
+  <desc id="desc">A flat 2D ChillClaw claw icon that opens and closes quickly in a loop.</desc>
+
+  <style>
+    .upper,
+    .lower {
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    .upper {
+      transform-origin: 262px 240px;
+      animation: chillclaw-upper 1.2s ease-in-out infinite;
+    }
+
+    .lower {
+      transform-origin: 250px 286px;
+      animation: chillclaw-lower 1.2s ease-in-out infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .upper,
+      .lower {
+        animation: none;
+      }
+    }
+
+    @keyframes chillclaw-upper {
+      0%,
+      100% {
+        transform: rotate(0deg);
+      }
+
+      40% {
+        transform: rotate(-12deg);
+      }
+
+      72% {
+        transform: rotate(-4deg);
+      }
+    }
+
+    @keyframes chillclaw-lower {
+      0%,
+      100% {
+        transform: rotate(0deg);
+      }
+
+      40% {
+        transform: rotate(10deg);
+      }
+
+      72% {
+        transform: rotate(3deg);
+      }
+    }
+  </style>
+
+  <g stroke="#1F1F1F" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path
+      class="upper"
+      fill="#FF5A36"
+      d="M93 209C97 165 121 133 163 114C206 94 260 92 308 108C342 119 370 139 390 168C406 190 413 209 409 223C406 232 397 235 380 234C354 232 326 235 302 247C281 257 266 272 250 292C224 325 193 344 156 346C132 347 111 339 96 323C82 309 75 290 75 269C75 247 81 226 93 209Z"
+    />
+    <path
+      class="lower"
+      fill="#FF5A36"
+      d="M182 319C204 307 226 298 247 291C277 280 311 276 348 278C379 280 405 287 425 300C436 307 439 316 434 326C422 346 405 364 382 380C359 396 332 407 303 414C275 421 245 423 216 418C192 415 172 408 155 397C142 389 134 380 130 369C126 357 129 347 138 339C149 331 163 324 182 319Z"
+    />
+  </g>
+</svg>

@@ -1728,6 +1728,176 @@ test("saveAIMemberRuntime prefers the canonical saved model key over stale clien
   });
 });
 
+test("saveAIMemberRuntime does not require saved credentials for managed local Ollama models", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath }) => {
+    await adapter.config.upsertManagedLocalModelEntry({
+      entryId: "managed-ollama-entry",
+      label: "Local AI on this Mac",
+      providerId: "ollama",
+      methodId: "ollama-local",
+      modelKey: "ollama/gemma4:e2b"
+    });
+
+    const result = await adapter.aiEmployees.saveAIMemberRuntime({
+      memberId: "member-ollama",
+      existingAgentId: "existing-agent",
+      name: "AI Ryo",
+      jobTitle: "Research Assistant",
+      avatar: {
+        presetId: "operator",
+        accent: "var(--avatar-1)",
+        emoji: "🧠",
+        theme: "onboarding"
+      },
+      personality: "Calm and methodical",
+      soul: "Helpful and precise",
+      workStyles: ["Methodical"],
+      skillIds: [],
+      selectedSkills: [],
+      capabilitySettings: {
+        memoryEnabled: true,
+        contextWindow: 128000
+      },
+      knowledgePacks: [],
+      brain: {
+        entryId: "managed-ollama-entry",
+        label: "Local AI on this Mac",
+        providerId: "ollama",
+        modelKey: "ollama/gemma4:e2b"
+      }
+    });
+    const commands = await readCommands(logPath);
+
+    assert.equal(result.agentId, "existing-agent");
+    assert.equal(result.requiresGatewayApply, true);
+    assert.equal(countCommands(commands, "models --agent existing-agent auth paste-token --provider ollama --profile-id ollama:chillclaw-existing-agent"), 0);
+  }, {
+    cleanModelRuntime: true
+  });
+});
+
+test("saveAIMemberRuntime repairs stale local Ollama config when the saved entry predates explicit provider wiring", async () => {
+  await withFakeOpenClaw(async ({ adapter, configPath, dataDir }) => {
+    const statePath = resolve(dataDir, "openclaw-state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          modelEntries: [
+            {
+              id: "managed-ollama-entry",
+              label: "Local AI on this Mac",
+              providerId: "ollama",
+              modelKey: "ollama/gemma4:e2b",
+              agentId: "",
+              agentDir: "",
+              workspaceDir: "",
+              authMethodId: "ollama-local",
+              profileIds: [],
+              isDefault: true,
+              isFallback: false,
+              createdAt: "2026-04-07T00:00:00.000Z",
+              updatedAt: "2026-04-07T00:00:00.000Z"
+            }
+          ],
+          defaultModelEntryId: "managed-ollama-entry",
+          fallbackModelEntryIds: []
+        },
+        null,
+        2
+      )
+    );
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          agents: {
+            defaults: {
+              model: {
+                primary: "ollama/gemma4:e2b",
+                fallbacks: []
+              },
+              models: {
+                "ollama/gemma4:e2b": {}
+              }
+            }
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    await adapter.aiEmployees.saveAIMemberRuntime({
+      memberId: "member-ollama",
+      existingAgentId: "existing-agent",
+      name: "AI Ryo",
+      jobTitle: "Research Assistant",
+      avatar: {
+        presetId: "operator",
+        accent: "var(--avatar-1)",
+        emoji: "🧠",
+        theme: "onboarding"
+      },
+      personality: "Calm and methodical",
+      soul: "Helpful and precise",
+      workStyles: ["Methodical"],
+      skillIds: [],
+      selectedSkills: [],
+      capabilitySettings: {
+        memoryEnabled: true,
+        contextWindow: 128000
+      },
+      knowledgePacks: [],
+      brain: {
+        entryId: "managed-ollama-entry",
+        label: "Local AI on this Mac",
+        providerId: "ollama",
+        modelKey: "ollama/gemma4:e2b"
+      }
+    });
+
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      models?: {
+        mode?: string;
+        providers?: {
+          ollama?: {
+            baseUrl?: string;
+            api?: string;
+            apiKey?: string;
+            models?: Array<Record<string, unknown>>;
+          };
+        };
+      };
+    };
+
+    assert.equal(config.models?.mode, "merge");
+    assert.deepEqual(config.models?.providers?.ollama, {
+      baseUrl: "http://127.0.0.1:11434",
+      api: "ollama",
+      apiKey: "ollama-local",
+      models: [
+        {
+          id: "gemma4:e2b",
+          name: "gemma4:e2b",
+          reasoning: false,
+          input: ["text"],
+          cost: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0
+          },
+          contextWindow: 131072,
+          maxTokens: 8192
+        }
+      ]
+    });
+  }, {
+    cleanModelRuntime: true
+  });
+});
+
 test("saveAIMemberRuntime upgrades stale MiniMax entries, avoids inherited fallbacks, and restores provider auth from saved secrets", async () => {
   await withFakeOpenClaw(async ({ configPath, dataDir }) => {
     const secrets = new InMemorySecretsAdapter();

@@ -367,6 +367,7 @@ public struct OnboardingStateResponse: Codable, Sendable {
     public var draft: OnboardingDraftState
     public var config: OnboardingUIConfig
     public var summary: OnboardingCompletionSummary
+    public var localRuntime: LocalModelRuntimeOverview?
     public var presetSkillSync: PresetSkillSyncOverview?
 
     public init(
@@ -374,12 +375,14 @@ public struct OnboardingStateResponse: Codable, Sendable {
         draft: OnboardingDraftState,
         config: OnboardingUIConfig,
         summary: OnboardingCompletionSummary,
+        localRuntime: LocalModelRuntimeOverview? = nil,
         presetSkillSync: PresetSkillSyncOverview? = nil
     ) {
         self.firstRun = firstRun
         self.draft = draft
         self.config = config
         self.summary = summary
+        self.localRuntime = localRuntime
         self.presetSkillSync = presetSkillSync
     }
 }

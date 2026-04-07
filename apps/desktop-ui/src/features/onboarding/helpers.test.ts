@@ -13,6 +13,7 @@ import {
   applyOnboardingChannelSessionToConfig,
   buildExistingInstallAdvanceDraft,
   buildOnboardingMemberRequest,
+  describeOnboardingLocalModelDownload,
   onboardingDestinationPath,
   onboardingRefreshResourceForEvent,
   resolveOnboardingEmployeePresetReadiness,
@@ -1141,6 +1142,69 @@ describe("onboarding helpers", () => {
     for (const [mode, status, expectedStep] of expectations) {
       expect(resolveOnboardingLocalSetupProgress(mode, status).currentStep).toBe(expectedStep);
     }
+  });
+
+  it("describes local model download progress with downloaded size, remaining size, and percent", () => {
+    const copy = onboardingCopy("en");
+
+    expect(
+      describeOnboardingLocalModelDownload(
+        {
+          supported: true,
+          recommendation: "local",
+          supportCode: "supported",
+          status: "downloading-model",
+          runtimeInstalled: true,
+          runtimeReachable: true,
+          modelDownloaded: false,
+          activeInOpenClaw: false,
+          chosenModelKey: "ollama/gemma4:e2b",
+          summary: "Local AI is downloading.",
+          detail: "Downloading local model layer sha256:71214.",
+          progressCompletedBytes: 1_099_704_448,
+          progressTotalBytes: 17_987_569_344
+        },
+        "en",
+        copy
+      )
+    ).toEqual({
+      modelLabel: "gemma4:e2b",
+      amountLabel: "1.1 GB of 18 GB downloaded",
+      remainingLabel: "16.9 GB remaining",
+      percentLabel: "6% complete",
+      progressPercent: 6
+    });
+  });
+
+  it("falls back to the daemon progress message when byte totals are unavailable", () => {
+    const copy = onboardingCopy("en");
+
+    expect(
+      describeOnboardingLocalModelDownload(
+        {
+          supported: true,
+          recommendation: "local",
+          supportCode: "supported",
+          status: "downloading-model",
+          runtimeInstalled: true,
+          runtimeReachable: true,
+          modelDownloaded: false,
+          activeInOpenClaw: false,
+          chosenModelKey: "ollama/gemma4:e2b",
+          summary: "Local AI is downloading.",
+          detail: "Preparing download details...",
+          progressMessage: "Resuming local model download"
+        },
+        "en",
+        copy
+      )
+    ).toEqual({
+      modelLabel: "gemma4:e2b",
+      amountLabel: "Resuming local model download",
+      remainingLabel: undefined,
+      percentLabel: undefined,
+      progressPercent: undefined
+    });
   });
 
   it("does not report connected until the saved model entry is persisted into onboarding state", () => {

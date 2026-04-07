@@ -443,6 +443,7 @@ export interface OnboardingStateResponse {
   draft: OnboardingDraftState;
   config: OnboardingUiConfig;
   summary: OnboardingCompletionSummary;
+  localRuntime?: LocalModelRuntimeOverview;
   presetSkillSync?: PresetSkillSyncOverview;
 }
 

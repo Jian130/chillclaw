@@ -66,7 +66,7 @@ export class SetupService {
         ? `ChillClaw is preparing the existing OpenClaw runtime for onboarding.`
         : "ChillClaw is downloading and installing OpenClaw locally for this Mac."
     });
-    installResult = await this.adapter.instances.install(false, { forceLocal: options?.forceLocal ?? false });
+    installResult = await this.adapter.instances.install(false, { forceLocal: options?.forceLocal ?? true });
     this.eventPublisher?.publishDeployProgress({
       correlationId,
       targetId: "managed-local",

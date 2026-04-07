@@ -46,12 +46,6 @@ struct UIContractTests {
     }
 
     @Test
-    func successfulModelSetupAdvancesToChannelStep() {
-        #expect(nativeOnboardingNextStepAfterModelSave(requiresInteraction: false) == .channel)
-        #expect(nativeOnboardingNextStepAfterModelSave(requiresInteraction: true) == .model)
-    }
-
-    @Test
     func onboardingForwardActionsMapToProminentNativeCTAStyle() {
         #expect(nativeOnboardingActionButtonVariant(nativeOnboardingForwardActionVariant()) == .onboardingProminent)
     }

@@ -1,0 +1,111 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="512"
+  height="512"
+  viewBox="0 0 512 512"
+  fill="none"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">Animated ChillClaw claw</title>
+  <desc id="desc">A stylized ChillClaw claw icon that gently opens and closes in a loop.</desc>
+  <defs>
+    <filter id="clawShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#000000" flood-opacity="0.16" />
+    </filter>
+  </defs>
+
+  <style>
+    .claw {
+      filter: url(#clawShadow);
+    }
+
+    .upper,
+    .lower {
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    .upper {
+      transform-origin: 164px 276px;
+      animation: chillclaw-upper 2.4s ease-in-out infinite;
+    }
+
+    .lower {
+      transform-origin: 190px 304px;
+      animation: chillclaw-lower 2.4s ease-in-out infinite;
+    }
+
+    @keyframes chillclaw-upper {
+      0%,
+      100% {
+        transform: rotate(0deg);
+      }
+
+      20% {
+        transform: rotate(-2deg);
+      }
+
+      50% {
+        transform: rotate(-10deg);
+      }
+
+      80% {
+        transform: rotate(-2deg);
+      }
+    }
+
+    @keyframes chillclaw-lower {
+      0%,
+      100% {
+        transform: rotate(0deg);
+      }
+
+      20% {
+        transform: rotate(2deg);
+      }
+
+      50% {
+        transform: rotate(8deg);
+      }
+
+      80% {
+        transform: rotate(2deg);
+      }
+    }
+  </style>
+
+  <g class="claw">
+    <g class="upper">
+      <path
+        d="M88 214C92 155 145 114 222 106C304 97 381 132 422 188C434 205 436 220 428 228C416 241 377 233 341 236C308 239 286 252 264 276C230 314 193 337 148 338C111 339 81 320 69 287C62 267 64 235 88 214Z"
+        fill="#A94328"
+        transform="translate(0 10)"
+      />
+      <path
+        d="M88 204C92 145 145 104 222 96C304 87 381 122 422 178C434 195 436 210 428 218C416 231 377 223 341 226C308 229 286 242 264 266C230 304 193 327 148 328C111 329 81 310 69 277C62 257 64 225 88 204Z"
+        fill="#FF6235"
+        stroke="#1F1F1F"
+        stroke-width="8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+
+    <g class="lower">
+      <path
+        d="M181 333C196 322 213 316 229 305C261 293 296 287 338 289C372 291 403 298 420 311C428 317 429 326 423 334C398 365 362 393 313 408C271 421 217 419 176 402C161 396 154 389 151 381C147 366 158 347 181 333Z"
+        fill="#A94328"
+        transform="translate(0 10)"
+      />
+      <path
+        d="M181 323C196 312 213 306 229 295C261 283 296 277 338 279C372 281 403 288 420 301C428 307 429 316 423 324C398 355 362 383 313 398C271 411 217 409 176 392C161 386 154 379 151 371C147 356 158 337 181 323Z"
+        fill="#FF6235"
+        stroke="#1F1F1F"
+        stroke-width="8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+  </g>
+</svg>

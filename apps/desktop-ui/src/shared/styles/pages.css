@@ -3515,6 +3515,53 @@
   gap: 14px;
 }
 
+.onboarding-model-download-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px 22px;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, rgb(var(--slate-rgb) / 0.12));
+  border-radius: var(--radius-panel);
+  background:
+    linear-gradient(180deg, rgb(var(--white-rgb) / 0.94), rgb(var(--white-rgb) / 0.9)),
+    var(--surface-info-glass);
+  box-shadow: var(--shadow-primary-subtle);
+}
+
+.onboarding-model-download-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.onboarding-model-download-card__copy {
+  display: grid;
+  gap: 6px;
+}
+
+.onboarding-model-download-card__copy strong {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.onboarding-model-download-card__copy span,
+.onboarding-model-download-card__meta span {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.onboarding-model-download-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .onboarding-model-local-progress__step {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

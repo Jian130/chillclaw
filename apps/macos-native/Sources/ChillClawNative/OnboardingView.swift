@@ -670,7 +670,9 @@ struct NativeOnboardingView: View {
     }
 
     private func modelLocalFirstFlow(mode: NativeOnboardingModelStepMode) -> some View {
-        VStack(alignment: .leading, spacing: 24) {
+        let downloadInfo = viewModel.localModelDownloadInfo
+
+        return VStack(alignment: .leading, spacing: 24) {
             if mode == .cloudHandoff {
                 HStack(alignment: .center, spacing: 20) {
                     ZStack {
@@ -753,7 +755,7 @@ struct NativeOnboardingView: View {
                         .foregroundStyle(nativeOnboardingTextPrimary)
                         .multilineTextAlignment(.center)
 
-                    Text(mode == .detectingLocal ? viewModel.copy.localModelDetectingBody : (viewModel.localRuntimeMessage.isEmpty ? viewModel.localRuntime?.detail ?? viewModel.copy.localModelDetectingBody : viewModel.localRuntimeMessage))
+                    Text(mode == .detectingLocal ? viewModel.copy.localModelDetectingBody : viewModel.localRuntimeSetupDetailText)
                         .font(.system(size: 16, weight: .regular))
                         .lineSpacing(6)
                         .foregroundStyle(nativeOnboardingTextSecondary)
@@ -762,6 +764,10 @@ struct NativeOnboardingView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 28)
+
+                if let downloadInfo {
+                    modelLocalDownloadCard(downloadInfo)
+                }
 
                 VStack(spacing: 12) {
                     ForEach(Array(viewModel.localSetupStepLabels.enumerated()), id: \.offset) { index, label in
@@ -782,6 +788,58 @@ struct NativeOnboardingView: View {
                 }
             }
         }
+    }
+
+    private func modelLocalDownloadCard(_ info: NativeOnboardingLocalModelDownloadInfo) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(info.amountLabel)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(nativeOnboardingTextPrimary)
+                    if let remainingLabel = info.remainingLabel {
+                        Text(remainingLabel)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(nativeOnboardingTextSecondary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                if let modelLabel = info.modelLabel {
+                    TagBadge(modelLabel, tone: .neutral, systemImage: "server.rack")
+                }
+            }
+
+            if let progressPercent = info.progressPercent {
+                ProgressBar(value: Double(progressPercent) / 100, label: nil)
+            }
+
+            HStack(alignment: .top, spacing: 16) {
+                Text(info.percentLabel ?? viewModel.copy.localModelDownloadResumeNote)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(nativeOnboardingTextPrimary)
+
+                Spacer(minLength: 0)
+
+                if info.percentLabel != nil {
+                    Text(viewModel.copy.localModelDownloadResumeNote)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(nativeOnboardingTextSecondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                .fill(Color.white.opacity(0.94))
+                .overlay(
+                    RoundedRectangle(cornerRadius: nativeOnboardingSectionRadius, style: .continuous)
+                        .strokeBorder(Color(red: 0.62, green: 0.77, blue: 0.99).opacity(0.55), lineWidth: 1.2)
+                )
+        )
     }
 
     private func modelLocalSetupStepRow(index: Int, label: String) -> some View {

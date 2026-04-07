@@ -69,7 +69,11 @@ function createHarness(overrides: Partial<LocalModelRuntimeAccess> = {}) {
     writePersistedState: async (nextState) => {
       persistedState = nextState;
     },
-    fetchModelConfig: async () => createEmptyModelConfig(),
+    fetchModelSelection: async () => ({
+      savedEntries: [],
+      defaultModel: undefined,
+      defaultEntryId: undefined
+    }),
     resolveInstalledRuntime: async () => ({
       command: "/usr/local/bin/ollama",
       source: "existing-install",
@@ -169,15 +173,15 @@ function createHarness(overrides: Partial<LocalModelRuntimeAccess> = {}) {
   };
 }
 
-test("local runtime overview recommends the medium Ollama tier for a 36 GB Apple Silicon Mac", async () => {
+test("local runtime overview recommends the small Ollama tier for a 36 GB Apple Silicon Mac", async () => {
   const { service } = createHarness();
 
   const overview = await service.getOverview();
 
   assert.equal(overview.supported, true);
   assert.equal(overview.recommendation, "local");
-  assert.equal(overview.recommendedTier, "medium");
-  assert.equal(overview.chosenModelKey, "ollama/gemma4:e4b");
+  assert.equal(overview.recommendedTier, "small");
+  assert.equal(overview.chosenModelKey, "ollama/gemma4:e2b");
 });
 
 test("local runtime overview falls back to cloud setup on underpowered Macs", async () => {
@@ -198,6 +202,42 @@ test("local runtime overview falls back to cloud setup on underpowered Macs", as
   assert.equal(overview.status, "cloud-recommended");
 });
 
+test("local runtime overview reads lightweight model selection without loading the full model catalog", async () => {
+  let selectionReads = 0;
+  const { service } = createHarness({
+    fetchModelSelection: async () => {
+      selectionReads += 1;
+      return {
+        savedEntries: [],
+        defaultModel: undefined,
+        defaultEntryId: undefined
+      };
+    },
+    resolveInstalledRuntime: async () => undefined
+  });
+
+  const overview = await service.getOverview();
+
+  assert.equal(overview.status, "idle");
+  assert.equal(selectionReads, 1);
+});
+
+test("local runtime overview skips model availability probes while the runtime is unreachable", async () => {
+  let modelAvailabilityChecks = 0;
+  const { service } = createHarness({
+    isModelAvailable: async () => {
+      modelAvailabilityChecks += 1;
+      return false;
+    }
+  });
+
+  const overview = await service.getOverview();
+
+  assert.equal(overview.runtimeReachable, false);
+  assert.equal(overview.modelDownloaded, false);
+  assert.equal(modelAvailabilityChecks, 0);
+});
+
 test("install reuses an existing Ollama runtime, downloads the selected model, and wires OpenClaw to it", async () => {
   const { service, getPersistedState, pullCalls, restartCalls, upsertCalls, publishedProgress, publishedCompleted } = createHarness();
 
@@ -205,12 +245,12 @@ test("install reuses an existing Ollama runtime, downloads the selected model, a
 
   assert.equal(result.status, "completed");
   assert.equal(result.localRuntime.status, "ready");
-  assert.deepEqual(pullCalls, ["gemma4:e4b"]);
+  assert.deepEqual(pullCalls, ["gemma4:e2b"]);
   assert.equal(upsertCalls[0]?.providerId, "ollama");
-  assert.equal(upsertCalls[0]?.modelKey, "ollama/gemma4:e4b");
+  assert.equal(upsertCalls[0]?.modelKey, "ollama/gemma4:e2b");
   assert.equal(restartCalls.length, 1);
   assert.equal(getPersistedState()?.managedEntryId, "managed-ollama-entry");
-  assert.equal(getPersistedState()?.selectedModelKey, "ollama/gemma4:e4b");
+  assert.equal(getPersistedState()?.selectedModelKey, "ollama/gemma4:e2b");
   assert.equal(publishedProgress.length > 0, true);
   assert.equal(publishedCompleted.at(-1), result.message);
 });

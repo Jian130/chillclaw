@@ -89,6 +89,7 @@ type ChannelsConfigAccess = {
   compareVersionStrings: (left: string, right: string) => number;
   personalWechatRuntimeChannelKey: string;
   feishuBundledSince: string;
+  wechatRuntimeDetectionIntervalMs?: number;
 };
 
 function channelIdFromEntryId(entryId: string): SupportedChannelId {
@@ -732,6 +733,7 @@ export class ChannelsConfigCoordinator {
         child
       };
       this.activeLoginSession = sessionState;
+      void this.monitorWechatRuntimeSave(sessionState);
 
       const pushLog = (text: string) => {
         if (this.activeLoginSession !== sessionState) {
@@ -747,7 +749,9 @@ export class ChannelsConfigCoordinator {
         }
         sessionState.logs.push(...lines);
         sessionState.logs = sessionState.logs.slice(-40);
-        sessionState.status = "awaiting-pairing";
+        if (sessionState.status !== "completed" && sessionState.status !== "failed") {
+          sessionState.status = "awaiting-pairing";
+        }
         settleStartupSoon();
       };
 
@@ -764,8 +768,16 @@ export class ChannelsConfigCoordinator {
           return;
         }
 
-        sessionState.status = "failed";
-        sessionState.logs.push(`Failed to start WeChat login: ${error instanceof Error ? error.message : String(error)}`);
+        if (sessionState.status === "completed") {
+          sessionState.logs.push(
+            `WeChat installer reported an error after the channel was already saved: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        } else {
+          sessionState.status = "failed";
+          sessionState.logs.push(`Failed to start WeChat login: ${error instanceof Error ? error.message : String(error)}`);
+        }
         settleStartupNow();
         void this.access.writeErrorLog("WeChat login session failed to start.", this.access.errorToLogDetails(error), {
           scope: "ChannelsConfigCoordinator.startWechatLogin.childError"
@@ -779,12 +791,20 @@ export class ChannelsConfigCoordinator {
 
         sessionState.exitCode = code ?? 1;
         sessionState.child = undefined;
-        sessionState.status = code === 0 ? "completed" : "failed";
-        sessionState.logs.push(
-          code === 0
-            ? "WeChat installer finished. ChillClaw saved this channel and will finish gateway activation after onboarding."
-            : `WeChat installer exited with code ${code ?? 1}.`
-        );
+        if (sessionState.status === "completed") {
+          sessionState.logs.push(
+            code === 0
+              ? "WeChat installer finished after ChillClaw had already detected the saved channel."
+              : `WeChat installer exited with code ${code ?? 1} after ChillClaw had already detected the saved channel.`
+          );
+        } else {
+          sessionState.status = code === 0 ? "completed" : "failed";
+          sessionState.logs.push(
+            code === 0
+              ? "WeChat installer finished. ChillClaw saved this channel and will finish gateway activation after onboarding."
+              : `WeChat installer exited with code ${code ?? 1}.`
+          );
+        }
         settleStartupNow();
       });
 
@@ -845,6 +865,41 @@ export class ChannelsConfigCoordinator {
     }
 
     return (await this.getActiveChannelSession()) ?? session;
+  }
+
+  private async monitorWechatRuntimeSave(sessionState: LoginSessionState): Promise<void> {
+    const intervalMs = this.access.wechatRuntimeDetectionIntervalMs ?? 2_000;
+
+    while (this.activeLoginSession === sessionState) {
+      if (sessionState.status === "completed" || sessionState.status === "failed") {
+        return;
+      }
+
+      try {
+        const snapshot = await this.access.readChannelSnapshot();
+        const savedEntry = this.access.buildLiveChannelEntries(snapshot.list, snapshot.status).find(
+          (entry) =>
+            entry.channelId === "wechat" &&
+            entry.status !== "not-started" &&
+            entry.status !== "failed"
+        );
+
+        if (savedEntry && this.activeLoginSession === sessionState) {
+          sessionState.entryId = savedEntry.id;
+          sessionState.status = "completed";
+          sessionState.logs.push(
+            savedEntry.summary?.trim() ||
+              "WeChat login finished. ChillClaw saved this channel and will finish gateway activation after onboarding."
+          );
+          sessionState.logs = sessionState.logs.slice(-40);
+          return;
+        }
+      } catch {
+        // Keep the live-session flow resilient if a single runtime poll fails.
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
   }
 
   private async ensureWechatInstallerCommand(): Promise<string> {

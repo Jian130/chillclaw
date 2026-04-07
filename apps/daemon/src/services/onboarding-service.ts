@@ -272,13 +272,28 @@ export class OnboardingService {
 
   async navigateStep(request: OnboardingStepNavigationRequest): Promise<OnboardingStateResponse> {
     const { draft } = await this.readResolvedDraftState();
-    const summary = await this.buildSummary(draft);
+    const navigationDraft =
+      stepIndex(request.step) > stepIndex(draft.currentStep)
+        ? await this.repairProgressedDraft({
+            ...draft,
+            currentStep: request.step
+          })
+        : draft;
+    const summary = await this.buildSummary(navigationDraft);
 
-    if (!this.canNavigateToStep(draft.currentStep, request.step, draft, summary)) {
+    if (!this.canNavigateToStep(draft.currentStep, request.step, navigationDraft, summary)) {
       throw new Error("Finish the earlier onboarding steps before moving ahead.");
     }
 
-    return this.updateState({ currentStep: request.step });
+    return this.updateState({
+      currentStep: request.step,
+      install: navigationDraft.install,
+      permissions: navigationDraft.permissions,
+      model: navigationDraft.model,
+      channel: navigationDraft.channel,
+      channelProgress: navigationDraft.channelProgress,
+      activeChannelSessionId: navigationDraft.activeChannelSessionId
+    });
   }
 
   async detectRuntime(): Promise<OnboardingStateResponse> {
@@ -291,7 +306,7 @@ export class OnboardingService {
 
   async installRuntime(options?: { forceLocal?: boolean }) {
     const setupService = new SetupService(this.adapter, this.store, this.overviewService, this.eventPublisher);
-    const result = await setupService.runFirstRunSetup({ forceLocal: options?.forceLocal ?? false });
+    const result = await setupService.runFirstRunSetup({ forceLocal: options?.forceLocal ?? true });
     const install = await this.detectInstallStateFromRuntime(result.install, (await this.store.read()).onboarding?.draft.install);
     const onboarding = await this.updateState({
       currentStep: install.installed ? "permissions" : "install",
@@ -885,12 +900,13 @@ export class OnboardingService {
       onboarding: {
         draft: {
           ...(state.onboarding?.draft ?? defaultOnboardingDraftState()),
+          currentStep: repairedDraft.currentStep,
           install: repairedDraft.install,
           permissions: repairedDraft.permissions,
           model: repairedDraft.model,
           channel: repairedDraft.channel,
           channelProgress: repairedDraft.channelProgress,
-          activeChannelSessionId: repairedDraft.activeChannelSessionId
+          activeChannelSessionId: repairedDraft.activeChannelSessionId || undefined
         }
       }
     }));
@@ -906,6 +922,7 @@ export class OnboardingService {
 
   private repairableDraftFields(draft: ReturnType<typeof defaultOnboardingDraftState>) {
     return {
+      currentStep: draft.currentStep,
       install: draft.install,
       permissions: draft.permissions,
       model: draft.model,
@@ -954,6 +971,20 @@ export class OnboardingService {
           entryId: preferredEntry.id
         };
       }
+    }
+
+    const deferredWechatEntry = await this.resolveDeferredWechatStageEntry(repaired);
+    if (deferredWechatEntry) {
+      repaired.currentStep = "employee";
+      repaired.channel = {
+        channelId: "wechat",
+        entryId: deferredWechatEntry.id
+      };
+      repaired.channelProgress = {
+        status: "staged",
+        message: deferredWechatEntry.summary
+      };
+      repaired.activeChannelSessionId = "";
     }
 
     if (
@@ -1082,18 +1113,60 @@ export class OnboardingService {
     const state = await this.store.read();
     const draft = state.onboarding?.draft ?? defaultOnboardingDraftState();
     if (draft.activeChannelSessionId === sessionId) {
-      await this.updateState({
-        currentStep: "channel",
-        channel: draft.channel,
-        channelProgress: {
-          status: "idle",
-          message: "The channel login session ended. Start the login again."
-        },
-        activeChannelSessionId: ""
-      });
+      const deferredWechatEntry = await this.resolveDeferredWechatStageEntry(draft);
+      if (deferredWechatEntry) {
+        await this.updateState({
+          currentStep: "employee",
+          channel: {
+            channelId: "wechat",
+            entryId: deferredWechatEntry.id
+          },
+          channelProgress: {
+            status: "staged",
+            message: deferredWechatEntry.summary
+          },
+          activeChannelSessionId: ""
+        });
+      } else {
+        await this.updateState({
+          currentStep: "channel",
+          channel: draft.channel,
+          channelProgress: {
+            status: "idle",
+            message: "The channel login session ended. Start the login again."
+          },
+          activeChannelSessionId: ""
+        });
+      }
     }
 
     return new Error("The channel login session ended. Start the login again.");
+  }
+
+  private async resolveDeferredWechatStageEntry(
+    draft: ReturnType<typeof defaultOnboardingDraftState>
+  ): Promise<Awaited<ReturnType<ChannelSetupService["getConfigOverview"]>>["entries"][number] | undefined> {
+    if (
+      draft.currentStep !== "channel" ||
+      draft.channel?.channelId !== "wechat" ||
+      !draft.channel.entryId ||
+      draft.activeChannelSessionId
+    ) {
+      return undefined;
+    }
+
+    const channelConfig = await this.channelSetupService.getConfigOverview();
+    const matchedEntry =
+      channelConfig.entries.find((entry) => entry.id === draft.channel?.entryId) ??
+      channelConfig.entries.find((entry) => entry.channelId === draft.channel?.channelId);
+
+    if (!matchedEntry || matchedEntry.channelId !== "wechat") {
+      return undefined;
+    }
+
+    return matchedEntry.status === "awaiting-pairing" || matchedEntry.status === "completed"
+      ? matchedEntry
+      : undefined;
   }
 
   private async buildStateResponse(state: Awaited<ReturnType<StateStore["read"]>>): Promise<OnboardingStateResponse> {
@@ -1101,6 +1174,14 @@ export class OnboardingService {
       ...(state.onboarding?.draft ?? defaultOnboardingDraftState()),
       employee: normalizedEmployeeState(state.onboarding?.draft?.employee)
     };
+    const summary =
+      draft.currentStep === "model"
+        ? this.buildDraftSummary(draft)
+        : await this.buildSummary(draft);
+    const localRuntime =
+      draft.currentStep === "model" && this.localModelRuntimeService
+        ? await this.localModelRuntimeService.getOverview()
+        : undefined;
 
     return {
       firstRun: {
@@ -1110,7 +1191,8 @@ export class OnboardingService {
       },
       draft,
       config: onboardingUiConfig,
-      summary: await this.buildSummary(draft),
+      summary,
+      localRuntime,
       presetSkillSync: this.presetSkillService ? await this.presetSkillService.getOverview() : undefined
     };
   }

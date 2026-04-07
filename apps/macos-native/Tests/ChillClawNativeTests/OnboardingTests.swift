@@ -392,18 +392,6 @@ struct OnboardingTests {
     }
 
     @Test
-    func existingInstallAdvanceDraftMovesToPermissions() {
-        let request = buildExistingInstallAdvanceRequest(
-            overview: makeOverview(setupCompleted: false, installed: true, running: false, version: "2026.3.13")
-        )
-
-        #expect(request.currentStep == .permissions)
-        #expect(request.install?.installed == true)
-        #expect(request.install?.version == "2026.3.13")
-        #expect(request.install?.disposition == "reused-existing")
-    }
-
-    @Test
     func advancePastInstallPersistsPermissionsStep() async throws {
         let recorder = NativeRequestRecorder()
         let session = await recorder.session { request in
@@ -599,6 +587,7 @@ struct OnboardingTests {
     func advancingToModelBootstrapsLocalDetectionWithoutCrashing() async throws {
         let recorder = NativeRequestRecorder()
         let confirmGate = AsyncGate()
+        let onboardingGate = AsyncGate()
         let detectedLocalRuntime = makeLocalRuntime(recommendation: "local", status: "installing-runtime")
 
         let session = await recorder.session { request in
@@ -608,11 +597,9 @@ struct OnboardingTests {
                 await confirmGate.wait()
                 let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
                 return (jsonResponse(url: url), body)
-            case ("GET", "/api/overview"):
-                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: false, localRuntime: detectedLocalRuntime))
-                return (jsonResponse(url: url), body)
-            case ("GET", "/api/models/config"):
-                let body = try JSONEncoder.chillClaw.encode(emptyModelConfig(localRuntime: detectedLocalRuntime))
+            case ("GET", "/api/onboarding/state"):
+                await onboardingGate.wait()
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model, localRuntime: detectedLocalRuntime))
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -656,11 +643,13 @@ struct OnboardingTests {
 
         await waitForRecordedURLCount(recorder, expectedCount: 1)
         await confirmGate.open()
-        await waitForRecordedURLCount(recorder, expectedCount: 3)
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         #expect(viewModel.currentStep == .model)
+        #expect(viewModel.modelStepMode == .detectingLocal)
 
         await task.value
+        await onboardingGate.open()
         for _ in 0..<20 {
             if viewModel.modelStepMode == .localSetup {
                 break
@@ -685,13 +674,7 @@ struct OnboardingTests {
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("GET", "/api/onboarding/state"):
-                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
-                return (jsonResponse(url: url), body)
-            case ("GET", "/api/overview"):
-                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: false, localRuntime: initialRuntime))
-                return (jsonResponse(url: url), body)
-            case ("GET", "/api/models/config"):
-                let body = try JSONEncoder.chillClaw.encode(emptyModelConfig(localRuntime: initialRuntime))
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model, localRuntime: initialRuntime))
                 return (jsonResponse(url: url), body)
             case ("POST", "/api/models/local-runtime/install"):
                 await installGate.wait()
@@ -750,7 +733,7 @@ struct OnboardingTests {
         )
 
         await viewModel.bootstrap()
-        await waitForRecordedURLCount(recorder, expectedCount: 4)
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         for _ in 0..<20 {
             if viewModel.modelStepMode == .localSetup, viewModel.localSetupProgress.currentStep == 1 {
@@ -797,13 +780,7 @@ struct OnboardingTests {
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("GET", "/api/onboarding/state"):
-                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
-                return (jsonResponse(url: url), body)
-            case ("GET", "/api/overview"):
-                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: false, localRuntime: initialRuntime))
-                return (jsonResponse(url: url), body)
-            case ("GET", "/api/models/config"):
-                let body = try JSONEncoder.chillClaw.encode(emptyModelConfig(localRuntime: initialRuntime))
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model, localRuntime: initialRuntime))
                 return (jsonResponse(url: url), body)
             case ("POST", "/api/models/local-runtime/install"):
                 await installGate.wait()
@@ -849,7 +826,7 @@ struct OnboardingTests {
         )
 
         await viewModel.bootstrap()
-        await waitForRecordedURLCount(recorder, expectedCount: 4)
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         eventContinuation?.yield(
             .localRuntimeProgress(
@@ -1524,6 +1501,45 @@ struct OnboardingTests {
     }
 
     @Test
+    func localModelDownloadInfoFormatsDownloadedAmountRemainingAndPercent() {
+        let copy = nativeOnboardingCopy(localeIdentifier: "en")
+        let runtime = makeLocalRuntime(
+            recommendation: "local",
+            status: "downloading-model",
+            progressCompletedBytes: 1_099_704_448,
+            progressTotalBytes: 17_987_569_344,
+            chosenModelKey: "ollama/gemma4:e2b"
+        )
+
+        let info = describeNativeOnboardingLocalModelDownload(localRuntime: runtime, copy: copy)
+
+        #expect(info?.modelLabel == "gemma4:e2b")
+        #expect(info?.amountLabel == "1.1 GB of 18 GB downloaded")
+        #expect(info?.remainingLabel == "16.9 GB remaining")
+        #expect(info?.percentLabel == "6% complete")
+        #expect(info?.progressPercent == 6)
+    }
+
+    @Test
+    func localModelDownloadInfoFallsBackToProgressMessageWithoutByteTotals() {
+        let copy = nativeOnboardingCopy(localeIdentifier: "en")
+        let runtime = makeLocalRuntime(
+            recommendation: "local",
+            status: "downloading-model",
+            progressMessage: "Resuming local model download",
+            chosenModelKey: "ollama/gemma4:e2b"
+        )
+
+        let info = describeNativeOnboardingLocalModelDownload(localRuntime: runtime, copy: copy)
+
+        #expect(info?.modelLabel == "gemma4:e2b")
+        #expect(info?.amountLabel == "Resuming local model download")
+        #expect(info?.remainingLabel == nil)
+        #expect(info?.percentLabel == nil)
+        #expect(info?.progressPercent == nil)
+    }
+
+    @Test
     func modelStepCopyMatchesFigmaCuratedProviderFlow() {
         let copy = nativeOnboardingCopy(localeIdentifier: "en")
 
@@ -1761,6 +1777,20 @@ struct OnboardingTests {
         #expect(viewModelSource.contains("nativeOnboardingModelCloudHandoffDelayNanoseconds"))
         #expect(viewModelSource.contains("readFreshOverview()"))
         #expect(viewModelSource.contains("readFreshModelConfig()"))
+    }
+
+    @Test
+    func nativeModelStepSourceDoesNotRefetchWhenTheProviderCatalogIsEmpty() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let viewModelSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(!viewModelSource.contains("if currentStep == .model && modelPickerProviders.isEmpty"))
     }
 
     @Test
@@ -3989,7 +4019,11 @@ private func makeLocalRuntime(
     recommendation: String = "local",
     status: String = "idle",
     supported: Bool = true,
-    activeInOpenClaw: Bool = false
+    activeInOpenClaw: Bool = false,
+    progressMessage: String? = nil,
+    progressCompletedBytes: Int? = nil,
+    progressTotalBytes: Int? = nil,
+    chosenModelKey: String? = nil
 ) -> LocalModelRuntimeOverview {
     .init(
         supported: supported,
@@ -4004,11 +4038,14 @@ private func makeLocalRuntime(
         requiredDiskGb: supported ? 8 : nil,
         totalMemoryGb: supported ? 18 : 8,
         freeDiskGb: supported ? 96 : 12,
-        chosenModelKey: supported ? "qwen2.5:7b-instruct" : nil,
+        chosenModelKey: chosenModelKey ?? (supported ? "qwen2.5:7b-instruct" : nil),
         managedEntryId: activeInOpenClaw ? "local-managed-entry" : nil,
         summary: supported ? "Local AI is available on this Mac." : "Cloud AI is recommended on this Mac.",
         detail: supported ? "ChillClaw can prepare a managed local model." : "This Mac should use cloud AI instead.",
         lastError: status == "failed" ? "Local runtime setup failed." : nil,
+        progressMessage: progressMessage,
+        progressCompletedBytes: progressCompletedBytes,
+        progressTotalBytes: progressTotalBytes,
         recoveryHint: status == "failed" ? "Repair the local runtime and try again." : nil
     )
 }
@@ -4058,7 +4095,10 @@ private func makeDeploymentTargetsResponse(targets: [DeploymentTargetStatus]) ->
     .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: targets)
 }
 
-private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStateResponse {
+private func makeOnboardingStateResponse(
+    step: OnboardingStep,
+    localRuntime: LocalModelRuntimeOverview? = nil
+) -> OnboardingStateResponse {
     .init(
         firstRun: .init(introCompleted: true, setupCompleted: false),
         draft: .init(currentStep: step),
@@ -4188,6 +4228,7 @@ private func makeOnboardingStateResponse(step: OnboardingStep) -> OnboardingStat
             ]
         ),
         summary: .init(),
+        localRuntime: localRuntime,
         presetSkillSync: .init(
             targetMode: .managedLocal,
             entries: [

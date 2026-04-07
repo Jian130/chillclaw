@@ -36,6 +36,28 @@ test("first-run install no longer marks the whole onboarding flow complete", asy
   assert.equal(result.steps.some((step) => step.id === "install-preset-skills"), false);
 });
 
+test("first-run setup defaults to the managed local OpenClaw runtime", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/setup-service-managed-local-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const service = new SetupService(adapter, store, overviewService);
+  let installOptions: { forceLocal?: boolean } | undefined;
+
+  adapter.install = async (_autoConfigure = true, options?: { forceLocal?: boolean }) => {
+    installOptions = options;
+    return {
+      status: "installed",
+      message: "Mock OpenClaw runtime is deployed and ready for onboarding.",
+      engineStatus: await adapter.status()
+    };
+  };
+
+  await service.runFirstRunSetup();
+
+  assert.equal(installOptions?.forceLocal, true);
+});
+
 test("first-run setup publishes deploy progress and completion events", async () => {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/setup-service-events-${randomUUID()}.json`);
   const adapter = new MockAdapter();

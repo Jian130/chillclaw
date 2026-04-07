@@ -65,7 +65,7 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/onboarding/runtime/detect", body: EmptyBody())
     }
 
-    public func installOnboardingRuntime(forceLocal: Bool = false) async throws -> SetupRunResponse {
+    public func installOnboardingRuntime(forceLocal: Bool = true) async throws -> SetupRunResponse {
         try await post(
             "/api/onboarding/runtime/install",
             body: InstallRequest(autoConfigure: true, forceLocal: forceLocal),
@@ -93,7 +93,7 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/onboarding/complete", body: request, timeout: RequestTimeout.longRunning)
     }
 
-    public func runFirstRunSetup(forceLocal: Bool = false) async throws -> SetupRunResponse {
+    public func runFirstRunSetup(forceLocal: Bool = true) async throws -> SetupRunResponse {
         try await post(
             "/api/first-run/setup",
             body: InstallRequest(autoConfigure: true, forceLocal: forceLocal),

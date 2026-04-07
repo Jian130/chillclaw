@@ -238,7 +238,19 @@ struct OnboardingClientTests {
                   }
                 ]
               },
-              "summary": {}
+              "summary": {},
+              "localRuntime": {
+                "supported": true,
+                "recommendation": "local",
+                "supportCode": "supported",
+                "status": "idle",
+                "runtimeInstalled": false,
+                "runtimeReachable": false,
+                "modelDownloaded": false,
+                "activeInOpenClaw": false,
+                "summary": "Local AI is available on this Mac.",
+                "detail": "ChillClaw recommends a starter Ollama tier for this Apple Silicon Mac."
+              }
             }
             """
         )
@@ -259,6 +271,8 @@ struct OnboardingClientTests {
         #expect(response.config.channels.map(\.id) == [.wechatWork, .wechat, .feishu, .telegram])
         #expect(response.config.channels.map(\.setupKind) == [.wechatWorkGuided, .wechatGuided, .feishuGuided, .telegramGuided])
         #expect(response.config.employeePresets.first?.avatarPresetId == "onboarding-analyst")
+        #expect(response.localRuntime?.recommendation == "local")
+        #expect(response.localRuntime?.status == "idle")
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "GET")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/state?fresh=1")

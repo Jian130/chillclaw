@@ -4,7 +4,8 @@
 
 ### 2026-04-12 17:00 CST
 
-- fixed CI test ordering by running workspace test suites before repository release-script contract tests, keeping daemon tests on the last green execution path while preserving release workflow coverage in a separate GitHub Actions step
+- fixed CI test ordering by running workspace test suites before repository release-script contract tests, keeping daemon tests on the last green execution path while preserving release workflow coverage
+- split the GitHub Actions JavaScript validation into explicit workspace and release-script test steps so future failures identify the broken boundary instead of collapsing into one combined log
 
 ### 2026-04-12 16:45 CST
 

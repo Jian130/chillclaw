@@ -32,8 +32,11 @@ jobs:
       - name: Build workspaces
         run: npm run build
 
-      - name: Run JavaScript and website tests
-        run: npm test
+      - name: Run JavaScript workspace tests
+        run: npm run test:workspaces
+
+      - name: Run release script tests
+        run: npm run test:scripts
 
   validate-macos-native:
     runs-on: macos-26

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-04-12 17:00 CST
+
+- fixed CI test ordering by running workspace test suites before repository release-script contract tests, keeping daemon tests on the last green execution path while preserving release workflow coverage in a separate GitHub Actions step
+
 ### 2026-04-12 16:45 CST
 
 - fixed the long-term macOS download path by moving the tag-driven release workflow from legacy `.pkg` publishing to the signed, notarized `ChillClaw-macOS.dmg` asset expected by the website and packaged app update checker

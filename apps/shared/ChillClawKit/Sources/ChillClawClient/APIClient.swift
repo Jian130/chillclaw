@@ -27,7 +27,7 @@ public enum ChillClawClientError: Error, LocalizedError {
 
 public final class ChillClawAPIClient: @unchecked Sendable {
     private enum RequestTimeout {
-        static let longRunning: TimeInterval = 300
+        static let longRunning: TimeInterval = 1_200
     }
 
     private let session: URLSession

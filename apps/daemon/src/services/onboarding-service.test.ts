@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
-import type { ChannelConfigOverview, OnboardingStateResponse } from "@chillclaw/contracts";
+import {
+  createDefaultLocalModelRuntimeOverview,
+  type ChannelConfigOverview,
+  type LocalModelRuntimeOverview,
+  type OnboardingStateResponse
+} from "@chillclaw/contracts";
 
 import { MockAdapter } from "../engine/mock-adapter.js";
 import { AITeamService } from "./ai-team-service.js";
@@ -16,7 +21,10 @@ import { OverviewService } from "./overview-service.js";
 import { PresetSkillService } from "./preset-skill-service.js";
 import { StateStore } from "./state-store.js";
 
-function createService(testName: string, options?: { withEvents?: boolean }) {
+function createService(
+  testName: string,
+  options?: { withEvents?: boolean; localModelRuntimeService?: LocalModelRuntimeService }
+) {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/${testName}-${randomUUID()}.json`);
   const adapter = new MockAdapter();
   const store = new StateStore(filePath);
@@ -33,7 +41,16 @@ function createService(testName: string, options?: { withEvents?: boolean }) {
     bus,
     aiTeamService,
     presetSkillService,
-    service: new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, presetSkillService, eventPublisher)
+    service: new OnboardingService(
+      adapter,
+      store,
+      overviewService,
+      channelSetupService,
+      aiTeamService,
+      presetSkillService,
+      eventPublisher,
+      options?.localModelRuntimeService
+    )
   };
 }
 
@@ -1290,6 +1307,114 @@ test("onboarding completion resolves stale local runtime model draft IDs before 
   assert.equal(member?.brain?.entryId, "runtime:ollama-gemma4-e2b");
 });
 
+test("onboarding completion repairs a degraded local Ollama runtime before creating the AI employee", async () => {
+  const degradedRuntime = {
+    ...createDefaultLocalModelRuntimeOverview(),
+    supported: true,
+    recommendation: "local",
+    supportCode: "supported",
+    status: "degraded",
+    runtimeInstalled: true,
+    runtimeReachable: false,
+    modelDownloaded: false,
+    activeInOpenClaw: true,
+    chosenModelKey: "ollama/gemma4:e2b",
+    managedEntryId: "runtime:ollama-gemma4-e2b",
+    summary: "Local AI needs repair.",
+    detail: "OpenClaw is pointed at the local Ollama model, but the runtime is unavailable."
+  } satisfies LocalModelRuntimeOverview;
+  const readyRuntime = {
+    ...degradedRuntime,
+    status: "ready",
+    runtimeReachable: true,
+    modelDownloaded: true,
+    summary: "Local AI is ready on this Mac.",
+    detail: "Ollama is running and the starter model is available."
+  } satisfies LocalModelRuntimeOverview;
+  let repairCalls = 0;
+  const localModelRuntimeService = {
+    async getOverview() {
+      return repairCalls > 0 ? readyRuntime : degradedRuntime;
+    },
+    async repair() {
+      repairCalls += 1;
+      return {
+        status: "completed" as const,
+        message: "Local AI is ready on this Mac.",
+        localRuntime: readyRuntime
+      };
+    }
+  } as Pick<LocalModelRuntimeService, "getOverview" | "repair"> as LocalModelRuntimeService;
+  const { adapter, service, aiTeamService } = createService(
+    "onboarding-service-complete-repairs-local-runtime",
+    { localModelRuntimeService }
+  );
+  let memberCreateCalls = 0;
+  const saveMemberForOnboarding = aiTeamService.saveMemberForOnboarding.bind(aiTeamService);
+
+  Object.assign(aiTeamService, {
+    async saveMemberForOnboarding(
+      ...args: Parameters<AITeamService["saveMemberForOnboarding"]>
+    ): ReturnType<AITeamService["saveMemberForOnboarding"]> {
+      memberCreateCalls += 1;
+      assert.equal(repairCalls, 1);
+      return saveMemberForOnboarding(...args);
+    }
+  });
+
+  await adapter.config.upsertManagedLocalModelEntry({
+    label: "Local AI on this Mac",
+    providerId: "ollama",
+    methodId: "ollama-local",
+    modelKey: "ollama/gemma4:e2b",
+    entryId: "runtime:ollama-gemma4-e2b"
+  });
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.4.11",
+      disposition: "installed-managed"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-04-11T00:00:00.000Z"
+    },
+    model: {
+      providerId: "ollama",
+      methodId: "ollama-local",
+      modelKey: "ollama/gemma4:e2b",
+      entryId: "runtime:ollama-gemma4-e2b"
+    },
+    channel: {
+      channelId: "telegram",
+      entryId: "telegram:default"
+    },
+    channelProgress: {
+      status: "staged",
+      requiresGatewayApply: true
+    },
+    employee: {
+      name: "AI Ryo",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: [],
+      knowledgePackIds: [],
+      workStyles: ["Analytical"],
+      memoryEnabled: true
+    }
+  });
+
+  const result = await service.complete({ destination: "chat" });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.summary.model?.entryId, "runtime:ollama-gemma4-e2b");
+  assert.equal(repairCalls, 1);
+  assert.equal(memberCreateCalls, 1);
+});
+
 test("onboarding completion binds the selected channel to the created AI employee", async () => {
   const { service, aiTeamService } = createService("onboarding-service-complete-binds-channel");
 
@@ -1981,6 +2106,75 @@ test("onboarding completion creates the staged AI employee before clearing onboa
   assert.equal(createdMember?.brain?.entryId, "mock-openai-gpt-4o-mini");
   assert.deepEqual(createdMember?.presetSkillIds, ["research-brief", "status-writer"]);
   assert.equal(persisted.onboarding, undefined);
+});
+
+test("onboarding completion persists the created AI employee id before channel binding", async () => {
+  const { service, store, adapter } = createService("onboarding-service-finalize-bind-retry");
+  const originalBindMemberChannel = adapter.bindAIMemberChannel.bind(adapter);
+  let bindAttempts = 0;
+
+  adapter.bindAIMemberChannel = async (...args: Parameters<MockAdapter["bindAIMemberChannel"]>) => {
+    bindAttempts += 1;
+    if (bindAttempts === 1) {
+      throw new Error("Binding is still owned by an old AI employee.");
+    }
+
+    return originalBindMemberChannel(...args);
+  };
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "installed-managed"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "wechat",
+      entryId: "wechat:default"
+    },
+    channelProgress: {
+      status: "staged"
+    },
+    employee: {
+      name: "Retry Ryo",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: ["research-brief", "status-writer"],
+      knowledgePackIds: ["company-handbook", "delivery-playbook"],
+      workStyles: ["Analytical", "Concise"],
+      memoryEnabled: true
+    }
+  });
+
+  await assert.rejects(
+    service.complete({ destination: "team" }),
+    /old AI employee/
+  );
+
+  const afterFailure = await store.read();
+  const createdMember = Object.values(afterFailure.aiTeam?.members ?? {}).find((member) => member.name === "Retry Ryo");
+
+  assert.ok(createdMember);
+  assert.equal(afterFailure.onboarding?.draft.employee?.memberId, createdMember.id);
+
+  const retry = await service.complete({ destination: "team" });
+  const afterRetry = await store.read();
+  const retryMembers = Object.values(afterRetry.aiTeam?.members ?? {}).filter((member) => member.name === "Retry Ryo");
+
+  assert.equal(retry.status, "completed");
+  assert.equal(retryMembers.length, 1);
+  assert.equal(bindAttempts, 2);
 });
 
 test("onboarding completion repairs legacy employee-step drafts that lost earlier prerequisite fields", async () => {

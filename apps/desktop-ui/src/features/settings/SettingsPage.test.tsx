@@ -19,11 +19,11 @@ vi.mock("../../app/providers/OverviewProvider.js", () => ({
         supported: true,
         currentVersion: "0.1.2",
         latestVersion: "0.1.4",
-        downloadUrl: "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.pkg",
+        downloadUrl: "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.dmg",
         releaseUrl: "https://github.com/Jian130/chillclaw/releases/tag/v0.1.4",
         checkedAt: "2026-04-04T11:00:00.000Z",
         summary: "ChillClaw 0.1.4 is available.",
-        detail: "Download the latest signed installer."
+        detail: "Download the latest disk image."
       },
       appService: {
         running: true,

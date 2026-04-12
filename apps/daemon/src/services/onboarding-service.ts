@@ -152,6 +152,10 @@ function onboardingModelFromLocalRuntime(
   };
 }
 
+function isLocalOllamaOnboardingModel(model: OnboardingModelState | undefined): boolean {
+  return model?.providerId === "ollama" || Boolean(model?.modelKey?.startsWith("ollama/"));
+}
+
 function resolveSavedModelEntry(
   savedEntries: ModelConfigActionResponse["modelConfig"]["savedEntries"],
   criteria: {
@@ -627,6 +631,12 @@ export class OnboardingService {
     if (!skipToDashboard) {
       this.assertReadyForFinalize(completionDraft, summary);
 
+      const preparedModel = await this.prepareLocalRuntimeModelForFinalize(summary.model ?? completionDraft.model);
+      if (preparedModel?.entryId) {
+        summary.model = preparedModel;
+        completionDraft.model = preparedModel;
+      }
+
       const employee = completionDraft.employee;
       if (!employee) {
         throw new Error("Enter the AI employee profile before finishing onboarding.");
@@ -676,6 +686,29 @@ export class OnboardingService {
         throw new Error("ChillClaw could not verify the staged AI employee after creation.");
       }
 
+      const createdEmployeeDraft = {
+        ...(employee),
+        memberId: createdMember.id,
+        name: createdMember.name,
+        jobTitle: createdMember.jobTitle,
+        avatarPresetId: createdMember.avatar.presetId,
+        presetId: employee.presetId,
+        personalityTraits: employee.personalityTraits,
+        presetSkillIds: resolvePresetSkillIds(employee),
+        knowledgePackIds: employee.knowledgePackIds,
+        workStyles: employee.workStyles,
+        memoryEnabled: employee.memoryEnabled
+      };
+      await this.store.update((existing) => ({
+        ...existing,
+        onboarding: {
+          draft: {
+            ...(existing.onboarding?.draft ?? defaultOnboardingDraftState()),
+            employee: createdEmployeeDraft
+          }
+        }
+      }));
+
       const channelBinding = summary.channel?.entryId ?? completionDraft.channel?.entryId;
       if (channelBinding && !createdMember.bindings.some((binding) => binding.target === channelBinding)) {
         await this.aiTeamService.bindMemberChannelForOnboarding(createdMember.id, { binding: channelBinding });
@@ -683,42 +716,9 @@ export class OnboardingService {
       await this.adapter.aiEmployees.setPrimaryAIMemberAgent(createdMember.agentId);
       this.publishWarmupProgress(warmupTaskId, "running", "Applying gateway changes");
 
-      await this.store.update((existing) => ({
-        ...existing,
-        onboarding: {
-          draft: {
-            ...(existing.onboarding?.draft ?? defaultOnboardingDraftState()),
-            employee: {
-              ...(existing.onboarding?.draft.employee ?? employee),
-              memberId: createdMember.id,
-              name: createdMember.name,
-              jobTitle: createdMember.jobTitle,
-              avatarPresetId: createdMember.avatar.presetId,
-              presetId: employee.presetId,
-              personalityTraits: employee.personalityTraits,
-              presetSkillIds: resolvePresetSkillIds(employee),
-              knowledgePackIds: employee.knowledgePackIds,
-              workStyles: employee.workStyles,
-              memoryEnabled: employee.memoryEnabled
-            }
-          }
-        }
-      }));
-
       finalSummary = {
         ...summary,
-        employee: {
-          memberId: createdMember.id,
-          name: createdMember.name,
-          jobTitle: createdMember.jobTitle,
-          avatarPresetId: createdMember.avatar.presetId,
-          presetId: employee.presetId,
-          personalityTraits: employee.personalityTraits,
-          presetSkillIds: resolvePresetSkillIds(employee),
-          knowledgePackIds: employee.knowledgePackIds,
-          workStyles: employee.workStyles,
-          memoryEnabled: employee.memoryEnabled
-        }
+        employee: createdEmployeeDraft
       };
 
       await this.adapter.gateway.finalizeOnboardingSetup();
@@ -1397,6 +1397,32 @@ export class OnboardingService {
     });
 
     return matchedEntry ? onboardingModelFromSavedEntry(matchedEntry, model) : undefined;
+  }
+
+  private async prepareLocalRuntimeModelForFinalize(
+    model: OnboardingModelState | undefined
+  ): Promise<OnboardingModelState | undefined> {
+    if (!this.localModelRuntimeService || !isLocalOllamaOnboardingModel(model)) {
+      return model;
+    }
+
+    const before = await this.localModelRuntimeService.getOverview();
+    const readyModel = onboardingModelFromLocalRuntime(before);
+    if (readyModel) {
+      return readyModel;
+    }
+
+    const result = await this.localModelRuntimeService.repair();
+    if (result.status !== "completed") {
+      throw new Error(result.message || "ChillClaw could not repair the local Ollama runtime before finishing onboarding.");
+    }
+
+    const repairedModel = onboardingModelFromLocalRuntime(result.localRuntime);
+    if (!repairedModel) {
+      throw new Error("ChillClaw repaired the local Ollama runtime, but OpenClaw did not report a ready local model.");
+    }
+
+    return repairedModel;
   }
 
   private isChannelEntryReadyForFinalize(

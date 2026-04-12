@@ -3,6 +3,7 @@ dist
 coverage
 .DS_Store
 .claude/
+.superpowers/
 *.log
 *.tsbuildinfo
 .turbo

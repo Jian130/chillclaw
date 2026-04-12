@@ -28,9 +28,21 @@
   height: 40px;
   width: 40px;
   place-items: center;
+  overflow: hidden;
   border-radius: var(--radius-xs);
-  background: linear-gradient(135deg, var(--primary) 0%, var(--accent-strong) 100%);
-  color: var(--white);
+  background: var(--surface);
+  box-shadow: var(--shadow-inset-border), var(--shadow-ink-xs);
+}
+
+.brand-mark {
+  display: block;
+  max-width: 100%;
+}
+
+.brand__mark-image {
+  width: 32px;
+  height: auto;
+  filter: drop-shadow(0 2px 4px rgb(var(--ink-rgb) / 0.18));
 }
 
 .brand h1 {

@@ -16,8 +16,8 @@ function buildRelease(overrides: Partial<Record<string, unknown>> = {}) {
     published_at: "2026-04-04T10:00:00.000Z",
     assets: [
       {
-        name: "ChillClaw-macOS.pkg",
-        browser_download_url: "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.pkg"
+        name: "ChillClaw-macOS.dmg",
+        browser_download_url: "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.dmg"
       }
     ],
     ...overrides
@@ -31,13 +31,13 @@ test("compareProductVersions orders semantic app versions", () => {
   assert.equal(compareProductVersions("0.1.2", "0.1.10") < 0, true);
 });
 
-test("parseStableMacOSRelease extracts release metadata for the signed macOS installer", () => {
+test("parseStableMacOSRelease extracts release metadata for the macOS disk image", () => {
   const release = parseStableMacOSRelease(buildRelease());
 
   assert.deepEqual(release, {
     version: "0.1.4",
     releaseUrl: "https://github.com/Jian130/chillclaw/releases/tag/v0.1.4",
-    downloadUrl: "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.pkg",
+    downloadUrl: "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.dmg",
     publishedAt: "2026-04-04T10:00:00.000Z"
   });
 });
@@ -83,7 +83,7 @@ test("app update service reports an available stable release and caches the resu
   assert.equal(fetchCount, 1);
   assert.equal(first.status, "update-available");
   assert.equal(first.latestVersion, "0.1.4");
-  assert.equal(first.downloadUrl?.endsWith("/ChillClaw-macOS.pkg"), true);
+  assert.equal(first.downloadUrl?.endsWith("/ChillClaw-macOS.dmg"), true);
   assert.deepEqual(second, first);
 });
 
@@ -115,7 +115,7 @@ test("app update service falls back to the last known status when GitHub cannot 
   assert.match(second.detail, /last known update result/i);
 });
 
-test("app update service returns an error when the stable release is missing the macOS installer", async () => {
+test("app update service returns an error when the stable release is missing the macOS disk image", async () => {
   const service = new AppUpdateService({
     currentVersion: "0.1.2",
     supported: true,
@@ -130,5 +130,5 @@ test("app update service returns an error when the stable release is missing the
   const status = await service.checkForUpdates();
 
   assert.equal(status.status, "error");
-  assert.match(status.detail, /ChillClaw-macOS\.pkg/i);
+  assert.match(status.detail, /ChillClaw-macOS\.dmg/i);
 });

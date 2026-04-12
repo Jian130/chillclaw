@@ -15,6 +15,8 @@ export {
   shouldResetStateAfterDeploymentUninstall
 } from "./routes/runtime-reset.js";
 
+const LONG_RUNNING_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
+
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.writeHead(statusCode, {
     "Content-Type": "application/json",
@@ -199,6 +201,8 @@ export function startServer(port = 4545) {
       sendJson(response, 500, { error: message });
     }
   });
+  // Managed runtime installs can exceed Node's 5-minute default on slow networks.
+  server.requestTimeout = LONG_RUNNING_REQUEST_TIMEOUT_MS;
 
   server.on("error", (error) => {
     void writeErrorLog("ChillClaw daemon server emitted an error.", errorToLogDetails(error), {

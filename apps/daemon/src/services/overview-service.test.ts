@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import { MockAdapter } from "../engine/mock-adapter.js";
 import { OverviewService } from "./overview-service.js";
@@ -16,6 +17,29 @@ test("overview service returns ChillClaw product data", async () => {
   assert.equal(Array.isArray(overview.profiles), true);
   assert.equal(overview.channelSetup.baseOnboardingCompleted, true);
   assert.match(overview.channelSetup.gatewaySummary, /Next recommended channel|All channel setup steps are complete|Gateway restarted/);
+});
+
+test("overview service skips local runtime probing while first-run onboarding is unfinished", async () => {
+  let localRuntimeCalls = 0;
+  const localModelRuntimeService = {
+    async getOverview() {
+      localRuntimeCalls += 1;
+      throw new Error("First-run overview should not probe Ollama before the model step.");
+    }
+  } as Pick<LocalModelRuntimeService, "getOverview"> as LocalModelRuntimeService;
+  const service = new OverviewService(
+    new MockAdapter(),
+    new StateStore(`/tmp/chillclaw-overview-first-run-${randomUUID()}.json`),
+    undefined,
+    undefined,
+    localModelRuntimeService
+  );
+
+  const overview = await service.getOverview();
+
+  assert.equal(overview.firstRun.setupCompleted, false);
+  assert.equal(localRuntimeCalls, 0);
+  assert.equal(overview.localRuntime?.status, "unchecked");
 });
 
 test("overview service can skip local runtime probing for install-time reads", async () => {

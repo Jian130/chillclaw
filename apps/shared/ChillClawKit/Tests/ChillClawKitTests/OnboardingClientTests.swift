@@ -679,7 +679,7 @@ struct OnboardingClientTests {
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/complete")
-        #expect(request.timeoutInterval == 300)
+        #expect(request.timeoutInterval == 1_200)
         let body = try #require(readRequestBody(request))
         let payload = try JSONDecoder.chillClaw.decode(CompleteOnboardingRequest.self, from: body)
         #expect(payload.destination == .chat)
@@ -781,7 +781,7 @@ struct OnboardingClientTests {
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/runtime/install")
-        #expect(request.timeoutInterval == 300)
+        #expect(request.timeoutInterval == 1_200)
     }
 
     @Test
@@ -852,7 +852,7 @@ struct OnboardingClientTests {
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/model/entries")
-        #expect(request.timeoutInterval == 300)
+        #expect(request.timeoutInterval == 1_200)
     }
 
     @Test
@@ -919,7 +919,7 @@ struct OnboardingClientTests {
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/channel/entries")
-        #expect(request.timeoutInterval == 300)
+        #expect(request.timeoutInterval == 1_200)
     }
 
     @Test

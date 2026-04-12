@@ -32,7 +32,7 @@ func nativeAppUpdateCopy(localeIdentifier: String = resolveNativeOnboardingLocal
     case "zh":
         return .init(
             title: "应用更新",
-            body: "检查最新稳定版 ChillClaw macOS 安装包，并在有更新时打开已签名的安装包下载页。",
+            body: "检查最新稳定版 ChillClaw macOS 磁盘映像，并在有更新时打开下载。",
             availableBadge: "有可用更新",
             currentBadge: "当前版本",
             unavailableBadge: "不可用",
@@ -46,7 +46,7 @@ func nativeAppUpdateCopy(localeIdentifier: String = resolveNativeOnboardingLocal
     case "ja":
         return .init(
             title: "アプリ更新",
-            body: "最新の安定版 ChillClaw macOS インストーラーを確認し、更新があれば署名済みパッケージのダウンロードを開きます。",
+            body: "最新の安定版 ChillClaw macOS ディスクイメージを確認し、更新があればダウンロードを開きます。",
             availableBadge: "更新あり",
             currentBadge: "最新",
             unavailableBadge: "利用不可",
@@ -60,7 +60,7 @@ func nativeAppUpdateCopy(localeIdentifier: String = resolveNativeOnboardingLocal
     case "ko":
         return .init(
             title: "앱 업데이트",
-            body: "최신 안정판 ChillClaw macOS 설치 패키지를 확인하고, 업데이트가 있으면 서명된 설치 파일 다운로드를 엽니다.",
+            body: "최신 안정판 ChillClaw macOS 디스크 이미지를 확인하고, 업데이트가 있으면 다운로드를 엽니다.",
             availableBadge: "업데이트 가능",
             currentBadge: "최신 상태",
             unavailableBadge: "사용 불가",
@@ -74,7 +74,7 @@ func nativeAppUpdateCopy(localeIdentifier: String = resolveNativeOnboardingLocal
     case "es":
         return .init(
             title: "Actualizaciones de la app",
-            body: "Comprueba el instalador estable más reciente de ChillClaw para macOS y abre la descarga del paquete firmado cuando haya una actualización.",
+            body: "Comprueba la imagen de disco estable más reciente de ChillClaw para macOS y abre la descarga cuando haya una actualización.",
             availableBadge: "Actualización disponible",
             currentBadge: "Actual",
             unavailableBadge: "No disponible",
@@ -88,7 +88,7 @@ func nativeAppUpdateCopy(localeIdentifier: String = resolveNativeOnboardingLocal
     default:
         return .init(
             title: "App Updates",
-            body: "Check the latest stable ChillClaw macOS installer and open the signed package download when an update is available.",
+            body: "Check the latest stable ChillClaw macOS disk image and open the download when an update is available.",
             availableBadge: "Update Available",
             currentBadge: "Current",
             unavailableBadge: "Unavailable",

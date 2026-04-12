@@ -126,12 +126,12 @@ struct ChillClawProtocolTests {
             "supported": true,
             "currentVersion": "0.1.2",
             "latestVersion": "0.1.4",
-            "downloadUrl": "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.pkg",
+            "downloadUrl": "https://github.com/Jian130/chillclaw/releases/download/v0.1.4/ChillClaw-macOS.dmg",
             "releaseUrl": "https://github.com/Jian130/chillclaw/releases/tag/v0.1.4",
             "publishedAt": "2026-04-04T10:00:00.000Z",
             "checkedAt": "2026-04-04T11:00:00.000Z",
             "summary": "ChillClaw 0.1.4 is available.",
-            "detail": "Download the latest signed installer."
+            "detail": "Download the latest disk image."
           },
           "firstRun": {
             "introCompleted": true,
@@ -188,7 +188,7 @@ struct ChillClawProtocolTests {
         let overview = try JSONDecoder.chillClaw.decode(ProductOverview.self, from: data)
         #expect(overview.appUpdate.status == "update-available")
         #expect(overview.appUpdate.latestVersion == "0.1.4")
-        #expect(overview.appUpdate.downloadUrl?.hasSuffix("ChillClaw-macOS.pkg") == true)
+        #expect(overview.appUpdate.downloadUrl?.hasSuffix("ChillClaw-macOS.dmg") == true)
     }
 
     @Test

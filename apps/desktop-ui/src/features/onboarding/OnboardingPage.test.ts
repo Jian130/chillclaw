@@ -98,4 +98,13 @@ describe("OnboardingPage CTA styling", () => {
     expect(source).toContain("onboarding-model-download-card");
     expect(source).toContain("copy.localModelDownloadResumeNote");
   });
+
+  it("shows the shared busy button animation while advancing from the model step", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain('const [modelAdvanceBusy, setModelAdvanceBusy] = useState(false);');
+    expect(source).toContain("setModelAdvanceBusy(true);");
+    expect(source).toContain("setModelAdvanceBusy(false);");
+    expect(source).toContain('loading={modelAdvanceBusy}');
+  });
 });

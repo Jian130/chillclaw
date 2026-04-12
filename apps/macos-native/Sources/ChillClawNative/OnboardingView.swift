@@ -256,14 +256,7 @@ struct NativeOnboardingView: View {
     private func header(headerWidth: CGFloat) -> some View {
         VStack(spacing: 16) {
             HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: NativeUI.mediumCornerRadius, style: .continuous)
-                        .fill(nativeBrandMarkGradient())
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.white)
-                }
+                NativeBrandMark(size: .onboarding)
                 Text(viewModel.copy.brand)
                     .font(.system(size: 34, weight: .semibold))
                     .tracking(-0.8)

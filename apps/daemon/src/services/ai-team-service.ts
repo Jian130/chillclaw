@@ -83,6 +83,10 @@ function detectedMemberId(agentId: string): string {
   return `detected-${slug || "agent"}`;
 }
 
+function isChillClawManagedMemberAgentId(agentId: string | undefined): boolean {
+  return Boolean(agentId?.trim().startsWith("chillclaw-member-"));
+}
+
 function defaultMemberAvatar(emoji?: string) {
   return {
     presetId: "operator",
@@ -316,6 +320,7 @@ export class AITeamService {
     const availableBrainIds = new Set(modelConfig.savedEntries.map((entry) => entry.id));
 
     const members = runtimeMembers
+      .filter((candidate) => !isChillClawManagedMemberAgentId(candidate.agentId) || storedByAgentId.has(candidate.agentId))
       .map((candidate) => {
         const stored = storedByAgentId.get(candidate.agentId);
         const inferred = importedMemberSummary(candidate, baseOverview, teams);

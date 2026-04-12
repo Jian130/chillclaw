@@ -105,7 +105,7 @@ flowchart LR
     CLI --> Config["OpenClaw config + health + doctor"]
     LocalLLM --> LocalRuntime["Ollama / vLLM / LM Studio / local gateway"]
     Daemon --> Data["ChillClaw local data<br/>~/Library/Application Support/ChillClaw"]
-    App --> Pkg["ChillClaw-macOS.pkg"]
+    App --> Dmg["ChillClaw-macOS.dmg"]
 ```
 
 ### Runtime breakdown
@@ -137,11 +137,11 @@ flowchart LR
 
 ### Packaging breakdown
 
-- `ChillClaw-macOS.pkg` installs `ChillClaw.app` into `/Applications`.
+- `ChillClaw-macOS.dmg` lets users drag `ChillClaw.app` into `/Applications`.
 - The app bundle contains the native macOS client, the built fallback React UI, the daemon, LaunchAgent helper scripts, and OpenClaw bootstrap/install logic.
 - OpenClaw itself is reused when an existing install is already available, or deployed into ChillClaw-managed local app data when setup needs to install it.
 - Stable macOS releases are published from protected GitHub tags in the form `vX.Y.Z`. The packaged app update check and the public website download button both resolve through GitHub Releases rather than hard-coded release pages.
-- The website always points at `releases/latest/download/ChillClaw-macOS.pkg`, so the public macOS download stays current when a new stable release is published.
+- The website always points at `releases/latest/download/ChillClaw-macOS.dmg`, so the public macOS download stays current when a new stable release is published.
 
 ### Native macOS client
 
@@ -367,7 +367,7 @@ This keeps each OpenClaw agent isolated and closer to the multi-agent workspace 
 
 ## macOS installer
 
-Build a distributable macOS app bundle and installer package with:
+Build a distributable macOS app bundle and drag-to-Applications disk image with:
 
 `npm run build:mac-installer`
 
@@ -391,7 +391,7 @@ Open the native macOS client package in Xcode with:
 
 `open -a Xcode apps/macos-native/Package.swift`
 
-Then choose the `ChillClawNative` scheme, select `My Mac`, and press Run.
+Then choose the `ChillClaw` scheme, select `My Mac`, and press Run.
 
 Open the shared Swift package in a separate Xcode window when needed:
 
@@ -401,9 +401,9 @@ React remains a parallel app under `apps/desktop-ui`, and future native clients 
 
 This produces:
 
-- `dist/macos/ChillClaw-macOS.pkg`
+- `dist/macos/ChillClaw-macOS.dmg`
 
-The installer builder stages the `.app` bundle in a temporary directory under `dist/`, then packages a native SwiftUI `ChillClaw.app` that talks to the bundled self-contained `chillclaw-daemon`.
+The installer builder stages the `.app` bundle in a temporary directory under `dist/`, then creates a drag-to-Applications DMG containing a native SwiftUI `ChillClaw.app` that talks to the bundled self-contained `chillclaw-daemon`.
 The packaged ChillClaw daemon still does not depend on a separate Homebrew-style Node runtime on the target Mac.
 
 The packaged app also includes LaunchAgent helper scripts so ChillClaw can run as a login-time background service on macOS.
@@ -432,7 +432,10 @@ For a **full OpenClaw uninstall**, ChillClaw now clears runtime-facing setup sta
 | Setup completion flag | Cleared | Kept | Removed with app data |
 | Selected onboarding profile | Cleared | Kept | Removed with app data |
 | Onboarding draft state | Cleared | Kept | Removed with app data |
+| Onboarding warmup jobs | Cleared | Kept | Removed with app data |
 | Channel onboarding records and saved staged channel entries | Cleared | Kept | Removed with app data |
+| AI employees and managed member workspaces | Cleared; managed `ai-members` data removed | Kept | Removed with app data |
+| Chat threads tied to OpenClaw agents | Cleared | Kept | Removed with app data |
 | Visible model config in the app | Reset to empty because the runtime is gone | Kept | Removed with app data |
 | Intro-complete flag | Kept | Kept | Removed with app data |
 | Recent tasks | Kept | Kept | Removed with app data |
@@ -442,6 +445,6 @@ For a **full OpenClaw uninstall**, ChillClaw now clears runtime-facing setup sta
 
 This split is intentional today:
 
-- OpenClaw uninstall resets setup-facing state so Models and Channels return to a clean post-uninstall surface.
+- OpenClaw uninstall resets setup-facing state so Models, Channels, AI employees, and chat return to a clean post-uninstall surface.
 - ChillClaw still preserves unrelated product history such as intro completion, task history, and custom skill state.
 - Secrets are currently outside that reset surface. We may tighten or expand that cleanup later, so treat this matrix as the current behavior rather than a permanent contract.

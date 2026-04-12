@@ -63,6 +63,10 @@ type OpenClawAgentBindingJsonEntry = {
   };
 };
 
+type OpenClawAgentBindJson = {
+  conflicts?: unknown[];
+};
+
 type OpenClawAuthProfileStoreJson = {
   version?: number;
   profiles?: Record<string, Record<string, unknown> & { provider?: string; type?: string; email?: string; accountId?: string; key?: string }>;
@@ -350,6 +354,86 @@ function safeJsonPayloadParse<T>(value: string | undefined): T | undefined {
   }
 
   return undefined;
+}
+
+function isIgnorableOpenClawDiagnosticLine(line: string): boolean {
+  const normalized = line.trim().toLowerCase();
+  return (
+    normalized.includes("plugins.allow is empty") ||
+    normalized.startsWith("[agents/auth-profiles] synced ")
+  );
+}
+
+function stripIgnorableOpenClawDiagnosticLines(text: string | undefined): string {
+  return (text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !isIgnorableOpenClawDiagnosticLine(line))
+    .join("\n")
+    .trim();
+}
+
+function commandFailureMessage(result: { stdout: string; stderr: string }, fallback: string): string {
+  return stripIgnorableOpenClawDiagnosticLines(result.stderr) ||
+    stripIgnorableOpenClawDiagnosticLines(result.stdout) ||
+    fallback;
+}
+
+function isAgentNotFoundFailure(result: { stdout: string; stderr: string }): boolean {
+  return /agent\s+"?[^"\n]*"?\s+not found/i.test(`${result.stderr}\n${result.stdout}`);
+}
+
+function candidateAgentIdFromUnknown(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function conflictOwnerAgentIdsFromEntry(entry: unknown): string[] {
+  if (typeof entry === "string") {
+    const matched = entry.match(/\bagent=([^) \t\n]+)/);
+    return matched?.[1] ? [matched[1].trim()] : [];
+  }
+
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return [];
+  }
+
+  const record = entry as Record<string, unknown>;
+  return [
+    candidateAgentIdFromUnknown(record.agentId),
+    candidateAgentIdFromUnknown(record.agent),
+    candidateAgentIdFromUnknown(record.ownerAgentId),
+    candidateAgentIdFromUnknown(record.owner)
+  ].filter((agentId): agentId is string => Boolean(agentId));
+}
+
+function bindConflictOwnerAgentIds(result: { stdout: string; stderr: string }): string[] {
+  const payload =
+    safeJsonPayloadParse<OpenClawAgentBindJson>(result.stdout) ??
+    safeJsonPayloadParse<OpenClawAgentBindJson>(result.stderr);
+  const conflicts = Array.isArray(payload?.conflicts) ? payload.conflicts : [];
+  return Array.from(new Set(conflicts.flatMap((entry) => conflictOwnerAgentIdsFromEntry(entry))));
+}
+
+function configBindingTarget(entry: unknown): string | undefined {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return undefined;
+  }
+
+  return normalizeBindingTarget(entry as OpenClawAgentBindingJsonEntry)?.target;
+}
+
+function shouldRemoveConfigBindingEntry(entry: unknown, ownerAgentIds: Set<string>, binding: string): boolean {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return false;
+  }
+
+  const record = entry as { agentId?: unknown };
+  const agentId = candidateAgentIdFromUnknown(record.agentId);
+  if (!agentId || !ownerAgentIds.has(agentId)) {
+    return false;
+  }
+
+  return configBindingTarget(entry) === binding;
 }
 
 export class AgentsConfigCoordinator {
@@ -776,11 +860,34 @@ export class AgentsConfigCoordinator {
     return owners;
   }
 
+  private async removeBindingEntriesFromConfig(ownerAgentIds: string[], binding: string): Promise<boolean> {
+    const snapshot = await this.access.readOpenClawConfigSnapshot();
+    const config = snapshot.config as OpenClawConfigSnapshotLike["config"] & { bindings?: unknown[] };
+    const currentBindings = Array.isArray(config.bindings) ? config.bindings : undefined;
+    if (!currentBindings) {
+      return false;
+    }
+
+    const ownerAgentIdSet = new Set(ownerAgentIds);
+    const nextBindings = currentBindings.filter((entry) => !shouldRemoveConfigBindingEntry(entry, ownerAgentIdSet, binding));
+    if (nextBindings.length === currentBindings.length) {
+      return false;
+    }
+
+    if (nextBindings.length > 0) {
+      config.bindings = nextBindings;
+    } else {
+      delete config.bindings;
+    }
+    await this.access.writeOpenClawConfigSnapshot(snapshot.configPath, snapshot.config);
+    return true;
+  }
+
   private async bindMemberChannelExclusively(
     agentId: string,
     binding: string
   ): Promise<{ bindings: MemberBindingSummary[]; requiresGatewayApply?: boolean }> {
-    const ownerAgentIds = await this.readBindingOwnerAgentIds(binding, agentId);
+    const ownerAgentIds = new Set(await this.readBindingOwnerAgentIds(binding, agentId));
     const runtimeBinding = this.access.toRuntimeBindingTarget(binding);
 
     for (const ownerAgentId of ownerAgentIds) {
@@ -789,16 +896,48 @@ export class AgentsConfigCoordinator {
         { allowFailure: true }
       );
       if (result.code !== 0) {
-        throw new Error(result.stderr || result.stdout || `ChillClaw could not unbind ${binding} from ${ownerAgentId}.`);
+        throw new Error(commandFailureMessage(result, `ChillClaw could not unbind ${binding} from ${ownerAgentId}.`));
       }
     }
 
-    const result = await this.access.runOpenClaw(
+    let result = await this.access.runOpenClaw(
       ["agents", "bind", "--agent", agentId, "--bind", runtimeBinding, "--json"],
       { allowFailure: true }
     );
     if (result.code !== 0) {
-      throw new Error(result.stderr || result.stdout || `ChillClaw could not bind ${binding} to ${agentId}.`);
+      const conflictOwnerAgentIds = bindConflictOwnerAgentIds(result)
+        .filter((ownerAgentId) => ownerAgentId !== agentId && !ownerAgentIds.has(ownerAgentId));
+      const missingOwnerAgentIds: string[] = [];
+
+      for (const ownerAgentId of conflictOwnerAgentIds) {
+        const unbind = await this.access.runOpenClaw(
+          ["agents", "unbind", "--agent", ownerAgentId, "--bind", runtimeBinding, "--json"],
+          { allowFailure: true }
+        );
+        if (unbind.code !== 0) {
+          if (isAgentNotFoundFailure(unbind)) {
+            missingOwnerAgentIds.push(ownerAgentId);
+            ownerAgentIds.add(ownerAgentId);
+            continue;
+          }
+          throw new Error(commandFailureMessage(unbind, `ChillClaw could not unbind ${binding} from ${ownerAgentId}.`));
+        }
+        ownerAgentIds.add(ownerAgentId);
+      }
+
+      if (missingOwnerAgentIds.length > 0) {
+        await this.removeBindingEntriesFromConfig(missingOwnerAgentIds, binding);
+      }
+
+      if (conflictOwnerAgentIds.length > 0) {
+        result = await this.access.runOpenClaw(
+          ["agents", "bind", "--agent", agentId, "--bind", runtimeBinding, "--json"],
+          { allowFailure: true }
+        );
+      }
+    }
+    if (result.code !== 0) {
+      throw new Error(commandFailureMessage(result, `ChillClaw could not bind ${binding} to ${agentId}.`));
     }
 
     this.access.invalidateMemberBindingCaches([...ownerAgentIds, agentId]);

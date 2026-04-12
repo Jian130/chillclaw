@@ -253,14 +253,7 @@ private struct NativeSidebar: View {
 
     private func sidebarBrand(copy: NativeDashboardCopy) -> some View {
         HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(nativeBrandMarkGradient())
-                Image(systemName: "sparkles")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 72, height: 72)
+            NativeBrandMark(size: .sidebar)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("ChillClaw")

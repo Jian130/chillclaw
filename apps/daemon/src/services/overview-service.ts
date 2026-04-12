@@ -57,7 +57,7 @@ export class OverviewService {
     };
     const onboardingCompleted = true;
     const nextChannelId = (["telegram", "whatsapp", "feishu", "wechat"] as const).find((channelId) => mergedChannels[channelId].status !== "completed");
-    const includeLocalRuntime = options?.includeLocalRuntime ?? true;
+    const includeLocalRuntime = options?.includeLocalRuntime ?? Boolean(state.setupCompletedAt);
     const localRuntime = includeLocalRuntime && this.localModelRuntimeService
       ? await this.localModelRuntimeService.getOverview()
       : base.localRuntime;

@@ -332,6 +332,11 @@ function isManagedModelAgentId(agentId: string | undefined): boolean {
   return Boolean(trimmed && trimmed.startsWith("chillclaw-model-"));
 }
 
+function isManagedMemberAgentId(agentId: string | undefined): boolean {
+  const trimmed = agentId?.trim();
+  return Boolean(trimmed && trimmed.startsWith("chillclaw-member-"));
+}
+
 function isImplicitMainAgentId(agentId: string | undefined): boolean {
   return agentId?.trim() === OPENCLAW_MAIN_AGENT_ID;
 }
@@ -3960,13 +3965,32 @@ export class OpenClawAdapter implements EngineAdapter {
     return isVisibleAIMemberAgentId(agent.id);
   }
 
+  private async hasUsableManagedMemberPaths(agent: OpenClawAgentListEntry): Promise<boolean> {
+    if (!isManagedMemberAgentId(agent.id)) {
+      return true;
+    }
+
+    const paths = [agent.agentDir?.trim(), agent.workspace?.trim()].filter((path): path is string => Boolean(path));
+    if (paths.length === 0) {
+      return false;
+    }
+
+    return (await Promise.all(paths.map((path) => fileExists(path)))).some(Boolean);
+  }
+
   private async listOpenClawAgents(): Promise<OpenClawAgentListEntry[]> {
     return readAgentListSnapshot();
   }
 
   async listAIMemberRuntimeCandidates(): Promise<AIMemberRuntimeCandidate[]> {
     const agents = await this.listOpenClawAgents();
-    const visibleAgents = agents.filter((agent) => this.isVisibleAIMemberAgent(agent));
+    const visibleAgents: Array<OpenClawAgentListEntry & { id: string }> = [];
+
+    for (const agent of agents) {
+      if (this.isVisibleAIMemberAgent(agent) && await this.hasUsableManagedMemberPaths(agent)) {
+        visibleAgents.push(agent);
+      }
+    }
 
     return visibleAgents.map((agent) => ({
         agentId: agent.id,

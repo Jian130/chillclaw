@@ -2718,9 +2718,15 @@
   width: 56px;
   height: 56px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--primary-bright) 0%, var(--accent-strong) 100%);
-  color: var(--white);
-  box-shadow: var(--shadow-accent-strong);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow-inset-border), var(--shadow-ink-sm);
+}
+
+.onboarding-brand__mark-image {
+  width: 46px;
+  height: auto;
+  filter: drop-shadow(0 3px 6px rgb(var(--ink-rgb) / 0.18));
 }
 
 .onboarding-header__copy {

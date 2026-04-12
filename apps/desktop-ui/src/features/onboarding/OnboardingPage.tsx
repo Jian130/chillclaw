@@ -62,6 +62,7 @@ import { memberAvatarImageSrc, resolveMemberAvatarPreset } from "../../shared/av
 import { subscribeToDaemonEvents } from "../../shared/api/events.js";
 import { t } from "../../shared/i18n/messages.js";
 import { Badge, TagBadge } from "../../shared/ui/Badge.js";
+import { BrandMark } from "../../shared/ui/BrandMark.js";
 import { Button } from "../../shared/ui/Button.js";
 import { Card, CardContent } from "../../shared/ui/Card.js";
 import { FieldLabel, Input } from "../../shared/ui/Field.js";
@@ -227,6 +228,7 @@ export default function OnboardingPage() {
   const [modelSession, setModelSession] = useState<ModelAuthSessionResponse["session"]>();
   const [modelSessionInput, setModelSessionInput] = useState("");
   const [modelBusy, setModelBusy] = useState<"" | "save" | "input">("");
+  const [modelAdvanceBusy, setModelAdvanceBusy] = useState(false);
   const [localRuntimeBusy, setLocalRuntimeBusy] = useState<"" | "install" | "repair">("");
   const [localRuntimeSnapshot, setLocalRuntimeSnapshot] = useState<ModelConfigOverview["localRuntime"]>();
   const [localRuntimeMessage, setLocalRuntimeMessage] = useState("");
@@ -1094,7 +1096,12 @@ export default function OnboardingPage() {
 
   async function handleAdvanceToChannel() {
     setPageError(undefined);
-    await goToStep("channel");
+    setModelAdvanceBusy(true);
+    try {
+      await goToStep("channel");
+    } finally {
+      setModelAdvanceBusy(false);
+    }
   }
 
   async function handleReturnToModelPicker() {
@@ -1369,7 +1376,7 @@ export default function OnboardingPage() {
             <div aria-hidden className="onboarding-toolbar__spacer" />
             <div className="onboarding-brand">
               <div className="onboarding-brand__mark">
-                <Sparkles size={28} />
+                <BrandMark className="onboarding-brand__mark-image" decorative />
               </div>
               <strong>{copy.brand}</strong>
             </div>
@@ -1739,7 +1746,7 @@ export default function OnboardingPage() {
                             </TagBadge>
                           ) : null}
                           <div className="actions-row">
-                            <Button fullWidth size="lg" onClick={() => void handleAdvanceToChannel()}>
+                            <Button fullWidth size="lg" loading={modelAdvanceBusy} onClick={() => void handleAdvanceToChannel()}>
                               {common.continue}
                             </Button>
                           </div>
@@ -1992,7 +1999,13 @@ export default function OnboardingPage() {
                               </div>
                             </div>
                             <div className="onboarding-model-actions onboarding-model-actions--connected">
-                              <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToChannel()}>
+                              <Button
+                                className="onboarding-install-next onboarding-primary-action"
+                                fullWidth
+                                size="lg"
+                                loading={modelAdvanceBusy}
+                                onClick={() => void handleAdvanceToChannel()}
+                              >
                                 {common.continue}
                               </Button>
                             </div>

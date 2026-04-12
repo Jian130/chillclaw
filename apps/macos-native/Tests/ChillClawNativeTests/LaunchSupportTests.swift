@@ -15,6 +15,12 @@ struct LaunchSupportTests {
         #expect(app.firstWindowVisibleCalls == 1)
         #expect(app.minimumSizes == [nativeOnboardingMinimumWindowSize])
     }
+
+    @Test
+    @MainActor
+    func applicationIconImageResolvesFromBundledBrandIcon() {
+        #expect(nativeApplicationIconImage() != nil)
+    }
 }
 
 private final class FakeNativeApplication: NativeApplicationControlling {

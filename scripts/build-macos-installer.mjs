@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { writeScriptLogLine } from "./logging.mjs";
@@ -10,6 +10,7 @@ const ROOT = process.cwd();
 const DIST_DIR = resolve(ROOT, "dist/macos");
 const STAGING_DIR = resolve(ROOT, "dist/.macos-staging");
 const BUILD_DIR = resolve(STAGING_DIR, ".build");
+const DMG_STAGING_DIR = resolve(STAGING_DIR, "dmg");
 const APP_NAME = "ChillClaw";
 const APP_BUNDLE = resolve(STAGING_DIR, `${APP_NAME}.app`);
 const APP_CONTENTS = resolve(APP_BUNDLE, "Contents");
@@ -22,9 +23,18 @@ const APP_SCRIPTS = resolve(APP_RUNTIME_ROOT, "scripts");
 const PACKAGED_DAEMON_BUNDLE = resolve(BUILD_DIR, "chillclaw-daemon.cjs");
 const PACKAGED_DAEMON_BINARY = resolve(APP_RUNTIME, "chillclaw-daemon");
 const MACOS_NATIVE_PACKAGE_DIR = resolve(ROOT, "apps/macos-native");
-const NATIVE_EXECUTABLE_NAME = "ChillClawNative";
+const NATIVE_EXECUTABLE_NAME = APP_NAME;
 const APP_NATIVE_EXECUTABLE = resolve(APP_MACOS, APP_NAME);
-const PKG_OUTPUT = resolve(DIST_DIR, `${APP_NAME}-macOS.pkg`);
+const APP_ICON_FILENAME = "ChillClawAppIcon.icns";
+const APP_ICON_PNG_FILENAME = "ChillClawAppIcon.png";
+const APP_BRAND_LOGO_FILENAME = "ChillClawBrandLogo.png";
+const APP_ICON_SOURCE = resolve(MACOS_NATIVE_PACKAGE_DIR, "Sources/ChillClawNative/Resources", APP_ICON_FILENAME);
+const APP_ICON_PNG_SOURCE = resolve(MACOS_NATIVE_PACKAGE_DIR, "Sources/ChillClawNative/Resources", APP_ICON_PNG_FILENAME);
+const APP_BRAND_LOGO_SOURCE = resolve(MACOS_NATIVE_PACKAGE_DIR, "Sources/ChillClawNative/Resources", APP_BRAND_LOGO_FILENAME);
+const DMG_OUTPUT = resolve(DIST_DIR, `${APP_NAME}-macOS.dmg`);
+const LEGACY_PKG_OUTPUT = resolve(DIST_DIR, `${APP_NAME}-macOS.pkg`);
+const INSTALLER_ICON_PNG = resolve(BUILD_DIR, "installer-icon.png");
+const INSTALLER_ICON_RESOURCE = resolve(BUILD_DIR, "installer-icon.rsrc");
 const LAUNCH_AGENT_LABEL = "ai.chillclaw.daemon";
 const SCRIPT_LABEL = "ChillClaw installer";
 const PACKAGED_APP_BUILD_WORKSPACES = ["@chillclaw/contracts", "@chillclaw/daemon", "@chillclaw/desktop-ui"];
@@ -173,6 +183,19 @@ async function buildNativeClient() {
   const nativeBinary = resolve(binDir, NATIVE_EXECUTABLE_NAME);
   await copyFile(nativeBinary, APP_NATIVE_EXECUTABLE);
   await chmod(APP_NATIVE_EXECUTABLE, 0o755);
+  await copyNativeResourceBundles(binDir);
+}
+
+async function copyNativeResourceBundles(binDir) {
+  const entries = await readdir(binDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.endsWith(".bundle")) {
+      continue;
+    }
+
+    await cp(resolve(binDir, entry.name), resolve(APP_RESOURCES, entry.name), { recursive: true });
+  }
 }
 
 function installLaunchAgentScript() {
@@ -291,6 +314,10 @@ function infoPlist() {
   <string>ChillClaw</string>
   <key>CFBundleIdentifier</key>
   <string>ai.chillclaw.desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>ChillClawAppIcon.icns</string>
+  <key>CFBundleIconName</key>
+  <string>ChillClawAppIcon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -337,6 +364,9 @@ async function stageBundle() {
 
   await buildStandaloneDaemon();
   await buildNativeClient();
+  await copyFile(APP_ICON_SOURCE, resolve(APP_RESOURCES, APP_ICON_FILENAME));
+  await copyFile(APP_ICON_PNG_SOURCE, resolve(APP_RESOURCES, APP_ICON_PNG_FILENAME));
+  await copyFile(APP_BRAND_LOGO_SOURCE, resolve(APP_RESOURCES, APP_BRAND_LOGO_FILENAME));
   await cp(resolve(ROOT, "apps/desktop-ui/dist"), APP_UI, { recursive: true });
   await copyFile(resolve(ROOT, "scripts/bootstrap-openclaw.mjs"), resolve(APP_SCRIPTS, "bootstrap-openclaw.mjs"));
 
@@ -349,11 +379,33 @@ async function stageBundle() {
   await chmod(resolve(APP_SCRIPTS, "run-daemon.sh"), 0o755);
   await chmod(resolve(APP_SCRIPTS, "uninstall-launchagent.sh"), 0o755);
   await writeFile(resolve(APP_CONTENTS, "Info.plist"), infoPlist());
+  await writeFile(resolve(APP_CONTENTS, "PkgInfo"), "APPL????");
 }
 
 async function buildInstaller() {
-  await mkdir(dirname(PKG_OUTPUT), { recursive: true });
-  await run("pkgbuild", ["--component", APP_BUNDLE, "--install-location", "/Applications", PKG_OUTPUT]);
+  await mkdir(dirname(DMG_OUTPUT), { recursive: true });
+  await rm(LEGACY_PKG_OUTPUT, { force: true });
+  await stageDiskImageContents();
+  await run("hdiutil", ["create", "-volname", APP_NAME, "-srcfolder", DMG_STAGING_DIR, "-ov", "-format", "UDZO", DMG_OUTPUT]);
+  await applyInstallerFileIcon(DMG_OUTPUT);
+}
+
+async function stageDiskImageContents() {
+  await rm(DMG_STAGING_DIR, { recursive: true, force: true });
+  await mkdir(DMG_STAGING_DIR, { recursive: true });
+  await cp(APP_BUNDLE, resolve(DMG_STAGING_DIR, `${APP_NAME}.app`), { recursive: true });
+  await symlink("/Applications", resolve(DMG_STAGING_DIR, "Applications"));
+}
+
+async function applyInstallerFileIcon(installerPath) {
+  await copyFile(APP_ICON_PNG_SOURCE, INSTALLER_ICON_PNG);
+  await run("sips", ["-i", INSTALLER_ICON_PNG]);
+
+  const iconResource = await capture("DeRez", ["-only", "icns", INSTALLER_ICON_PNG]);
+  await writeFile(INSTALLER_ICON_RESOURCE, `${iconResource}\n`);
+
+  await run("Rez", ["-append", INSTALLER_ICON_RESOURCE, "-o", installerPath]);
+  await run("SetFile", ["-a", "C", installerPath]);
 }
 
 const options = parseArgs(process.argv.slice(2));
@@ -364,5 +416,5 @@ await buildInstaller();
 writeScriptLogLine({
   label: SCRIPT_LABEL,
   scope: "build-macos-installer.main",
-  message: `Built ${PKG_OUTPUT}`
+  message: `Built ${DMG_OUTPUT}`
 });

@@ -402,6 +402,19 @@ test("AI member discovery falls back to stderr when OpenClaw writes JSON there",
   });
 });
 
+test("AI member discovery ignores stale ChillClaw-managed agents after runtime uninstall reset removes their workspace", async () => {
+  await withFakeOpenClaw(async ({ adapter }) => {
+    const members = await adapter.aiEmployees.listAIMemberRuntimeCandidates();
+
+    assert.deepEqual(
+      members.map((member) => member.agentId),
+      ["existing-agent"]
+    );
+  }, {
+    staleManagedMemberAgent: true
+  });
+});
+
 test("buildGatewaySocketConnectParams matches the current OpenClaw connect schema", () => {
   const params = buildGatewaySocketConnectParams({
     token: "gateway-token",
@@ -496,6 +509,8 @@ async function withFakeOpenClaw(
     pluginUpdateAvailable?: boolean;
     gatewayServiceLoaded?: boolean;
     minimaxCatalog?: boolean;
+    staleManagedMemberAgent?: boolean;
+    bindConflictWithStaleOwner?: boolean;
   }
 ): Promise<void> {
   const previousLock = fakeOpenClawLock;
@@ -551,11 +566,31 @@ async function withFakeOpenClaw(
   const pluginUpdateAvailable = options?.pluginUpdateAvailable === true;
   const gatewayServiceLoaded = options?.gatewayServiceLoaded !== false;
   const minimaxCatalog = options?.minimaxCatalog === true;
+  const staleManagedMemberAgent = options?.staleManagedMemberAgent === true;
+  const bindConflictWithStaleOwner = options?.bindConflictWithStaleOwner === true;
   const chatHistoryPayload =
     options?.chatHistoryPayload ??
     '{"sessionKey":"agent:existing-agent:chillclaw-chat:thread-1","messages":[{"role":"assistant","content":[{"type":"text","text":"Hello from OpenClaw"}],"timestamp":1773000000000}]}';
 
-  await writeFile(configPath, JSON.stringify({}));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      bindConflictWithStaleOwner
+        ? {
+            bindings: [
+              {
+                type: "route",
+                agentId: "chillclaw-member-smart-ryo-20260412-122127",
+                match: {
+                  channel: "openclaw-weixin",
+                  accountId: "default"
+                }
+              }
+            ]
+          }
+        : {}
+    )
+  );
   await writeFile(versionPath, "2026.3.7\n");
   await mkdir(agentDirPath, { recursive: true });
   await writeFile(
@@ -594,6 +629,9 @@ async function withFakeOpenClaw(
   if (gatewayServiceLoaded) {
     await writeFile(gatewayServiceMarkerPath, "1\n");
     await writeFile(gatewayRunningMarkerPath, "1\n");
+  }
+  if (bindConflictWithStaleOwner) {
+    await writeFile(bindingsPath, "chillclaw-member-smart-ryo-20260412-122127|openclaw-weixin:default\n");
   }
   await mkdir(agentDirPath, { recursive: true });
   await mkdir(binDir, { recursive: true });
@@ -821,6 +859,10 @@ elif [ "$1" = "agents" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" =
     >&2 echo '[plugins] feishu_doc: Registered feishu_doc, feishu_app_scopes'
     >&2 echo '[{"id":"main","identityName":"Maggie","bindings":0},{"id":"chillclaw-model-openai","identityName":"OpenAI Helper","bindings":0},{"id":"stderr-agent","identityName":"Stderr Agent","identityEmoji":"🦊","workspace":"/tmp/stderr-workspace","agentDir":"/tmp/stderr-agent","model":"openai/gpt-5","bindings":1}]'
     >&2 echo '[plugins] feishu_chat: Registered feishu_chat tool'
+  elif [ "${staleManagedMemberAgent ? "1" : "0"}" = "1" ]; then
+    echo '[plugins] feishu_doc: Registered feishu_doc, feishu_app_scopes'
+    echo '[{"id":"main","identityName":"Maggie","bindings":0},{"id":"chillclaw-member-helper-20260327-000000","identityName":"Helper","identityEmoji":"🧠","workspace":${JSON.stringify(join(dataDir, "ai-members", "member-1", "workspace"))},"agentDir":${JSON.stringify(join(dataDir, "ai-members", "member-1", "agent"))},"model":"openai/gpt-5","bindings":1},{"id":"existing-agent","identityName":"Existing Agent","identityEmoji":"🧭","workspace":"/tmp/workspace","agentDir":"/tmp/agent","model":"openai/gpt-5","bindings":2}]'
+    echo '[plugins] feishu_chat: Registered feishu_chat tool'
   else
     echo '[plugins] feishu_doc: Registered feishu_doc, feishu_app_scopes'
     echo '[{"id":"main","identityName":"Maggie","bindings":0},{"id":"chillclaw-model-openai","identityName":"OpenAI Helper","bindings":0},{"id":"existing-agent","identityName":"Existing Agent","identityEmoji":"🧭","workspace":"/tmp/workspace","agentDir":"/tmp/agent","model":"openai/gpt-5","bindings":2}]'
@@ -831,12 +873,22 @@ elif [ "$1" = "agents" ] && [ "$2" = "bind" ] && [ "$3" = "--agent" ] && [ "$5" 
     >&2 echo 'Unknown channel "wechat".'
     exit 1
   fi
+  if [ "${bindConflictWithStaleOwner ? "1" : "0"}" = "1" ] && [ "$4" != "chillclaw-member-smart-ryo-20260412-122127" ] && grep -Fq "chillclaw-member-smart-ryo-20260412-122127" ${JSON.stringify(configPath)}; then
+    >&2 echo '[agents/auth-profiles] synced openai-codex credentials from external cli'
+    >&2 echo '[plugins] plugins.allow is empty; discovered non-bundled plugins may auto-load: openclaw-weixin (/Users/home/.openclaw/extensions/openclaw-weixin/index.ts). Set plugins.allow to explicit trusted ids.'
+    echo '{"agentId":"'"$4"'","added":[],"updated":[],"skipped":[],"conflicts":["openclaw-weixin accountId=default (agent=chillclaw-member-smart-ryo-20260412-122127)"]}'
+    exit 1
+  fi
   touch ${JSON.stringify(bindingsPath)}
   if ! grep -Fqx "$4|$6" ${JSON.stringify(bindingsPath)}; then
     echo "$4|$6" >> ${JSON.stringify(bindingsPath)}
   fi
   echo '{"ok":true}'
 elif [ "$1" = "agents" ] && [ "$2" = "unbind" ] && [ "$3" = "--agent" ] && [ "$5" = "--bind" ]; then
+  if [ "${bindConflictWithStaleOwner ? "1" : "0"}" = "1" ] && [ "$4" = "chillclaw-member-smart-ryo-20260412-122127" ]; then
+    >&2 echo 'Agent "chillclaw-member-smart-ryo-20260412-122127" not found.'
+    exit 1
+  fi
   if [ -f ${JSON.stringify(bindingsPath)} ]; then
     grep -Fvx "$4|$6" ${JSON.stringify(bindingsPath)} > ${JSON.stringify(bindingsPath)}.next || true
     mv ${JSON.stringify(bindingsPath)}.next ${JSON.stringify(bindingsPath)}
@@ -1402,6 +1454,29 @@ test("bindAIMemberChannel maps personal WeChat bindings to the runtime channel i
     assert.equal(countCommands(commands, "agents bind --agent existing-agent --bind wechat:default --json"), 0);
   }, {
     failPersonalWechatBindingAlias: true,
+    bindingsUseMatchShape: true
+  });
+});
+
+test("bindAIMemberChannel clears stale conflict owners reported by OpenClaw bind output", async () => {
+  await withFakeOpenClaw(async ({ adapter, logPath }) => {
+    const result = await adapter.aiEmployees.bindAIMemberChannel("existing-agent", {
+      binding: "wechat:default"
+    });
+    const commands = await readCommands(logPath);
+
+    assert.equal(result.requiresGatewayApply, true);
+    assert.deepEqual(result.bindings, [{ id: "wechat:default", target: "wechat:default" }]);
+    assert.equal(
+      countCommands(
+        commands,
+        "agents unbind --agent chillclaw-member-smart-ryo-20260412-122127 --bind openclaw-weixin:default --json"
+      ),
+      1
+    );
+    assert.equal(countCommands(commands, "agents bind --agent existing-agent --bind openclaw-weixin:default --json"), 2);
+  }, {
+    bindConflictWithStaleOwner: true,
     bindingsUseMatchShape: true
   });
 });

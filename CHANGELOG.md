@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-04-12 16:11 CST
+
+- switched macOS distribution toward a branded drag-to-Applications DMG, including native app/product renaming, packaged icon and brand assets, installer script updates, release/update copy, and matching README guidance
+- added shared ChillClaw brand marks across the React and native macOS shells, refreshed onboarding/settings presentation details, and kept the model-to-channel onboarding handoff visibly busy while slow daemon navigation finishes
+- hardened OpenClaw uninstall and AI employee creation by clearing stale ChillClaw-managed agents, workspaces, chat state, and top-level channel bindings, filtering deleted managed agents from live rosters, repairing stale WeChat bind conflicts, and persisting the created onboarding employee before channel binding so retries do not create duplicates
+
 ### 2026-04-11 18:24 CST
 
 - hardened the managed local AI onboarding handoff so ChillClaw can recover an already-installed Ollama model, keep the channel step from repeatedly rebuilding slow model summaries, and resolve stale draft model entry IDs to the current OpenClaw saved runtime entry before creating the AI employee

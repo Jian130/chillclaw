@@ -35,7 +35,7 @@ interface AppUpdateServiceOptions {
 
 const DEFAULT_REPOSITORY = "Jian130/chillclaw";
 const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MACOS_INSTALLER_NAME = "ChillClaw-macOS.pkg";
+const MACOS_INSTALLER_NAME = "ChillClaw-macOS.dmg";
 
 function normalizeVersion(value: string): string {
   return value.trim().replace(/^v/i, "").split("-")[0] ?? value.trim();
@@ -148,7 +148,7 @@ export class AppUpdateService {
           supported: true,
           currentVersion: this.currentVersion,
           checkedAt: this.now().toISOString(),
-          summary: "ChillClaw could not verify the latest macOS installer.",
+          summary: "ChillClaw could not verify the latest macOS disk image.",
           detail: `The stable GitHub release is missing ${MACOS_INSTALLER_NAME}, or it is not a production release yet.`
         });
       }
@@ -164,7 +164,7 @@ export class AppUpdateService {
           publishedAt: release.publishedAt,
           checkedAt: this.now().toISOString(),
           summary: `ChillClaw ${release.version} is available.`,
-          detail: `A newer stable ChillClaw macOS installer is ready to download from GitHub Releases.`
+          detail: `A newer stable ChillClaw macOS disk image is ready to download from GitHub Releases.`
         });
       }
 
@@ -179,8 +179,8 @@ export class AppUpdateService {
         checkedAt: this.now().toISOString(),
         summary: "ChillClaw is up to date.",
         detail: force
-          ? "ChillClaw checked GitHub Releases and did not find a newer stable macOS installer."
-          : "No newer stable ChillClaw macOS installer is available right now."
+          ? "ChillClaw checked GitHub Releases and did not find a newer stable macOS disk image."
+          : "No newer stable ChillClaw macOS disk image is available right now."
       });
     } catch (error) {
       if (this.cachedStatus) {

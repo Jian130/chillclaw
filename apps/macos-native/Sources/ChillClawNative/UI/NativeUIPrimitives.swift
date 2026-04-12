@@ -319,6 +319,8 @@ private struct NativeLoadingOrb: View {
                 .scaleEffect(breathing ? 1.08 : 0.9)
                 .opacity(breathing ? 0.28 : 0.12)
 
+            NativeBrandMark(size: .loadingHero)
+
             Circle()
                 .stroke(Color.blue.opacity(0.12), lineWidth: 8)
 

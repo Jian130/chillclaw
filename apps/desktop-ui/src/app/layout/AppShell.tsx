@@ -1,10 +1,11 @@
 import type { PropsWithChildren } from "react";
-import { MessageSquareText, Sparkles } from "lucide-react";
+import { MessageSquareText } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { useLocale } from "../providers/LocaleProvider.js";
 import { useOverview } from "../providers/OverviewProvider.js";
 import { useViewportMode } from "../../shared/data/responsive.js";
+import { BrandMark } from "../../shared/ui/BrandMark.js";
 import { SidebarNav } from "../../shared/ui/SidebarNav.js";
 import { LanguageSelector } from "../../shared/ui/LanguageSelector.js";
 import { LoadingPanel } from "../../shared/ui/LoadingPanel.js";
@@ -38,7 +39,7 @@ export function AppShell(props: PropsWithChildren<{ loading?: boolean }>) {
       <aside className="app-sidebar">
         <NavLink className="brand" to="/">
           <div className="brand__mark">
-            <Sparkles size={22} />
+            <BrandMark className="brand__mark-image" decorative />
           </div>
           <div>
             <h1>ChillClaw</h1>

@@ -8,7 +8,7 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
-        .executable(name: "ChillClawNative", targets: ["ChillClawNative"]),
+        .executable(name: "ChillClaw", targets: ["ChillClawNative"]),
     ],
     dependencies: [
         .package(
@@ -44,3 +44,4 @@ let package = Package(
         ),
     ]
 )
+		

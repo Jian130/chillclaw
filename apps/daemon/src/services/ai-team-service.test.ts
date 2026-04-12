@@ -61,6 +61,105 @@ test("AI team overview merges detected existing OpenClaw agents", async () => {
   assert.equal(state.aiTeam?.members[overview.members[0].id]?.agentId, "existing-agent");
 });
 
+test("AI team overview does not import ChillClaw-managed agents without stored metadata", async () => {
+  class StaleManagedAgentsAdapter extends MockAdapter {
+    override async listAIMemberRuntimeCandidates() {
+      return [
+        {
+          agentId: "chillclaw-member-old-helper-20260411-000000",
+          name: "Old Helper",
+          emoji: "🧠",
+          modelKey: "openai/gpt-4o-mini",
+          agentDir: "/mock/old-helper/agent",
+          workspaceDir: "/mock/old-helper/workspace",
+          bindingCount: 0,
+          bindings: []
+        },
+        {
+          agentId: "chillclaw-member-current-helper-20260412-000000",
+          name: "Current Helper",
+          emoji: "🧠",
+          modelKey: "openai/gpt-4o-mini",
+          agentDir: "/mock/current-helper/agent",
+          workspaceDir: "/mock/current-helper/workspace",
+          bindingCount: 1,
+          bindings: [{ id: "wechat:default", target: "wechat:default" }]
+        },
+        {
+          agentId: "existing-openclaw-agent",
+          name: "Existing OpenClaw Agent",
+          emoji: "🧭",
+          modelKey: "openai/gpt-4o-mini",
+          agentDir: "/mock/existing-agent",
+          workspaceDir: "/mock/existing-workspace",
+          bindingCount: 0,
+          bindings: []
+        }
+      ];
+    }
+  }
+
+  const { service, store } = createService("ai-team-stale-managed-agents", new StaleManagedAgentsAdapter());
+  await store.write({
+    tasks: [],
+    aiTeam: {
+      teamVision: "A helpful team.",
+      members: {
+        "current-member": {
+          id: "current-member",
+          agentId: "chillclaw-member-current-helper-20260412-000000",
+          source: "chillclaw",
+          hasManagedMetadata: true,
+          name: "Current Helper",
+          jobTitle: "Research assistant",
+          status: "ready",
+          currentStatus: "Ready for new assignments.",
+          activeTaskCount: 0,
+          avatar: {
+            presetId: "onboarding-analyst",
+            accent: "#97b5ea",
+            emoji: "🧠",
+            theme: "onboarding"
+          },
+          brain: {
+            entryId: "mock-openai-gpt-4o-mini",
+            label: "GPT-4o Mini",
+            providerId: "openai",
+            modelKey: "openai/gpt-4o-mini"
+          },
+          teamIds: [],
+          bindingCount: 0,
+          bindings: [],
+          lastUpdatedAt: "2026-04-12T00:00:00.000Z",
+          personality: "",
+          soul: "",
+          workStyles: [],
+          skillIds: [],
+          knowledgePackIds: [],
+          capabilitySettings: {
+            memoryEnabled: true,
+            contextWindow: 128000
+          },
+          agentDir: "/mock/current-helper/agent",
+          workspaceDir: "/mock/current-helper/workspace"
+        }
+      },
+      teams: {},
+      activity: []
+    }
+  });
+
+  const overview = await service.getOverview();
+  const state = await store.read();
+
+  assert.deepEqual(
+    overview.members.map((member) => member.agentId).sort(),
+    ["chillclaw-member-current-helper-20260412-000000", "existing-openclaw-agent"]
+  );
+  assert.equal(overview.members.find((member) => member.id === "current-member")?.source, "chillclaw");
+  assert.equal(state.aiTeam?.members["detected-chillclaw-member-old-helper-20260411-000000"], undefined);
+});
+
 test("AI team overview exposes daemon-owned member presets filtered to available skills", async () => {
   const { service } = createService("ai-team-member-presets", new MockAdapter());
   const overview = await service.getOverview();

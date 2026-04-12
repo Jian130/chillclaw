@@ -28,7 +28,7 @@ test("swift package wrapper canonicalizes symlinked package paths and isolates C
     cwd: aliasRoot,
     subcommand: "build",
     packagePath: "apps/macos-native",
-    forwardedArgs: ["-c", "release", "--product", "ChillClawNative"]
+    forwardedArgs: ["-c", "release", "--product", "ChillClaw"]
   });
 
   assert.equal(invocation.cwd, canonicalRoot);
@@ -43,6 +43,6 @@ test("swift package wrapper canonicalizes symlinked package paths and isolates C
     "-c",
     "release",
     "--product",
-    "ChillClawNative"
+    "ChillClaw"
   ]);
 });

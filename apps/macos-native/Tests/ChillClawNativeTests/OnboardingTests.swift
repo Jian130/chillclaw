@@ -108,6 +108,17 @@ struct OnboardingTests {
         #expect(primitivesSource.contains("enum LoadingStateStyle"))
         #expect(primitivesSource.contains("case hero"))
         #expect(primitivesSource.contains("NativeLoadingOrb"))
+
+        let heroSectionStart = try #require(primitivesSource.range(of: "case .hero:")?.lowerBound)
+        let heroSectionEnd = try #require(primitivesSource.range(of: "private struct NativeLoadingOrb")?.lowerBound)
+        let heroSection = primitivesSource[heroSectionStart..<heroSectionEnd]
+        #expect(heroSection.contains("NativeLoadingOrb()"))
+        #expect(!heroSection.contains("NativeBrandMark(size: .loadingHero)"))
+
+        let orbSectionStart = heroSectionEnd
+        let orbSectionEnd = try #require(primitivesSource.range(of: "struct EmptyState")?.lowerBound)
+        let orbSection = primitivesSource[orbSectionStart..<orbSectionEnd]
+        #expect(orbSection.contains("NativeBrandMark(size: .loadingHero)"))
     }
 
     @Test

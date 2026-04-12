@@ -55,6 +55,26 @@ test("macOS release workflow waits for notarization before Gatekeeper assessment
   assert.ok(stapleIndex < installerAssessIndex);
 });
 
+test("macOS release workflow preserves Node runtime entitlements on the packaged daemon", async () => {
+  const [workflow, entitlements] = await Promise.all([
+    readRepoFile(".github/workflows/macos-release.yml"),
+    readRepoFile("scripts/macos-daemon-entitlements.plist")
+  ]);
+
+  assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/);
+  assert.match(entitlements, /com\.apple\.security\.cs\.allow-unsigned-executable-memory/);
+  assert.match(workflow, /DAEMON_ENTITLEMENTS:\s*scripts\/macos-daemon-entitlements\.plist/);
+  assert.match(
+    workflow,
+    /codesign --force --sign "\$APP_IDENTITY" --options runtime --timestamp --entitlements "\$DAEMON_ENTITLEMENTS" "\$APP_PATH\/Contents\/Resources\/runtime\/chillclaw-daemon"/
+  );
+  assert.doesNotMatch(
+    workflow,
+    /codesign --force --deep --sign "\$APP_IDENTITY" --options runtime --timestamp "\$APP_PATH"/
+  );
+  assert.match(workflow, /codesign --force --sign "\$APP_IDENTITY" --options runtime --timestamp "\$APP_PATH"/);
+});
+
 test("macOS installer builder exposes staging-only and DMG-only release modes", async () => {
   const buildScript = await readRepoFile("scripts/build-macos-installer.mjs");
 

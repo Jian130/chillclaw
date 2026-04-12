@@ -30,21 +30,10 @@ struct NativeLaunchCoordinator {
 
 @MainActor
 func nativeApplicationIconImage() -> NSImage? {
-    let candidates: [(bundle: Bundle, name: String, extensionName: String)] = [
-        (.main, "ChillClawAppIcon", "icns"),
-        (.main, "ChillClawAppIcon", "png"),
-        (.module, "ChillClawAppIcon", "png"),
-        (.module, "ChillClawAppIcon", "icns"),
-    ]
-
-    for candidate in candidates {
-        guard
-            let iconURL = candidate.bundle.url(forResource: candidate.name, withExtension: candidate.extensionName),
-            let iconImage = NSImage(contentsOf: iconURL)
-        else {
-            continue
-        }
-
+    for extensionName in ["icns", "png"] {
+        guard let iconURL = nativeBundledResourceURL(forResource: "ChillClawAppIcon", withExtension: extensionName),
+              let iconImage = NSImage(contentsOf: iconURL)
+        else { continue }
         return iconImage
     }
 

@@ -2249,22 +2249,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
 func onboardingAssetURL(_ presetId: String) -> URL? {
     let preset = resolveOnboardingAvatarPreset(presetId)
 
-    for ext in ["png", "jpg", "jpeg"] {
-        if let url = Bundle.module.url(forResource: preset.resourceName, withExtension: ext) {
-            return url
-        }
-    }
-
-    if let resourceURL = Bundle.module.resourceURL {
-        for ext in ["png", "jpg", "jpeg"] {
-            let candidate = resourceURL.appendingPathComponent("\(preset.resourceName).\(ext)")
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-    }
-
-    return nil
+    return nativeBundledResourceURL(forResource: preset.resourceName, withExtensions: ["png", "jpg", "jpeg"])
 }
 
 func onboardingAssetImage(_ presetId: String) -> Image? {

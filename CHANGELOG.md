@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.1.4 - 2026-04-12
+
+### 2026-04-12 20:52 CST
+
+- fixed a native macOS startup crash in signed app builds by replacing SwiftPM `Bundle.module` startup resource lookups with a packaged-app-safe resolver for `Contents/Resources` and copied Swift resource bundles
+
+### 2026-04-12 20:40 CST
+
+- fixed signed macOS releases by signing the packaged Node daemon with the hardened-runtime entitlements it needs for V8 executable memory, and by signing the outer app without overwriting the daemon signature so clean Macs no longer kill the daemon at startup
+
 ### 2026-04-12 20:00 CST
 
 - fixed the macOS release workflow by deferring Gatekeeper assessment until after the signed DMG is notarized and stapled, avoiding the pre-notarization `Unnotarized Developer ID` rejection

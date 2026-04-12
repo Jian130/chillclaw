@@ -128,6 +128,56 @@ struct UIContractTests {
     }
 
     @Test
+    func nativePackagedResourceHelpersAvoidSwiftPMBundleModuleTrap() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let brandSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/UI/NativeBrandMark.swift"),
+            encoding: .utf8
+        )
+        let onboardingSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingSupport.swift"),
+            encoding: .utf8
+        )
+        let launchSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/LaunchSupport.swift"),
+            encoding: .utf8
+        )
+
+        #expect(!brandSource.contains("Bundle.module"))
+        #expect(!onboardingSource.contains("Bundle.module"))
+        #expect(!launchSource.contains("Bundle.module"))
+        #expect(brandSource.contains("nativeBundledResourceURL"))
+        #expect(onboardingSource.contains("nativeBundledResourceURL"))
+        #expect(launchSource.contains("nativeBundledResourceURL"))
+    }
+
+    @Test
+    func nativeBundledResourceURLFindsPackagedRootAndResourceBundleFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chillclaw-resource-test-\(UUID().uuidString)")
+        let bundle = root.appendingPathComponent("ChillClawNative_ChillClawNative.bundle")
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let rootAsset = root.appendingPathComponent("ChillClawBrandLogo.png")
+        let bundleAsset = bundle.appendingPathComponent("onboarding-guide.png")
+        try Data([1]).write(to: rootAsset)
+        try Data([2]).write(to: bundleAsset)
+
+        #expect(
+            nativeBundledResourceURL(forResource: "ChillClawBrandLogo", withExtension: "png", resourceRoots: [root])?
+                .standardizedFileURL == rootAsset.standardizedFileURL
+        )
+        #expect(
+            nativeBundledResourceURL(forResource: "onboarding-guide", withExtension: "png", resourceRoots: [root])?
+                .standardizedFileURL == bundleAsset.standardizedFileURL
+        )
+    }
+
+    @Test
     @MainActor
     func nativeBrandLogoImageLoadsFromBundledResource() throws {
         let image = try #require(nativeBrandLogoImage())

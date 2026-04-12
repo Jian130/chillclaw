@@ -19,6 +19,7 @@ jobs:
     runs-on: macos-26
     env:
       APP_PATH: dist/.macos-staging/ChillClaw.app
+      DAEMON_ENTITLEMENTS: scripts/macos-daemon-entitlements.plist
       INSTALLER_PATH: dist/macos/ChillClaw-macOS.dmg
       CHECKSUM_PATH: dist/macos/ChillClaw-macOS.dmg.sha256.txt
     steps:
@@ -100,9 +101,9 @@ jobs:
         env:
           APP_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APP_IDENTITY }}
         run: |
-          codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$APP_PATH/Contents/Resources/runtime/chillclaw-daemon"
+          codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp --entitlements "$DAEMON_ENTITLEMENTS" "$APP_PATH/Contents/Resources/runtime/chillclaw-daemon"
           codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$APP_PATH/Contents/MacOS/ChillClaw"
-          codesign --force --deep --sign "$APP_IDENTITY" --options runtime --timestamp "$APP_PATH"
+          codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$APP_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
       - name: Build signed disk image

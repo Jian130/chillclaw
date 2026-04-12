@@ -43,7 +43,7 @@ struct NativeBrandMark: View {
 @MainActor
 func nativeBrandLogoImage() -> NSImage? {
     guard
-        let logoURL = Bundle.module.url(forResource: "ChillClawBrandLogo", withExtension: "png")
+        let logoURL = nativeBundledResourceURL(forResource: "ChillClawBrandLogo", withExtension: "png")
     else {
         return nil
     }

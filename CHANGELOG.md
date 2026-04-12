@@ -4,6 +4,10 @@
 
 ## 0.1.4 - 2026-04-12
 
+### 2026-04-12 22:24 CST
+
+- fixed clean macOS OpenClaw installation by downloading a ChillClaw-managed Node.js/npm runtime into app data for managed installs, so setup no longer requires Homebrew or a user-installed npm before the Ollama step
+
 ### 2026-04-12 22:05 CST
 
 - fixed clean macOS daemon startup when the first localhost ping is refused, so the native app treats that as a missing daemon and installs the LaunchAgent instead of failing before launchd is registered

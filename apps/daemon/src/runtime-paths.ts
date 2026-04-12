@@ -17,6 +17,35 @@ export function getManagedWechatInstallerDir(): string {
   return resolve(getDataDir(), "wechat-installer-runtime");
 }
 
+export function getManagedNodeVersion(): string {
+  return process.env.CHILLCLAW_MANAGED_NODE_VERSION?.trim() || "22.22.2";
+}
+
+export function getManagedNodeDistName(): string {
+  const arch = process.arch === "x64" ? "x64" : "arm64";
+  return `node-v${getManagedNodeVersion()}-darwin-${arch}`;
+}
+
+export function getManagedNodeDir(): string {
+  return resolve(getDataDir(), "node-runtime");
+}
+
+export function getManagedNodeInstallDir(): string {
+  return resolve(getManagedNodeDir(), getManagedNodeDistName());
+}
+
+export function getManagedNodeBinDir(): string {
+  return resolve(getManagedNodeInstallDir(), "bin");
+}
+
+export function getManagedNodeBinPath(): string {
+  return resolve(getManagedNodeBinDir(), "node");
+}
+
+export function getManagedNodeNpmBinPath(): string {
+  return resolve(getManagedNodeBinDir(), "npm");
+}
+
 export function getManagedOllamaDir(): string {
   return resolve(getDataDir(), "ollama-runtime");
 }

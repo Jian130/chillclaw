@@ -1519,7 +1519,7 @@ export function createDefaultProductOverview(options?: {
       installSource: "npm-local",
       prerequisites: [
         "macOS",
-        "Node.js 22 or newer",
+        "ChillClaw-managed Node.js and npm runtime",
         "pnpm only if you build OpenClaw from source",
         "Ability to install or reuse the latest available OpenClaw CLI"
       ]

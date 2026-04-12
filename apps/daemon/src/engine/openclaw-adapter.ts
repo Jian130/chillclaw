@@ -52,6 +52,7 @@ import { type CommandResult, probeCommand as probeExternalCommand, resolveComman
 import { createDefaultSecretsAdapter } from "../platform/macos-keychain-secrets-adapter.js";
 import { OpenClawGatewaySocketAdapter, normalizeGatewaySocketUrl } from "../platform/openclaw-gateway-socket-adapter.js";
 import { loadOrCreateOpenClawGatewayDeviceIdentity } from "../platform/openclaw-gateway-device-auth.js";
+import { ensureManagedNodeNpmInvocation, resolveManagedNodeNpmInvocation } from "../platform/managed-node-runtime.js";
 import { modelAuthSecretName, type SecretsAdapter } from "../platform/secrets-adapter.js";
 import {
   listModelProviderDefinitions,
@@ -80,6 +81,8 @@ import type {
 import {
   getAppRootDir,
   getDataDir,
+  getManagedNodeBinDir,
+  getManagedNodeBinPath,
   getManagedOpenClawBinPath,
   getManagedOpenClawDir,
   getManagedWechatInstallerDir
@@ -444,7 +447,8 @@ const STANDARD_OPENCLAW_REQUIREMENTS = [
 ];
 const MANAGED_OPENCLAW_REQUIREMENTS = [
   "macOS",
-  "Node.js 22 or newer",
+  "ChillClaw-managed Node.js and npm runtime",
+  "Internet access to download OpenClaw packages",
   "pnpm only if you build OpenClaw from source"
 ];
 
@@ -756,6 +760,7 @@ async function resolveStickyCommand(
 function buildCommandEnv(command?: string, envOverrides?: Record<string, string | undefined>): NodeJS.ProcessEnv {
   const pathEntries = [
     command && command.startsWith("/") ? dirname(command) : undefined,
+    getManagedNodeBinDir(),
     ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -1148,6 +1153,7 @@ async function runClawHub(
 
 async function resolveNodeCommand(): Promise<string | undefined> {
   const nodeCommand = await resolveCommand("node", [
+    getManagedNodeBinPath(),
     "/opt/homebrew/bin/node",
     "/usr/local/bin/node",
     "/usr/bin/node",
@@ -1171,6 +1177,10 @@ async function probeInvocation(invocation: CommandInvocation, args: string[] = [
 }
 
 async function resolveNpmInvocation(): Promise<CommandInvocation | undefined> {
+  return (await resolveSystemNpmInvocation()) ?? (await resolveManagedNodeNpmInvocation());
+}
+
+async function resolveSystemNpmInvocation(): Promise<CommandInvocation | undefined> {
   const npmCommand = await resolveCommand("npm", [
     "/opt/homebrew/bin/npm",
     "/usr/local/bin/npm",
@@ -3139,7 +3149,7 @@ export class OpenClawAdapter implements EngineAdapter {
     installSource: "npm-local",
     prerequisites: [
       "macOS",
-      "Node.js 22 or newer",
+      "ChillClaw-managed Node.js and npm runtime",
       "pnpm only if you build OpenClaw from source",
       "Permission to install or reuse the latest available OpenClaw CLI"
     ],
@@ -4454,8 +4464,9 @@ export class OpenClawAdapter implements EngineAdapter {
       };
     }
 
-    const npmInvocation = await resolveNpmInvocation();
-    const ensuredNpmInvocation = npmInvocation ?? (await this.ensureSystemDependencies());
+    const ensuredNpmInvocation = usesManagedLocalRuntime
+      ? await ensureManagedNodeNpmInvocation()
+      : (await resolveSystemNpmInvocation()) ?? (await this.ensureSystemDependencies());
 
     if (!ensuredNpmInvocation) {
       throw new Error(
@@ -4548,7 +4559,7 @@ export class OpenClawAdapter implements EngineAdapter {
   private async ensureSystemDependencies(): Promise<CommandInvocation | undefined> {
     const [nodeCommand, npmInvocation, gitCommand, brewCommand] = await Promise.all([
       resolveNodeCommand(),
-      resolveNpmInvocation(),
+      resolveSystemNpmInvocation(),
       resolveGitCommand(),
       resolveBrewCommand()
     ]);
@@ -4600,6 +4611,6 @@ export class OpenClawAdapter implements EngineAdapter {
       scope: "OpenClawAdapter.ensureSystemDependencies"
     });
 
-    return resolveNpmInvocation();
+    return resolveSystemNpmInvocation();
   }
 }

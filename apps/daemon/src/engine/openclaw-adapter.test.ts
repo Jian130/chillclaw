@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import type { ModelCatalogEntry } from "@chillclaw/contracts";
 
@@ -19,6 +22,8 @@ import {
   summarizeTargetUpdateStatus
 } from "./openclaw-adapter.js";
 import { InMemorySecretsAdapter, modelAuthSecretName } from "../platform/secrets-adapter.js";
+
+const execFile = promisify(execFileCallback);
 
 test("reconcileSavedEntriesWithRuntime aligns saved entries with the live OpenClaw runtime chain", () => {
   const entries = [
@@ -2266,15 +2271,31 @@ test("install refreshes managed-local command resolution after npm creates the r
 
   const tempDir = await mkdtemp(resolve(tmpdir(), "chillclaw-openclaw-managed-install-test-"));
   const dataDir = join(tempDir, "data");
-  const binDir = join(tempDir, "bin");
-  const npmPath = join(binDir, "npm");
-  const originalPath = process.env.PATH;
+  const nodeVersion = "99.0.0";
+  const nodeDistName = `node-v${nodeVersion}-darwin-${process.arch === "x64" ? "x64" : "arm64"}`;
+  const nodeDistRoot = join(tempDir, nodeDistName);
+  const nodeBinDir = join(nodeDistRoot, "bin");
+  const nodeArchivePath = join(tempDir, `${nodeDistName}.tar.gz`);
   const originalDataDir = process.env.CHILLCLAW_DATA_DIR;
+  const originalManagedNodeVersion = process.env.CHILLCLAW_MANAGED_NODE_VERSION;
+  const originalManagedNodeDistUrl = process.env.CHILLCLAW_MANAGED_NODE_DIST_URL;
 
   await mkdir(dataDir, { recursive: true });
-  await mkdir(binDir, { recursive: true });
+  await mkdir(nodeBinDir, { recursive: true });
   await writeFile(
-    npmPath,
+    join(nodeBinDir, "node"),
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "v${nodeVersion}"
+  exit 0
+fi
+script="$1"
+shift
+exec /bin/sh "$script" "$@"
+`
+  );
+  await writeFile(
+    join(nodeBinDir, "npm"),
     `#!/bin/sh
 if [ "$1" = "--version" ]; then
   echo "10.9.0"
@@ -2292,7 +2313,7 @@ if [ "$1" = "install" ] && [ "$2" = "--prefix" ]; then
   prefix="$3"
   mkdir -p "$prefix/node_modules/.bin"
   cat > "$prefix/node_modules/.bin/openclaw" <<'EOF'
-#!/bin/sh
+#!/usr/bin/env node
 if [ "$1" = "--version" ]; then
   echo "2026.3.13"
 elif [ "$1" = "status" ] && [ "$2" = "--json" ]; then
@@ -2311,10 +2332,13 @@ fi
 exit 1
 `
   );
-  await chmod(npmPath, 0o755);
+  await chmod(join(nodeBinDir, "node"), 0o755);
+  await chmod(join(nodeBinDir, "npm"), 0o755);
+  await execFile("/usr/bin/tar", ["-czf", nodeArchivePath, "-C", tempDir, nodeDistName]);
 
-  process.env.PATH = originalPath ? `${binDir}:${originalPath}` : binDir;
   process.env.CHILLCLAW_DATA_DIR = dataDir;
+  process.env.CHILLCLAW_MANAGED_NODE_VERSION = nodeVersion;
+  process.env.CHILLCLAW_MANAGED_NODE_DIST_URL = pathToFileURL(nodeArchivePath).href;
 
   const adapter = new OpenClawAdapter();
   adapter.invalidateReadCaches();
@@ -2327,15 +2351,20 @@ exit 1
     assert.match(result.message, /OpenClaw 20\d{2}\.\d+\.\d+/);
   } finally {
     adapter.invalidateReadCaches();
-    if (originalPath === undefined) {
-      delete process.env.PATH;
-    } else {
-      process.env.PATH = originalPath;
-    }
     if (originalDataDir === undefined) {
       delete process.env.CHILLCLAW_DATA_DIR;
     } else {
       process.env.CHILLCLAW_DATA_DIR = originalDataDir;
+    }
+    if (originalManagedNodeVersion === undefined) {
+      delete process.env.CHILLCLAW_MANAGED_NODE_VERSION;
+    } else {
+      process.env.CHILLCLAW_MANAGED_NODE_VERSION = originalManagedNodeVersion;
+    }
+    if (originalManagedNodeDistUrl === undefined) {
+      delete process.env.CHILLCLAW_MANAGED_NODE_DIST_URL;
+    } else {
+      process.env.CHILLCLAW_MANAGED_NODE_DIST_URL = originalManagedNodeDistUrl;
     }
     await rm(tempDir, { recursive: true, force: true });
     releaseLock();

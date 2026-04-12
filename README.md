@@ -130,7 +130,7 @@ flowchart LR
   - `aiEmployees`: OpenClaw agent-backed AI employee config and workspace management
   - `gateway`: live gateway lifecycle, health, tasks, chat, login, and pairing flows
 - Config and AI employee saves are staged changes. They write correct engine and workspace state first, then the gateway manager is responsible for applying them live.
-- `OpenClawAdapter` checks for an existing OpenClaw install, reuses it when available, and otherwise deploys a ChillClaw-managed local OpenClaw runtime under the user's ChillClaw data directory.
+- `OpenClawAdapter` checks for an existing OpenClaw install, reuses it when available, and otherwise deploys a ChillClaw-managed local OpenClaw runtime under the user's ChillClaw data directory with a managed Node.js/npm toolchain.
 - The adapter seam is intentionally future-facing: it should later support local-LLM runtimes and model families such as Qwen, MiniMax-exposed local runtimes, Llama, Mistral, and other OpenAI-compatible local gateways.
 - The current local-runtime slice uses Ollama as the managed daemon-owned local engine and writes an explicit OpenClaw native-Ollama provider config for the selected local `ollama/...` model instead of exposing raw local-model wiring directly to clients.
 - User state, diagnostics, and ChillClaw metadata live in `~/Library/Application Support/ChillClaw` when packaged.
@@ -139,7 +139,7 @@ flowchart LR
 
 - `ChillClaw-macOS.dmg` lets users drag `ChillClaw.app` into `/Applications`.
 - The app bundle contains the native macOS client, the built fallback React UI, the daemon, LaunchAgent helper scripts, and OpenClaw bootstrap/install logic.
-- OpenClaw itself is reused when an existing install is already available, or deployed into ChillClaw-managed local app data when setup needs to install it.
+- OpenClaw itself is reused when an existing install is already available, or deployed into ChillClaw-managed local app data when setup needs to install it. Clean Macs do not need Homebrew or a user-installed npm for the managed install path.
 - Stable macOS releases are published from protected GitHub tags in the form `vX.Y.Z`. The packaged app update check and the public website download button both resolve through GitHub Releases rather than hard-coded release pages.
 - The tag-driven macOS release workflow signs the staged `ChillClaw.app`, builds the drag-to-Applications DMG from that signed app, signs and notarizes the DMG, then publishes `ChillClaw-macOS.dmg` and `ChillClaw-macOS.dmg.sha256.txt`.
 - The website always points at `releases/latest/download/ChillClaw-macOS.dmg`, so the public macOS download stays current when a new stable release is published.
@@ -258,7 +258,7 @@ When a user installs and opens ChillClaw for the first time today:
 
 1. ChillClaw opens a six-step onboarding flow at `/onboarding`.
 2. `Welcome` initializes the guided setup and stores onboarding draft progress in the daemon-backed state store.
-3. `Install OpenClaw` detects compatible runtime state, lets the user reuse or update an existing runtime when possible, and installs the managed runtime when needed.
+3. `Install OpenClaw` detects compatible runtime state, lets the user reuse or update an existing runtime when possible, and installs the managed runtime when needed. On clean Macs, ChillClaw downloads its own Node.js/npm toolchain into app data before installing OpenClaw.
 4. `Permissions` records the onboarding permissions acknowledgement and unlocks the model step.
 5. `Configure Model` saves the first real model entry and handles any interactive provider auth through the daemon-owned onboarding route family.
 6. `Configure Channel` saves one launch channel configuration for Telegram, WhatsApp, Feishu, WeChat Work, or personal WeChat without requiring the gateway to be running yet.

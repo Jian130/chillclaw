@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { chmod, copyFile, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { writeScriptLogLine } from "./logging.mjs";
@@ -52,9 +52,17 @@ async function readProductVersion() {
 const APP_VERSION = await readProductVersion();
 
 function parseArgs(argv) {
-  return {
-    skipBuild: argv.includes("--skip-build")
+  const options = {
+    skipBuild: argv.includes("--skip-build"),
+    stageOnly: argv.includes("--stage-only"),
+    dmgOnly: argv.includes("--dmg-only")
   };
+
+  if (options.stageOnly && options.dmgOnly) {
+    throw new Error("Use either --stage-only or --dmg-only, not both.");
+  }
+
+  return options;
 }
 
 function run(command, args) {
@@ -390,6 +398,14 @@ async function buildInstaller() {
   await applyInstallerFileIcon(DMG_OUTPUT);
 }
 
+async function assertStagedAppBundleExists() {
+  try {
+    await access(APP_BUNDLE);
+  } catch {
+    throw new Error("No staged ChillClaw.app found. Run `npm run build:mac-installer -- --stage-only` before `--dmg-only`.");
+  }
+}
+
 async function stageDiskImageContents() {
   await rm(DMG_STAGING_DIR, { recursive: true, force: true });
   await mkdir(DMG_STAGING_DIR, { recursive: true });
@@ -409,12 +425,22 @@ async function applyInstallerFileIcon(installerPath) {
 }
 
 const options = parseArgs(process.argv.slice(2));
-await ensureBuild(options.skipBuild);
-await stageBundle();
-await buildInstaller();
+
+if (!options.dmgOnly) {
+  await ensureBuild(options.skipBuild);
+  await stageBundle();
+}
+
+if (!options.stageOnly) {
+  if (options.dmgOnly) {
+    await assertStagedAppBundleExists();
+  }
+
+  await buildInstaller();
+}
 
 writeScriptLogLine({
   label: SCRIPT_LABEL,
   scope: "build-macos-installer.main",
-  message: `Built ${DMG_OUTPUT}`
+  message: options.stageOnly ? `Staged ${APP_BUNDLE}` : `Built ${DMG_OUTPUT}`
 });

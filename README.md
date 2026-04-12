@@ -141,6 +141,7 @@ flowchart LR
 - The app bundle contains the native macOS client, the built fallback React UI, the daemon, LaunchAgent helper scripts, and OpenClaw bootstrap/install logic.
 - OpenClaw itself is reused when an existing install is already available, or deployed into ChillClaw-managed local app data when setup needs to install it.
 - Stable macOS releases are published from protected GitHub tags in the form `vX.Y.Z`. The packaged app update check and the public website download button both resolve through GitHub Releases rather than hard-coded release pages.
+- The tag-driven macOS release workflow signs the staged `ChillClaw.app`, builds the drag-to-Applications DMG from that signed app, signs and notarizes the DMG, then publishes `ChillClaw-macOS.dmg` and `ChillClaw-macOS.dmg.sha256.txt`.
 - The website always points at `releases/latest/download/ChillClaw-macOS.dmg`, so the public macOS download stays current when a new stable release is published.
 
 ### Native macOS client
@@ -405,6 +406,8 @@ This produces:
 
 The installer builder stages the `.app` bundle in a temporary directory under `dist/`, then creates a drag-to-Applications DMG containing a native SwiftUI `ChillClaw.app` that talks to the bundled self-contained `chillclaw-daemon`.
 The packaged ChillClaw daemon still does not depend on a separate Homebrew-style Node runtime on the target Mac.
+
+Release CI uses the same installer builder in two phases: `--stage-only` creates the app bundle for signing, and `--dmg-only` creates the final DMG from that signed staged app.
 
 The packaged app also includes LaunchAgent helper scripts so ChillClaw can run as a login-time background service on macOS.
 The native client first tries to attach to an already-running daemon, then installs or refreshes the LaunchAgent if needed, and falls back to the bundled web UI only as an explicit recovery path.

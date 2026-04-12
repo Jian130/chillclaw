@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 2026-04-12 16:45 CST
+
+- fixed the long-term macOS download path by moving the tag-driven release workflow from legacy `.pkg` publishing to the signed, notarized `ChillClaw-macOS.dmg` asset expected by the website and packaged app update checker
+- added script-level release contract coverage and wired script tests into `npm test` so release assets, website download links, and daemon app-update parsing stay aligned
+
 ### 2026-04-12 16:11 CST
 
 - switched macOS distribution toward a branded drag-to-Applications DMG, including native app/product renaming, packaged icon and brand assets, installer script updates, release/update copy, and matching README guidance

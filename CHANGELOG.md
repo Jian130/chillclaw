@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.5 - 2026-04-12
+
+### 2026-04-12 23:04 CST
+
+- fixed the daemon GitHub Actions suite on Linux by making macOS managed-runtime install fixtures explicitly exercise the Darwin runtime path while preserving the production non-macOS install guard
+- bumped ChillClaw package metadata and internal workspace dependency pins to 0.1.5 for the next tagged macOS release
+
 ## 0.1.4 - 2026-04-12
 
 ### 2026-04-12 22:24 CST

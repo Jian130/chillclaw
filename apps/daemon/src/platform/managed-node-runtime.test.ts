@@ -12,6 +12,21 @@ import { ensureManagedNodeNpmInvocation, resolveManagedNodeNpmInvocation } from 
 
 const execFile = promisify(execFileCallback);
 
+function mockProcessPlatform(platform: NodeJS.Platform): () => void {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", {
+    configurable: true,
+    enumerable: originalDescriptor?.enumerable ?? true,
+    value: platform
+  });
+
+  return () => {
+    if (originalDescriptor) {
+      Object.defineProperty(process, "platform", originalDescriptor);
+    }
+  };
+}
+
 async function createFakeNodeArchive(root: string, version: string): Promise<string> {
   const distName = `node-v${version}-darwin-${process.arch === "x64" ? "x64" : "arm64"}`;
   const distRoot = join(root, distName);
@@ -56,6 +71,7 @@ test("ensureManagedNodeNpmInvocation installs npm under the ChillClaw runtime", 
   const originalDataDir = process.env.CHILLCLAW_DATA_DIR;
   const originalNodeVersion = process.env.CHILLCLAW_MANAGED_NODE_VERSION;
   const originalNodeUrl = process.env.CHILLCLAW_MANAGED_NODE_DIST_URL;
+  const restorePlatform = mockProcessPlatform("darwin");
 
   process.env.CHILLCLAW_DATA_DIR = dataDir;
   process.env.CHILLCLAW_MANAGED_NODE_VERSION = version;
@@ -73,6 +89,7 @@ test("ensureManagedNodeNpmInvocation installs npm under the ChillClaw runtime", 
     await execFile(invocation.command, ["install", "--prefix", join(tempDir, "openclaw-runtime"), "openclaw@latest"]);
     assert.equal(await readFile(join(tempDir, "npm-args.txt"), "utf8"), "install --prefix " + join(tempDir, "openclaw-runtime") + " openclaw@latest\n");
   } finally {
+    restorePlatform();
     if (originalDataDir === undefined) {
       delete process.env.CHILLCLAW_DATA_DIR;
     } else {

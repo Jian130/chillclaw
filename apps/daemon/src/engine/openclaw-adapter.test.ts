@@ -25,6 +25,21 @@ import { InMemorySecretsAdapter, modelAuthSecretName } from "../platform/secrets
 
 const execFile = promisify(execFileCallback);
 
+function mockProcessPlatform(platform: NodeJS.Platform): () => void {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", {
+    configurable: true,
+    enumerable: originalDescriptor?.enumerable ?? true,
+    value: platform
+  });
+
+  return () => {
+    if (originalDescriptor) {
+      Object.defineProperty(process, "platform", originalDescriptor);
+    }
+  };
+}
+
 test("reconcileSavedEntriesWithRuntime aligns saved entries with the live OpenClaw runtime chain", () => {
   const entries = [
     {
@@ -2279,6 +2294,7 @@ test("install refreshes managed-local command resolution after npm creates the r
   const originalDataDir = process.env.CHILLCLAW_DATA_DIR;
   const originalManagedNodeVersion = process.env.CHILLCLAW_MANAGED_NODE_VERSION;
   const originalManagedNodeDistUrl = process.env.CHILLCLAW_MANAGED_NODE_DIST_URL;
+  const restorePlatform = mockProcessPlatform("darwin");
 
   await mkdir(dataDir, { recursive: true });
   await mkdir(nodeBinDir, { recursive: true });
@@ -2350,6 +2366,7 @@ exit 1
     assert.match(result.actualVersion ?? "", /20\d{2}\.\d+\.\d+/);
     assert.match(result.message, /OpenClaw 20\d{2}\.\d+\.\d+/);
   } finally {
+    restorePlatform();
     adapter.invalidateReadCaches();
     if (originalDataDir === undefined) {
       delete process.env.CHILLCLAW_DATA_DIR;

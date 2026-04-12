@@ -1005,6 +1005,32 @@ function countCommands(commands: string[], needle: string): number {
   return commands.filter((command) => command === needle).length;
 }
 
+async function waitForTestValue<T>(
+  read: () => Promise<T>,
+  isReady: (value: T) => boolean,
+  describeLastValue: (value: T | undefined) => string,
+  options?: {
+    intervalMs?: number;
+    timeoutMs?: number;
+  }
+): Promise<T> {
+  const intervalMs = options?.intervalMs ?? 100;
+  const timeoutMs = options?.timeoutMs ?? (process.env.CI === "true" ? 10_000 : 5_000);
+  const deadline = Date.now() + timeoutMs;
+  let lastValue: T | undefined;
+
+  do {
+    lastValue = await read();
+    if (isReady(lastValue)) {
+      return lastValue;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  } while (Date.now() < deadline);
+
+  assert.fail(describeLastValue(lastValue));
+}
+
 test("OpenClaw model config uses the full provider catalog and one status read per refresh cycle", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
     const config = await adapter.config.getModelConfig();
@@ -1033,18 +1059,15 @@ test("OpenClaw model config uses the full provider catalog and one status read p
 test("fresh model invalidation reuses an in-flight model snapshot instead of starting a duplicate reload", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
     const firstRead = adapter.config.getModelConfig();
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const commands = await readCommands(logPath);
-      if (
+    await waitForTestValue(
+      () => readCommands(logPath),
+      (commands) =>
         countCommands(commands, "models list --json") >= 1 &&
         countCommands(commands, "models list --all --json") >= 1 &&
-        countCommands(commands, "models status --json") >= 1
-      ) {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+        countCommands(commands, "models status --json") >= 1,
+      (commands) => `Timed out waiting for in-flight model commands:\n${commands?.join("\n") ?? "(none)"}`,
+      { intervalMs: 50 }
+    );
     adapter.invalidateReadCaches(["models"]);
 
     await Promise.all([firstRead, adapter.config.getModelConfig()]);
@@ -1143,11 +1166,12 @@ test("creating a normal OAuth saved model entry authenticates through models aut
     assert.equal(created.status, "interactive");
     assert.ok(created.authSession?.id);
 
-    let session = await adapter.config.getModelAuthSession(created.authSession!.id);
-    for (let attempt = 0; attempt < 10 && session.session.status === "running"; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      session = await adapter.config.getModelAuthSession(created.authSession!.id);
-    }
+    const session = await waitForTestValue(
+      () => adapter.config.getModelAuthSession(created.authSession!.id),
+      (authSession) => authSession.session.status !== "running",
+      (authSession) => `Timed out waiting for model auth session to complete:\n${JSON.stringify(authSession?.session ?? null, null, 2)}`,
+      { intervalMs: 150 }
+    );
     const commands = await readCommands(logPath);
 
     assert.equal(session.session.status, "completed");
@@ -1623,35 +1647,24 @@ test("personal WeChat runs the installer command and starts a channel session lo
       values: {}
     });
     assert.ok(result.session);
-    let session = await adapter.gateway.getChannelSession(result.session.id);
+    const session = await waitForTestValue(
+      () => adapter.gateway.getChannelSession(result.session!.id),
+      (channelSession) =>
+        channelSession.logs.some((line) => /qr code|scan/i.test(line)) &&
+        channelSession.logs.some((line) => line.includes("npm install") && line.includes("@tencent-weixin/openclaw-weixin-cli@latest")) &&
+        channelSession.logs.some((line) => /weixin-installer .*install/.test(line)),
+      (channelSession) => `Timed out waiting for personal WeChat installer logs:\n${channelSession?.logs.join("\n") ?? "(none)"}`
+    );
 
-	    for (let attempt = 0; attempt < 20; attempt += 1) {
-	      if (
-	        session.logs.some((line) => /qr code|scan/i.test(line)) &&
-	        session.logs.some((line) => line.includes("npm install") && line.includes("@tencent-weixin/openclaw-weixin-cli@latest")) &&
-	        session.logs.some((line) => /weixin-installer .*install/.test(line))
-	      ) {
-        break;
-      }
+    const commands = await waitForTestValue(
+      () => readCommands(logPath),
+      (loggedCommands) =>
+        loggedCommands.some((command) => command.includes("npm install --prefix") && command.includes("@tencent-weixin/openclaw-weixin-cli@latest")) &&
+        loggedCommands.some((command) => /weixin-installer install$/.test(command)),
+      (loggedCommands) => `Timed out waiting for personal WeChat installer commands:\n${loggedCommands?.join("\n") ?? "(none)"}`
+    );
 
-	      await new Promise((resolve) => setTimeout(resolve, 100));
-	      session = await adapter.gateway.getChannelSession(result.session.id);
-	    }
-
-	    let commands = await readCommands(logPath);
-	    for (let attempt = 0; attempt < 10; attempt += 1) {
-	      if (
-	        commands.some((command) => command.includes("npm install --prefix") && command.includes("@tencent-weixin/openclaw-weixin-cli@latest")) &&
-	        commands.some((command) => /weixin-installer install$/.test(command))
-	      ) {
-	        break;
-	      }
-
-	      await new Promise((resolve) => setTimeout(resolve, 100));
-	      commands = await readCommands(logPath);
-	    }
-
-	    assert.equal(session.channelId, "wechat");
+    assert.equal(session.channelId, "wechat");
     assert.match(session.message ?? "", /wechat login|qr/i);
     assert.equal(session.logs.some((line) => /qr code|scan/i.test(line)), true);
     assert.equal(session.logs.some((line) => line.includes("npm install") && line.includes("@tencent-weixin/openclaw-weixin-cli@latest")), true);
@@ -1673,16 +1686,11 @@ test("personal WeChat captures installer output that only appears on an interact
       values: {}
     });
     assert.ok(result.session);
-    let session = await adapter.gateway.getChannelSession(result.session.id);
-
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      if (session.logs.some((line) => /interactive qr ready from tty/i.test(line))) {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      session = await adapter.gateway.getChannelSession(result.session.id);
-    }
+    const session = await waitForTestValue(
+      () => adapter.gateway.getChannelSession(result.session!.id),
+      (channelSession) => channelSession.logs.some((line) => /interactive qr ready from tty/i.test(line)),
+      (channelSession) => `Timed out waiting for interactive TTY installer output:\n${channelSession?.logs.join("\n") ?? "(none)"}`
+    );
 
     assert.equal(
       session.logs.some((line) => /interactive qr ready from tty/i.test(line)),
@@ -1701,15 +1709,11 @@ test("personal WeChat hides completed installer sessions from general config whi
     });
     assert.ok(result.session);
 
-    let session = await adapter.gateway.getChannelSession(result.session.id);
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      if (session.status === "completed") {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      session = await adapter.gateway.getChannelSession(result.session.id);
-    }
+    const session = await waitForTestValue(
+      () => adapter.gateway.getChannelSession(result.session!.id),
+      (channelSession) => channelSession.status === "completed",
+      (channelSession) => `Timed out waiting for personal WeChat installer completion:\n${channelSession?.logs.join("\n") ?? "(none)"}`
+    );
 
     assert.equal(session.status, "completed", session.logs.join("\n"));
     assert.match(session.message, /gateway activation after onboarding/i);
@@ -1754,15 +1758,11 @@ test("personal WeChat does not start a second installer while the QR session is 
       action: "save",
       values: {}
     });
-    let firstSession = await adapter.gateway.getActiveChannelSession();
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (firstSession?.channelId === "wechat" && firstSession.status === "running") {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      firstSession = await adapter.gateway.getActiveChannelSession();
-    }
+    const firstSession = await waitForTestValue(
+      () => adapter.gateway.getActiveChannelSession(),
+      (channelSession) => channelSession?.channelId === "wechat" && channelSession.status === "running",
+      (channelSession) => `Timed out waiting for active personal WeChat installer session:\n${JSON.stringify(channelSession ?? null, null, 2)}`
+    );
 
     const second = await adapter.config.saveChannelEntry({
       channelId: "wechat",

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-04-12 17:30 CST
+
+- hardened the daemon CI suite by replacing short fixed polling loops in the OpenClaw adapter tests with condition-based waits for model auth and personal WeChat installer sessions, reducing GitHub Actions timing flakes while preserving fast local exits
+
 ### 2026-04-12 17:00 CST
 
 - fixed CI test ordering by running workspace test suites before repository release-script contract tests, keeping daemon tests on the last green execution path while preserving release workflow coverage

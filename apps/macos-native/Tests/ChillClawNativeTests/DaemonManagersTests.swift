@@ -55,6 +55,25 @@ struct DaemonManagersTests {
     }
 
     @Test
+    func processManagerStartsLaunchAgentWhenInitialPingThrowsConnectionRefused() async throws {
+        let launchAgent = FakeLaunchAgentController()
+        let manager = DaemonProcessManager(
+            launchAgent: launchAgent,
+            ping: {
+                if await launchAgent.currentStartAttempts() == 0 {
+                    throw URLError(.cannotConnectToHost)
+                }
+                return true
+            }
+        )
+
+        await manager.ensureRunning()
+
+        #expect(await launchAgent.currentStartAttempts() == 1)
+        #expect(manager.status == .running(details: "Daemon reachable"))
+    }
+
+    @Test
     func processManagerPreparesSupportDirectoriesBeforeInitialPing() async throws {
         let launchAgent = FakeLaunchAgentController()
         let recorder = StartupEventRecorder()

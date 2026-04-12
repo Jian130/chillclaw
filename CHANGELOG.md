@@ -4,6 +4,10 @@
 
 ## 0.1.4 - 2026-04-12
 
+### 2026-04-12 22:05 CST
+
+- fixed clean macOS daemon startup when the first localhost ping is refused, so the native app treats that as a missing daemon and installs the LaunchAgent instead of failing before launchd is registered
+
 ### 2026-04-12 21:42 CST
 
 - fixed clean macOS app startup so the native client creates `~/Library/Application Support/ChillClaw` before daemon reachability checks, uses a short pre-launch ping timeout, and gives launchd enough time for the packaged daemon to become reachable

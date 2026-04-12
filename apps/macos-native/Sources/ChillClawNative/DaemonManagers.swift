@@ -256,7 +256,7 @@ final class DaemonProcessManager {
     func ensureRunning() async {
         do {
             try await prepareStartup()
-            if try await ping() {
+            if await isReachable() {
                 status = .attachedExisting(details: "Using existing ChillClaw daemon")
                 return
             }
@@ -297,11 +297,15 @@ final class DaemonProcessManager {
         }
     }
 
+    private func isReachable() async -> Bool {
+        (try? await ping()) == true
+    }
+
     private func waitUntilReachable() async -> Bool {
         let deadline = Date().addingTimeInterval(Self.reachabilityTimeoutSeconds)
         while Date() < deadline {
             try? await Task.sleep(nanoseconds: Self.reachabilityDelayNanoseconds)
-            if (try? await ping()) == true {
+            if await isReachable() {
                 return true
             }
         }

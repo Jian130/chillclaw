@@ -12,6 +12,7 @@ import type {
 } from "@chillclaw/contracts";
 
 import {
+  isStaleManagedOllamaListenerCommand,
   LocalModelRuntimeService,
   resolveInstalledRuntimeCandidate,
   resolveDiskProbePath,
@@ -87,6 +88,7 @@ function createHarness(overrides: Partial<LocalModelRuntimeAccess> = {}) {
       source: "managed-install",
       managed: true
     }),
+    prepareRuntimeEndpoint: async () => {},
     isRuntimeReachable: async () => reachable,
     startRuntime: async () => {
       reachable = true;
@@ -260,6 +262,31 @@ test("install reuses an existing Ollama runtime, downloads the selected model, a
   assert.equal(publishedCompleted.at(-1), result.message);
 });
 
+test("install restarts a reachable managed runtime endpoint when preparation marks it stale", async () => {
+  let reachable = true;
+  let startCalls = 0;
+  const { service } = createHarness({
+    resolveInstalledRuntime: async () => ({
+      command: "/tmp/chillclaw/ollama-runtime/bin/ollama",
+      source: "managed-install",
+      managed: true
+    }),
+    prepareRuntimeEndpoint: async () => {
+      reachable = false;
+    },
+    isRuntimeReachable: async () => reachable,
+    startRuntime: async () => {
+      startCalls += 1;
+      reachable = true;
+    }
+  });
+
+  const result = await service.install();
+
+  assert.equal(result.status, "completed");
+  assert.equal(startCalls, 1);
+});
+
 test("local model progress preserves the backing download job id", async () => {
   let modelAvailable = false;
   const { service, publishedRuntimeProgress } = createHarness({
@@ -409,6 +436,17 @@ test("resolveInstalledRuntimeCandidate accepts a PATH ollama executable when pre
 test("managed Ollama runtime path points to a CLI-only binary", () => {
   assert.match(getManagedOllamaCliPath(), /ollama-runtime\/bin\/ollama$/u);
   assert.doesNotMatch(getManagedOllamaCliPath(), /Ollama\.app/u);
+});
+
+test("stale managed Ollama listener detection rejects removed app-bundle commands", () => {
+  assert.equal(
+    isStaleManagedOllamaListenerCommand(
+      getManagedOllamaCliPath().replace(/bin\/ollama$/u, "Ollama.app/Contents/Resources/ollama serve")
+    ),
+    true
+  );
+  assert.equal(isStaleManagedOllamaListenerCommand(`${getManagedOllamaCliPath()} serve`), false);
+  assert.equal(isStaleManagedOllamaListenerCommand("/Applications/Ollama.app/Contents/Resources/ollama serve"), false);
 });
 
 test("resolveDiskProbePath falls back to the nearest existing parent for first-run local runtime paths", async () => {

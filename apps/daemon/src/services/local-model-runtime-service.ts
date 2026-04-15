@@ -66,6 +66,7 @@ export type LocalModelRuntimeAccess = {
   fetchModelSelection: () => Promise<Pick<ModelConfigOverview, "savedEntries" | "defaultEntryId" | "defaultModel">>;
   resolveInstalledRuntime: () => Promise<ResolvedOllamaRuntime | undefined>;
   installManagedRuntime: () => Promise<ResolvedOllamaRuntime>;
+  prepareRuntimeEndpoint: (runtime: ResolvedOllamaRuntime) => Promise<void>;
   isRuntimeReachable: (runtime: ResolvedOllamaRuntime | undefined) => Promise<boolean>;
   startRuntime: (runtime: ResolvedOllamaRuntime) => Promise<void>;
   isModelAvailable: (runtime: ResolvedOllamaRuntime, modelTag: string) => Promise<boolean>;
@@ -95,6 +96,9 @@ type ActiveLocalModelRuntimeJob = {
 type RetryableError = Error & { retryable?: boolean };
 
 const LOCAL_MODEL_PULL_MAX_ATTEMPTS = 3;
+const OLLAMA_HOST = "127.0.0.1";
+const OLLAMA_PORT = 11_434;
+const OLLAMA_BASE_URL = `http://${OLLAMA_HOST}:${OLLAMA_PORT}`;
 
 function modelTagFromKey(modelKey: string): string {
   return modelKey.replace(/^ollama\//, "");
@@ -393,6 +397,7 @@ export class LocalModelRuntimeService {
       if (!runtime) {
         runtime = await this.access.installManagedRuntime();
       }
+      await this.access.prepareRuntimeEndpoint(runtime);
 
       if (!(await this.access.isRuntimeReachable(runtime))) {
         await this.setProgressState(action, "starting-runtime", "ChillClaw is starting the local Ollama runtime.");
@@ -659,7 +664,7 @@ async function waitForRuntime(command: ResolvedOllamaRuntime): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch("http://127.0.0.1:11434/api/tags", {
+      const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
         signal: AbortSignal.timeout(2_000)
       });
       if (response.ok) {
@@ -673,6 +678,127 @@ async function waitForRuntime(command: ResolvedOllamaRuntime): Promise<void> {
   }
 
   throw new Error(`ChillClaw could not reach the local Ollama runtime at ${command.command}.`);
+}
+
+type RuntimeListener = {
+  pid: number;
+  command: string;
+};
+
+export function isStaleManagedOllamaListenerCommand(command: string): boolean {
+  if (!command.includes(`${getManagedOllamaDir()}/`)) {
+    return false;
+  }
+
+  const currentCommand = getManagedOllamaCliPath();
+  return command !== currentCommand && !command.startsWith(`${currentCommand} `);
+}
+
+async function listOllamaRuntimeListeners(): Promise<RuntimeListener[]> {
+  if (process.platform !== "darwin") {
+    return [];
+  }
+
+  let listeners: { code: number; stdout: string };
+  try {
+    listeners = await runLoggedCommand(
+      "localModelRuntime.inspectRuntimeListener",
+      "lsof",
+      ["-nP", "-t", `-iTCP:${OLLAMA_PORT}`, "-sTCP:LISTEN"],
+      { allowFailure: true }
+    );
+  } catch {
+    return [];
+  }
+  if (listeners.code !== 0) {
+    return [];
+  }
+
+  const pids = [
+    ...new Set(
+      listeners.stdout
+        .split(/\s+/u)
+        .map((line) => Number(line.trim()))
+        .filter((pid) => Number.isInteger(pid) && pid > 0)
+    )
+  ];
+  const result: RuntimeListener[] = [];
+  for (const pid of pids) {
+    let processInfo: { code: number; stdout: string };
+    try {
+      processInfo = await runLoggedCommand(
+        "localModelRuntime.inspectRuntimeProcess",
+        "ps",
+        ["-p", String(pid), "-o", "command="],
+        { allowFailure: true }
+      );
+    } catch {
+      continue;
+    }
+    const command = processInfo.stdout.trim();
+    if (processInfo.code === 0 && command.length > 0) {
+      result.push({ pid, command });
+    }
+  }
+  return result;
+}
+
+async function hasStaleManagedOllamaServer(runtime: ResolvedOllamaRuntime | undefined): Promise<boolean> {
+  if (!runtime?.managed) {
+    return false;
+  }
+
+  const listeners = await listOllamaRuntimeListeners();
+  return listeners.some((listener) => isStaleManagedOllamaListenerCommand(listener.command));
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessRunning(pid)) {
+      return true;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+  return !isProcessRunning(pid);
+}
+
+async function stopStaleManagedOllamaServers(runtime: ResolvedOllamaRuntime): Promise<void> {
+  if (!runtime.managed) {
+    return;
+  }
+
+  const staleListeners = (await listOllamaRuntimeListeners()).filter((listener) =>
+    isStaleManagedOllamaListenerCommand(listener.command)
+  );
+  for (const listener of staleListeners) {
+    try {
+      logDevelopmentCommand("localModelRuntime.stopStaleRuntime", "kill", ["-TERM", String(listener.pid)]);
+      process.kill(listener.pid, "SIGTERM");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        continue;
+      }
+      throw new Error(`ChillClaw found a stale managed Ollama runtime but could not stop process ${listener.pid}.`);
+    }
+
+    if (await waitForProcessExit(listener.pid)) {
+      continue;
+    }
+
+    logDevelopmentCommand("localModelRuntime.stopStaleRuntime", "kill", ["-KILL", String(listener.pid)]);
+    process.kill(listener.pid, "SIGKILL");
+    await waitForProcessExit(listener.pid, 2_000);
+  }
 }
 
 async function pullModelViaDownloadManager(
@@ -781,17 +907,21 @@ export function createLocalModelRuntimeService(
 
       throw new Error("ChillClaw requires RuntimeManager to prepare the managed Ollama runtime.");
     },
-    isRuntimeReachable: async () => {
+    prepareRuntimeEndpoint: async (runtime) => {
+      await stopStaleManagedOllamaServers(runtime);
+    },
+    isRuntimeReachable: async (runtime) => {
       try {
-        const response = await fetch("http://127.0.0.1:11434/api/tags", {
+        const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
           signal: AbortSignal.timeout(2_000)
         });
-        return response.ok;
+        return response.ok && !(await hasStaleManagedOllamaServer(runtime));
       } catch {
         return false;
       }
     },
     startRuntime: async (runtime) => {
+      await stopStaleManagedOllamaServers(runtime);
       logDevelopmentCommand("localModelRuntime.startRuntime", runtime.command, ["serve"]);
       const child = spawn(runtime.command, ["serve"], {
         detached: true,

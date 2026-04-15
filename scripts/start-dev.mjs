@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, openSync } from "node:fs";
 import net from "node:net";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -19,6 +19,7 @@ const rootDir = process.cwd();
 const daemonPort = Number(process.env.CHILLCLAW_PORT ?? "4545");
 const uiPort = Number(process.env.CHILLCLAW_UI_PORT ?? "4173");
 const viteBinPath = resolve(rootDir, "node_modules", "vite", "bin", "vite.js");
+const devLogDir = resolve(rootDir, "apps/daemon/.data/logs");
 const SCRIPT_LABEL = "ChillClaw start";
 
 let daemonProcess = null;
@@ -41,6 +42,28 @@ function shellQuote(value) {
   }
 
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function slugForLabel(label) {
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-|-$/gu, "") || "process"
+  );
+}
+
+function openBackgroundLogs(label) {
+  mkdirSync(devLogDir, { recursive: true });
+  const slug = slugForLabel(label);
+  const stdoutPath = resolve(devLogDir, `${slug}.out.log`);
+  const stderrPath = resolve(devLogDir, `${slug}.err.log`);
+
+  return {
+    stdoutPath,
+    stderrPath,
+    stdio: ["ignore", openSync(stdoutPath, "a"), openSync(stderrPath, "a")]
+  };
 }
 
 function fail(message) {
@@ -127,10 +150,12 @@ function runBackgroundStep(label, command, args, options = {}) {
   const { cwd = rootDir, extraEnv = {} } = options;
   logStep(label, { step: true });
   logStep(`Launching: ${command} ${args.map((arg) => shellQuote(arg)).join(" ")}`);
+  const logs = openBackgroundLogs(label);
+  logStep(`${label} logs: ${logs.stdoutPath} and ${logs.stderrPath}`);
 
   const child = spawn(command, args, {
     cwd,
-    stdio: "inherit",
+    stdio: logs.stdio,
     detached: true,
     env: {
       ...process.env,

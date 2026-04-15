@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.8 - 2026-04-15
+
+### 2026-04-15 17:09 CST
+
+- fixed managed local Ollama startup recovery by detecting ChillClaw-managed listeners that still point at a removed app-bundle runtime, stopping them before reachability is accepted, and restarting through the current managed `bin/ollama` CLI
+- hardened local development restart behavior by writing background daemon/UI output to log files and ignoring daemon stdout/stderr `EPIPE` from closed parent terminals instead of crashing
+- improved daemon GitHub Actions diagnostics so failed Node test files annotate the actual TAP `not ok` diagnostic block instead of a later tail of passing output
+- bumped ChillClaw package metadata and internal workspace dependency pins to 0.1.8 for the next tagged release
+
 ## 0.1.7 - 2026-04-15
 
 ### 2026-04-15 16:12 CST

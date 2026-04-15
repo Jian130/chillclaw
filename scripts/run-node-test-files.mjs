@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const TEST_FILE_SUFFIX = ".test.";
 const MAX_FAILURE_OUTPUT_LENGTH = 20_000;
+const MAX_FAILURE_SUMMARY_SOURCE_LENGTH = 1_000_000;
 
 export async function listTestFiles(rootDir) {
   const root = resolve(rootDir);
@@ -39,19 +40,66 @@ function appendOutputTail(current, chunk) {
   return next.slice(-MAX_FAILURE_OUTPUT_LENGTH);
 }
 
+function appendOutputSummarySource(current, chunk) {
+  if (current.length >= MAX_FAILURE_SUMMARY_SOURCE_LENGTH) {
+    return current;
+  }
+
+  const next = current + chunk;
+  if (next.length <= MAX_FAILURE_SUMMARY_SOURCE_LENGTH) {
+    return next;
+  }
+  return next.slice(0, MAX_FAILURE_SUMMARY_SOURCE_LENGTH);
+}
+
 function escapeWorkflowCommandValue(value) {
   return value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
 
+export function summarizeNodeTestFailureOutput(output) {
+  const lines = output.split(/\r?\n/);
+  const failureBlocks = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^not ok \d+\b/u.test(lines[index])) {
+      continue;
+    }
+
+    let end = index + 1;
+    let foundDiagnostics = false;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor];
+      if (/^  ---\s*$/u.test(line)) {
+        foundDiagnostics = true;
+      }
+      if (!foundDiagnostics && /^(?:# Subtest:|ok \d+\b|not ok \d+\b)/u.test(line)) {
+        break;
+      }
+
+      end = cursor + 1;
+      if (foundDiagnostics && /^  \.\.\.\s*$/u.test(line)) {
+        break;
+      }
+    }
+
+    if (foundDiagnostics) {
+      failureBlocks.push(lines.slice(index, end).join("\n").trimEnd());
+    }
+  }
+
+  return failureBlocks.join("\n\n").trim();
+}
+
 export function formatGithubErrorAnnotation(filePath, cwd, outputTail) {
   const normalizedPath = relative(cwd, filePath) || filePath;
-  const message = outputTail.trim() || "Node test file exited with a failure status.";
+  const message = summarizeNodeTestFailureOutput(outputTail) || outputTail.trim() || "Node test file exited with a failure status.";
   return `::error file=${normalizedPath},title=Node test file failed::${escapeWorkflowCommandValue(message)}`;
 }
 
 function runTestFile(file, nodeArgs) {
   return new Promise((resolveRun) => {
     let outputTail = "";
+    let outputSummarySource = "";
     let settled = false;
     const child = spawn(process.execPath, [...nodeArgs, "--test", file], {
       env: process.env,
@@ -68,12 +116,16 @@ function runTestFile(file, nodeArgs) {
 
     child.stdout.on("data", (chunk) => {
       process.stdout.write(chunk);
-      outputTail = appendOutputTail(outputTail, String(chunk));
+      const chunkText = String(chunk);
+      outputTail = appendOutputTail(outputTail, chunkText);
+      outputSummarySource = appendOutputSummarySource(outputSummarySource, chunkText);
     });
 
     child.stderr.on("data", (chunk) => {
       process.stderr.write(chunk);
-      outputTail = appendOutputTail(outputTail, String(chunk));
+      const chunkText = String(chunk);
+      outputTail = appendOutputTail(outputTail, chunkText);
+      outputSummarySource = appendOutputSummarySource(outputSummarySource, chunkText);
     });
 
     child.on("error", (error) => {
@@ -97,7 +149,7 @@ function runTestFile(file, nodeArgs) {
       settle({
         file,
         ok: code === 0,
-        outputTail
+        outputTail: summarizeNodeTestFailureOutput(outputSummarySource) || outputTail
       });
     });
   });

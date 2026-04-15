@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-13T00:00:00.000Z",
+  "resources": [
+    {
+      "id": "node-npm-runtime",
+      "kind": "node-npm",
+      "label": "Node.js and npm runtime",
+      "version": "22.22.2",
+      "platforms": [
+        {
+          "os": "darwin",
+          "arch": "*"
+        }
+      ],
+      "sourcePolicy": ["bundled", "download"],
+      "updatePolicy": "stage-silently-apply-safely",
+      "installDir": "node-runtime",
+      "activePath": "node-runtime/node-v22.22.2-darwin-arm64/bin/npm",
+      "artifacts": [
+        {
+          "source": "bundled",
+          "format": "directory",
+          "path": "node/node-v22.22.2-darwin-arm64"
+        }
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "openclaw-runtime",
+      "kind": "engine",
+      "label": "OpenClaw runtime",
+      "version": "latest",
+      "platforms": [
+        {
+          "os": "darwin",
+          "arch": "*"
+        }
+      ],
+      "sourcePolicy": ["bundled", "download"],
+      "updatePolicy": "stage-silently-apply-safely",
+      "installDir": "openclaw-runtime",
+      "activePath": "openclaw-runtime/node_modules/.bin/openclaw",
+      "artifacts": [
+        {
+          "source": "bundled",
+          "format": "tgz",
+          "path": "openclaw/openclaw-runtime.tgz"
+        }
+      ],
+      "dependencies": ["node-npm-runtime"]
+    },
+    {
+      "id": "ollama-runtime",
+      "kind": "local-ai-runtime",
+      "label": "Ollama runtime",
+      "version": "0.20.6",
+      "platforms": [
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        }
+      ],
+      "sourcePolicy": ["bundled", "download"],
+      "updatePolicy": "stage-silently-apply-safely",
+      "installDir": "ollama-runtime",
+      "activePath": "ollama-runtime/bin/ollama",
+      "artifacts": [
+        {
+          "source": "bundled",
+          "format": "file",
+          "path": "ollama/ollama"
+        },
+        {
+          "source": "download",
+          "format": "tgz",
+          "url": "https://github.com/ollama/ollama/releases/download/v0.20.6/ollama-darwin.tgz"
+        }
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "local-model-catalog",
+      "kind": "model-catalog",
+      "label": "Local model catalog",
+      "version": "2026.04.13",
+      "platforms": [
+        {
+          "os": "*",
+          "arch": "*"
+        }
+      ],
+      "sourcePolicy": ["bundled", "download"],
+      "updatePolicy": "stage-silently-apply-safely",
+      "installDir": "local-model-catalog",
+      "artifacts": [
+        {
+          "source": "bundled",
+          "format": "json",
+          "path": "models/local-model-catalog.json"
+        }
+      ],
+      "dependencies": []
+    }
+  ]
+}

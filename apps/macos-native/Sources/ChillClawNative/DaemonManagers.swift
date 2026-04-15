@@ -115,6 +115,9 @@ actor LaunchAgentManager: LaunchAgentControlling {
         let runScript = ((appRoot as NSString).appendingPathComponent("app/scripts/run-daemon.sh"))
         let staticDir = ((appRoot as NSString).appendingPathComponent("app/ui"))
         let bootstrap = ((appRoot as NSString).appendingPathComponent("app/scripts/bootstrap-openclaw.mjs"))
+        let runtimeBundleDir = ((appRoot as NSString).appendingPathComponent("app/runtime-artifacts"))
+        let runtimeManifestPath = ((runtimeBundleDir as NSString).appendingPathComponent("runtime-manifest.lock.json"))
+        let runtimeUpdateFeedURL = ProcessInfo.processInfo.environment["CHILLCLAW_RUNTIME_UPDATE_FEED_URL"] ?? ""
         let logPath = (supportPaths.logDir as NSString).appendingPathComponent("daemon.log")
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
 
@@ -146,6 +149,12 @@ actor LaunchAgentManager: LaunchAgentControlling {
             <string>\(staticDir)</string>
             <key>CHILLCLAW_OPENCLAW_BOOTSTRAP_SCRIPT</key>
             <string>\(bootstrap)</string>
+            <key>CHILLCLAW_RUNTIME_BUNDLE_DIR</key>
+            <string>\(runtimeBundleDir)</string>
+            <key>CHILLCLAW_RUNTIME_MANIFEST_PATH</key>
+            <string>\(runtimeManifestPath)</string>
+            <key>CHILLCLAW_RUNTIME_UPDATE_FEED_URL</key>
+            <string>\(runtimeUpdateFeedURL)</string>
             <key>CHILLCLAW_LAUNCHAGENT_LABEL</key>
             <string>\(label)</string>
           </dict>

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import type {
@@ -15,11 +15,12 @@ import type {
 
 import { chooseLocalModelTier, type LocalModelHostSnapshot } from "../config/local-model-runtime-catalog.js";
 import type { ManagedLocalModelEntryRequest } from "../engine/adapter.js";
-import { getManagedOllamaAppPath, getManagedOllamaCliPath, getManagedOllamaDir, getManagedOllamaModelsDir } from "../runtime-paths.js";
+import { getManagedOllamaBinDir, getManagedOllamaCliPath, getManagedOllamaDir, getManagedOllamaModelsDir } from "../runtime-paths.js";
 import { logDevelopmentCommand } from "./logger.js";
 import { StateStore } from "./state-store.js";
 import type { EventPublisher } from "./event-publisher.js";
 import type { EngineAdapter } from "../engine/adapter.js";
+import type { RuntimeManager } from "../runtime-manager/runtime-manager.js";
 
 export type ResolvedOllamaRuntime = {
   command: string;
@@ -92,6 +93,8 @@ type RetryableError = Error & { retryable?: boolean };
 
 const OLLAMA_API_ORIGIN = "http://127.0.0.1:11434";
 const LOCAL_MODEL_PULL_MAX_ATTEMPTS = 3;
+const DEFAULT_MANAGED_OLLAMA_VERSION = process.env.CHILLCLAW_MANAGED_OLLAMA_VERSION?.trim() || "0.20.6";
+const DEFAULT_MANAGED_OLLAMA_ARCHIVE_NAME = "ollama-darwin.tgz";
 
 function modelTagFromKey(modelKey: string): string {
   return modelKey.replace(/^ollama\//, "");
@@ -159,6 +162,10 @@ export async function resolveDiskProbePath(targetPath: string): Promise<string> 
       candidate = parent;
     }
   }
+}
+
+function defaultManagedOllamaArchiveUrl(): string {
+  return `https://github.com/ollama/ollama/releases/download/v${DEFAULT_MANAGED_OLLAMA_VERSION}/${DEFAULT_MANAGED_OLLAMA_ARCHIVE_NAME}`;
 }
 
 function activeLocalEntry(modelSelection: Pick<ModelConfigOverview, "savedEntries" | "defaultEntryId" | "defaultModel">) {
@@ -763,7 +770,8 @@ async function pullModelViaApi(modelTag: string, publishProgress: (progress: Pul
 export function createLocalModelRuntimeService(
   adapter: EngineAdapter,
   store: StateStore,
-  eventPublisher?: EventPublisher
+  eventPublisher?: EventPublisher,
+  runtimeManager?: RuntimeManager
 ): LocalModelRuntimeService {
   return new LocalModelRuntimeService({
     inspectHost: async () => {
@@ -794,42 +802,42 @@ export function createLocalModelRuntimeService(
       ]);
     },
     installManagedRuntime: async () => {
+      if (runtimeManager) {
+        const result = await runtimeManager.prepare("ollama-runtime");
+        if (result.status !== "completed") {
+          throw new Error(result.message);
+        }
+        const resolved = await resolveInstalledRuntimeCandidate([
+          { command: getManagedOllamaCliPath(), source: "managed-install" as const, managed: true }
+        ]);
+        if (!resolved) {
+          throw new Error("ChillClaw prepared Ollama, but the managed Ollama command is not executable.");
+        }
+        return resolved;
+      }
+
       const workspace = await mkdtemp(resolve(tmpdir(), "chillclaw-ollama-"));
-      const dmgPath = resolve(workspace, "Ollama.dmg");
-      const mountPath = resolve(workspace, "mount");
-      await mkdir(mountPath, { recursive: true });
+      const archivePath = resolve(workspace, DEFAULT_MANAGED_OLLAMA_ARCHIVE_NAME);
+      const extractedPath = resolve(workspace, "extracted");
       await mkdir(getManagedOllamaDir(), { recursive: true });
+      await mkdir(getManagedOllamaBinDir(), { recursive: true });
 
       try {
         await runLoggedCommand("localModelRuntime.installManagedRuntime", "curl", [
           "-L",
-          "https://ollama.com/download/Ollama.dmg",
+          defaultManagedOllamaArchiveUrl(),
           "-o",
-          dmgPath
+          archivePath
         ]);
-        await runLoggedCommand("localModelRuntime.installManagedRuntime", "hdiutil", [
-          "attach",
-          dmgPath,
-          "-nobrowse",
-          "-readonly",
-          "-mountpoint",
-          mountPath
+        await mkdir(extractedPath, { recursive: true });
+        await runLoggedCommand("localModelRuntime.installManagedRuntime", "tar", [
+          "-xzf",
+          archivePath,
+          "-C",
+          extractedPath
         ]);
-
-        try {
-          await rm(getManagedOllamaAppPath(), { recursive: true, force: true });
-          await runLoggedCommand("localModelRuntime.installManagedRuntime", "ditto", [
-            resolve(mountPath, "Ollama.app"),
-            getManagedOllamaAppPath()
-          ]);
-        } finally {
-          await runLoggedCommand("localModelRuntime.installManagedRuntime", "hdiutil", [
-            "detach",
-            mountPath
-          ], {
-            allowFailure: true
-          });
-        }
+        await copyFile(resolve(extractedPath, "ollama"), getManagedOllamaCliPath());
+        await chmod(getManagedOllamaCliPath(), 0o755);
 
         await mkdir(getManagedOllamaModelsDir(), { recursive: true });
         return {

@@ -45,6 +45,8 @@ import type {
   RemoveChannelEntryRequest,
   ReplaceFallbackModelEntriesRequest,
   RecoveryRunResponse,
+  RuntimeActionResponse,
+  RuntimeManagerOverview,
   SaveCustomSkillRequest,
   SendChatMessageRequest,
   SkillCatalogActionResponse,
@@ -86,6 +88,7 @@ type JsonRequestInit = RequestInit & {
 function getGetCacheMs(path: string): number | undefined {
   if (
     path.startsWith("/overview") ||
+    path.startsWith("/runtime/resources") ||
     path.startsWith("/onboarding/state") ||
     path.startsWith("/deploy/targets") ||
     path.startsWith("/models/config") ||
@@ -193,6 +196,46 @@ async function readJson<T>(path: string, init?: JsonRequestInit): Promise<T> {
 
 export function fetchOverview(options?: { fresh?: boolean }): Promise<ProductOverview> {
   return readJson<ProductOverview>("/overview", options);
+}
+
+export function fetchRuntimeResources(options?: { fresh?: boolean }): Promise<RuntimeManagerOverview> {
+  return readJson<RuntimeManagerOverview>("/runtime/resources", options);
+}
+
+export function prepareRuntimeResource(resourceId: string): Promise<RuntimeActionResponse> {
+  return readJson<RuntimeActionResponse>(`/runtime/resources/${encodeURIComponent(resourceId)}/prepare`, {
+    method: "POST"
+  });
+}
+
+export function repairRuntimeResource(resourceId: string): Promise<RuntimeActionResponse> {
+  return readJson<RuntimeActionResponse>(`/runtime/resources/${encodeURIComponent(resourceId)}/repair`, {
+    method: "POST"
+  });
+}
+
+export function checkRuntimeResourceUpdate(resourceId: string): Promise<RuntimeActionResponse> {
+  return readJson<RuntimeActionResponse>(`/runtime/resources/${encodeURIComponent(resourceId)}/check-update`, {
+    method: "POST"
+  });
+}
+
+export function stageRuntimeResourceUpdate(resourceId: string): Promise<RuntimeActionResponse> {
+  return readJson<RuntimeActionResponse>(`/runtime/resources/${encodeURIComponent(resourceId)}/stage-update`, {
+    method: "POST"
+  });
+}
+
+export function applyRuntimeResourceUpdate(resourceId: string): Promise<RuntimeActionResponse> {
+  return readJson<RuntimeActionResponse>(`/runtime/resources/${encodeURIComponent(resourceId)}/apply-update`, {
+    method: "POST"
+  });
+}
+
+export function rollbackRuntimeResource(resourceId: string): Promise<RuntimeActionResponse> {
+  return readJson<RuntimeActionResponse>(`/runtime/resources/${encodeURIComponent(resourceId)}/rollback`, {
+    method: "POST"
+  });
 }
 
 export function fetchDeploymentTargets(options?: { fresh?: boolean }): Promise<DeploymentTargetsResponse> {

@@ -27,14 +27,17 @@ test("macOS release workflow signs the staged app before building and notarizing
   const workflow = await readRepoFile(".github/workflows/macos-release.yml");
 
   const stageIndex = workflow.indexOf("npm run build:mac-installer -- --skip-build --stage-only");
+  const prepareRuntimeIndex = workflow.indexOf("npm run prepare:runtime-artifacts");
   const signIndex = workflow.indexOf("name: Sign ChillClaw.app");
   const dmgIndex = workflow.indexOf("npm run build:mac-installer -- --skip-build --dmg-only");
   const notarizeIndex = workflow.indexOf("name: Notarize and staple disk image");
 
   assert.notEqual(stageIndex, -1);
+  assert.notEqual(prepareRuntimeIndex, -1);
   assert.notEqual(signIndex, -1);
   assert.notEqual(dmgIndex, -1);
   assert.notEqual(notarizeIndex, -1);
+  assert.ok(prepareRuntimeIndex < stageIndex);
   assert.ok(stageIndex < signIndex);
   assert.ok(signIndex < dmgIndex);
   assert.ok(dmgIndex < notarizeIndex);
@@ -53,6 +56,27 @@ test("macOS release workflow waits for notarization before Gatekeeper assessment
   assert.notEqual(stapleIndex, -1);
   assert.notEqual(installerAssessIndex, -1);
   assert.ok(stapleIndex < installerAssessIndex);
+});
+
+test("local signed macOS installer script mirrors release signing and notarization", async () => {
+  const [signScript, packageJson] = await Promise.all([
+    readRepoFile("scripts/build-signed-macos-installer.sh"),
+    readRepoFile("package.json")
+  ]);
+
+  assert.match(packageJson, /"build:mac-signed-installer": "bash \.\/scripts\/build-signed-macos-installer\.sh"/);
+  assert.match(signScript, /require_env APP_IDENTITY/);
+  assert.match(signScript, /require_env APPLE_NOTARY_KEY_PATH/);
+  assert.match(signScript, /npm run prepare:runtime-artifacts/);
+  assert.match(signScript, /CHILLCLAW_REQUIRE_CLI_RUNTIME_ARTIFACTS=1 npm run build:mac-installer -- --stage-only/);
+  assert.match(signScript, /find "\$APP_PATH\/Contents\/Resources\/app\/runtime-artifacts" -type f -perm -111 -print0/);
+  assert.match(signScript, /codesign --force --sign "\$APP_IDENTITY" --options runtime --timestamp --entitlements "\$DAEMON_ENTITLEMENTS"/);
+  assert.match(signScript, /npm run build:mac-installer -- --skip-build --dmg-only/);
+  assert.match(signScript, /codesign --force --sign "\$APP_IDENTITY" --timestamp "\$INSTALLER_PATH"/);
+  assert.match(signScript, /xcrun notarytool submit "\$INSTALLER_PATH"/);
+  assert.match(signScript, /xcrun stapler staple "\$INSTALLER_PATH"/);
+  assert.match(signScript, /spctl --assess --type open --context context:primary-signature --verbose=2 "\$INSTALLER_PATH"/);
+  assert.match(signScript, /shasum -a 256 "\$INSTALLER_PATH" > "\$CHECKSUM_PATH"/);
 });
 
 test("macOS release workflow preserves Node runtime entitlements on the packaged daemon", async () => {
@@ -81,6 +105,45 @@ test("macOS installer builder exposes staging-only and DMG-only release modes", 
   assert.match(buildScript, /--stage-only/);
   assert.match(buildScript, /--dmg-only/);
   assert.match(buildScript, /No staged ChillClaw\.app found/);
+});
+
+test("macOS installer builder stages runtime artifacts and LaunchAgent runtime environment", async () => {
+  const [buildScript, runtimeManifest, packageJson, workflow, prepareScript] = await Promise.all([
+    readRepoFile("scripts/build-macos-installer.mjs"),
+    readRepoFile("runtime-manifest.lock.json"),
+    readRepoFile("package.json"),
+    readRepoFile(".github/workflows/macos-release.yml"),
+    readRepoFile("scripts/prepare-runtime-artifacts.mjs")
+  ]);
+
+  assert.match(buildScript, /runtime-artifacts/);
+  assert.match(buildScript, /runtime-manifest\.lock\.json/);
+  assert.match(buildScript, /verbatimSymlinks:\s*true/);
+  assert.match(
+    buildScript,
+    /cp\(APP_BUNDLE, resolve\(DMG_STAGING_DIR, `\$\{APP_NAME\}\.app`\), \{ recursive: true, verbatimSymlinks: true \}\)/
+  );
+  assert.match(buildScript, /CHILLCLAW_REQUIRE_CLI_RUNTIME_ARTIFACTS/);
+  assert.match(buildScript, /Packaged Node\.js runtime npm is not executable/);
+  assert.match(buildScript, /Packaged Ollama runtime is missing the runnable ollama CLI binary/);
+  assert.match(buildScript, /Runtime artifacts must be runnable CLI payloads/);
+  assert.match(buildScript, /CHILLCLAW_RUNTIME_BUNDLE_DIR/);
+  assert.match(buildScript, /CHILLCLAW_RUNTIME_MANIFEST_PATH/);
+  assert.match(buildScript, /CHILLCLAW_RUNTIME_UPDATE_FEED_URL/);
+  assert.match(packageJson, /prepare:runtime-artifacts/);
+  assert.match(workflow, /npm run prepare:runtime-artifacts/);
+  assert.match(workflow, /CHILLCLAW_REQUIRE_CLI_RUNTIME_ARTIFACTS:\s*"1"/);
+  assert.match(workflow, /find "\$APP_PATH\/Contents\/Resources\/app\/runtime-artifacts" -type f -perm -111 -print0/);
+  assert.match(prepareScript, /Downloaded Node\.js archive npm is not executable/);
+  assert.match(prepareScript, /nodejs\.org\/dist/);
+  assert.match(prepareScript, /ollama CLI binary/);
+  assert.match(runtimeManifest, /node-npm-runtime/);
+  assert.match(runtimeManifest, /ollama-runtime/);
+  assert.match(runtimeManifest, /"format": "directory"/);
+  assert.match(runtimeManifest, /"format": "file"/);
+  assert.match(runtimeManifest, /ollama-runtime\/bin\/ollama/);
+  assert.doesNotMatch(runtimeManifest, /Ollama\.app/);
+  assert.doesNotMatch(runtimeManifest, /Ollama\.dmg/);
 });
 
 test("local macOS installer builds warn before users share unsigned DMGs", async () => {

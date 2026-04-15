@@ -88,6 +88,7 @@ import {
   getManagedWechatInstallerDir
 } from "../runtime-paths.js";
 import { errorToLogDetails, formatConsoleLine, logDevelopmentCommand, writeErrorLog, writeInfoLog } from "../services/logger.js";
+import type { RuntimeManager } from "../runtime-manager/runtime-manager.js";
 
 interface OpenClawStatusJson {
   setup?: {
@@ -3177,7 +3178,10 @@ export class OpenClawAdapter implements EngineAdapter {
   private readonly modelsConfigCoordinator: ModelsConfigCoordinator;
   private readonly runtimeLifecycleService: OpenClawRuntimeLifecycleService;
 
-  constructor(private readonly secrets: SecretsAdapter = createDefaultSecretsAdapter()) {
+  constructor(
+    private readonly secrets: SecretsAdapter = createDefaultSecretsAdapter(),
+    private readonly runtimeManager?: RuntimeManager
+  ) {
     const modelsConfigCoordinator = new ModelsConfigCoordinator({
       readModelSnapshot: async () => {
         const snapshot = await readModelSnapshot();
@@ -4461,6 +4465,35 @@ export class OpenClawAdapter implements EngineAdapter {
           : OPENCLAW_VERSION_OVERRIDE
             ? `OpenClaw ${existingVersion} is already installed and meets ChillClaw's requested version floor ${OPENCLAW_VERSION_OVERRIDE}.${gatewayNormalizationSuffix}`
             : `OpenClaw ${existingVersion} is already installed and ready for ChillClaw.${gatewayNormalizationSuffix}`
+      };
+    }
+
+    if (usesManagedLocalRuntime && this.runtimeManager) {
+      const runtimeResult = await this.runtimeManager.prepare("openclaw-runtime");
+      if (runtimeResult.status !== "completed") {
+        throw new Error(runtimeResult.message);
+      }
+      const nextVersion = await readManagedOpenClawVersion({ fresh: true });
+      if (!nextVersion || (OPENCLAW_VERSION_OVERRIDE && nextVersion !== OPENCLAW_VERSION_OVERRIDE)) {
+        throw new Error(`ChillClaw prepared ${runtimeResult.resource.label}, but could not verify the managed OpenClaw CLI.`);
+      }
+      const installedCommand = await resolveManagedOpenClawCommand({ fresh: true });
+      const configChanged = await this.ensureChillClawGatewayConfigBaseline(installedCommand);
+      const gatewayNormalizationSuffix = configChanged
+        ? " ChillClaw also reset the OpenClaw gateway to its local baseline on this Mac."
+        : "";
+
+      return {
+        status: existingVersion || systemVersion ? "reinstalled" : "installed",
+        changed: true,
+        hadExisting: Boolean(existingVersion || systemVersion),
+        existingVersion: existingVersion ?? systemVersion,
+        version: nextVersion,
+        message: existingVersion
+          ? `ChillClaw refreshed its managed local OpenClaw ${nextVersion} runtime in ${installPath}.${gatewayNormalizationSuffix}`
+          : systemVersion
+            ? `ChillClaw deployed a managed local OpenClaw ${nextVersion} runtime into ${installPath} instead of depending on the system OpenClaw ${systemVersion}.${gatewayNormalizationSuffix}`
+            : `ChillClaw deployed OpenClaw ${nextVersion} locally into ${installPath}.${gatewayNormalizationSuffix}`
       };
     }
 

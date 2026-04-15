@@ -13,6 +13,8 @@ struct SettledMutationResult<Mutation, State> {
 private let onboardingTerminalControlPattern = try! NSRegularExpression(pattern: #"\[[0-9;?]*[ -/]*[@-~]"#)
 private let onboardingQRCodeGlyphs = CharacterSet(charactersIn: "█▀▄▌▐▙▟▛▜■□▓▒")
 private let onboardingURLPattern = try! NSRegularExpression(pattern: #"https?://[^\s]+"#)
+private let onboardingInstallTimeoutRecoveryMaxAttempts = 3_600
+private let onboardingInstallTimeoutRecoverySleepNanoseconds: UInt64 = 1_000_000_000
 
 private func sanitizeOnboardingChannelSessionLogLines(_ lines: [String]) -> [String] {
     lines.compactMap { line in
@@ -1848,7 +1850,13 @@ final class NativeOnboardingViewModel {
             return false
         }
 
-        for attempt in 0..<12 {
+        applyInstallProgressUpdate(phase: .installing, percent: max(installProgress.percent ?? 55, 55), message: copy.installStageInstalling)
+
+        for attempt in 0..<onboardingInstallTimeoutRecoveryMaxAttempts {
+            if Task.isCancelled {
+                return true
+            }
+
             if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
                 applyOnboardingState(next)
                 if next.draft.currentStep != .install, next.draft.install?.installed == true || next.summary.install?.installed == true {
@@ -1868,8 +1876,8 @@ final class NativeOnboardingViewModel {
                 return true
             }
 
-            if attempt < 11 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if attempt < onboardingInstallTimeoutRecoveryMaxAttempts - 1 {
+                try? await Task.sleep(nanoseconds: onboardingInstallTimeoutRecoverySleepNanoseconds)
             }
         }
 
@@ -2008,8 +2016,39 @@ final class NativeOnboardingViewModel {
     }
 
     private func applyDaemonEvent(_ event: ChillClawEvent) async {
-        if onboardingState?.draft.currentStep == .install, case let .deployProgress(_, _, phase, percent, message) = event {
-            applyInstallProgressUpdate(phase: phase, percent: percent.map(Double.init), message: message)
+        if onboardingState?.draft.currentStep == .install {
+            switch event {
+            case let .deployProgress(_, _, phase, percent, message):
+                applyInstallProgressUpdate(phase: phase, percent: percent.map(Double.init), message: message)
+            case let .runtimeProgress(resourceID, action, _, percent, message, _):
+                if let progress = nativeOnboardingInstallProgressForRuntimeResource(
+                    resourceID: resourceID,
+                    action: action,
+                    percent: percent,
+                    message: message
+                ) {
+                    applyInstallProgressUpdate(
+                        phase: progress.phase ?? .installing,
+                        percent: progress.percent,
+                        message: progress.message
+                    )
+                }
+            case let .runtimeCompleted(resourceID, action, _, message, _):
+                if let progress = nativeOnboardingInstallProgressForRuntimeResource(
+                    resourceID: resourceID,
+                    action: action,
+                    percent: 100,
+                    message: message
+                ) {
+                    applyInstallProgressUpdate(
+                        phase: progress.phase ?? .installing,
+                        percent: progress.percent,
+                        message: progress.message
+                    )
+                }
+            default:
+                break
+            }
         }
 
         var shouldClearPageError = false
@@ -2048,6 +2087,10 @@ final class NativeOnboardingViewModel {
             let .localRuntimeCompleted(_, _, message, localRuntime):
             syncLocalRuntimeState(localRuntime, message: message)
             shouldClearPageError = true
+        case let .runtimeProgress(_, _, _, _, _, runtimeManager),
+            let .runtimeCompleted(_, _, _, _, runtimeManager),
+            let .runtimeUpdateStaged(_, _, _, runtimeManager):
+            appState.applyRuntimeManagerOverview(runtimeManager)
         case .skillCatalogUpdated, .pluginConfigUpdated, .deployProgress, .deployCompleted, .gatewayStatus, .chatStream, .configApplied:
             break
         }

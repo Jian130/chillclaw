@@ -35,6 +35,8 @@ tags:
     description: Legacy engine install/uninstall/update
   - name: service
     description: macOS LaunchAgent / app-service management
+  - name: runtime
+    description: Managed prerequisite provisioning, verification, and curated runtime updates
   - name: onboarding
     description: Guided onboarding wizard (intro, setup, and step-by-step state machine)
   - name: models
@@ -240,6 +242,111 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ServiceActionWithOverview"
+
+  # ── Runtime Manager ──────────────────────────────────────────────────────
+
+  /runtime/resources:
+    get:
+      operationId: getRuntimeResources
+      tags: [runtime]
+      summary: Managed prerequisite status
+      responses:
+        "200":
+          description: RuntimeManagerOverview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeManagerOverview"
+
+  /runtime/resources/{resourceId}/prepare:
+    post:
+      operationId: prepareRuntimeResource
+      tags: [runtime]
+      summary: ⏳ Prepare a managed prerequisite from the packaged manifest or approved fallback
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Runtime action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeActionResponse"
+
+  /runtime/resources/{resourceId}/repair:
+    post:
+      operationId: repairRuntimeResource
+      tags: [runtime]
+      summary: ⏳ Repair a managed prerequisite
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Runtime action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeActionResponse"
+
+  /runtime/resources/{resourceId}/check-update:
+    post:
+      operationId: checkRuntimeResourceUpdate
+      tags: [runtime]
+      summary: Check the ChillClaw-curated runtime update feed
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Runtime action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeActionResponse"
+
+  /runtime/resources/{resourceId}/stage-update:
+    post:
+      operationId: stageRuntimeResourceUpdate
+      tags: [runtime]
+      summary: ⏳ Stage an approved runtime update without changing the active install
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Runtime action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeActionResponse"
+
+  /runtime/resources/{resourceId}/apply-update:
+    post:
+      operationId: applyRuntimeResourceUpdate
+      tags: [runtime]
+      summary: ⏳ Apply a staged runtime update and roll back automatically on failed verification
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Runtime action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeActionResponse"
+
+  /runtime/resources/{resourceId}/rollback:
+    post:
+      operationId: rollbackRuntimeResource
+      tags: [runtime]
+      summary: ⏳ Restore the previous managed runtime version
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Runtime action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeActionResponse"
 
   # ── Deploy ────────────────────────────────────────────────────────────────
 
@@ -1500,6 +1607,13 @@ components:
       schema:
         type: string
         enum: [standard, managed-local]
+    resourceId:
+      name: resourceId
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [node-npm-runtime, openclaw-runtime, ollama-runtime, local-model-catalog]
     entryId:
       name: entryId
       in: path
@@ -1610,6 +1724,67 @@ components:
             $ref: "#/components/schemas/RecoveryAction"
         appUpdate:
           $ref: "#/components/schemas/AppUpdateStatus"
+        runtimeManager:
+          $ref: "#/components/schemas/RuntimeManagerOverview"
+
+    RuntimeResourceOverview:
+      type: object
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [node-npm, engine, local-ai-runtime, model-catalog, model-weights, local-ai-backend]
+        label: { type: string }
+        status:
+          type: string
+          enum: [missing, bundled-available, installed, staged-update, updating, ready, degraded, failed, rollback-required]
+        sourcePolicy:
+          type: string
+          enum: [bundled, download, existing-managed]
+        updatePolicy:
+          type: string
+          enum: [none, manual, stage-silently-apply-safely]
+        installedVersion: { type: string }
+        bundledVersion: { type: string }
+        desiredVersion: { type: string }
+        latestApprovedVersion: { type: string }
+        stagedVersion: { type: string }
+        activePath: { type: string }
+        updateAvailable: { type: boolean }
+        blockingResourceIds:
+          type: array
+          items: { type: string }
+        summary: { type: string }
+        detail: { type: string }
+        lastCheckedAt: { type: string, format: date-time }
+        lastUpdatedAt: { type: string, format: date-time }
+        lastError: { type: string }
+
+    RuntimeManagerOverview:
+      type: object
+      properties:
+        checkedAt: { type: string, format: date-time }
+        resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeResourceOverview"
+        summary: { type: string }
+        detail: { type: string }
+
+    RuntimeActionResponse:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [prepare, repair, check-update, stage-update, apply-update, rollback, remove]
+        status:
+          type: string
+          enum: [completed, failed, in-progress]
+        message: { type: string }
+        resource:
+          $ref: "#/components/schemas/RuntimeResourceOverview"
+        runtimeManager:
+          $ref: "#/components/schemas/RuntimeManagerOverview"
 
     AppUpdateStatus:
       type: object

@@ -50,20 +50,40 @@ export function getManagedOllamaDir(): string {
   return resolve(getDataDir(), "ollama-runtime");
 }
 
-export function getManagedOllamaAppPath(): string {
+export function getLegacyManagedOllamaAppPath(): string {
   return resolve(getManagedOllamaDir(), "Ollama.app");
 }
 
+export function getManagedOllamaBinDir(): string {
+  return resolve(getManagedOllamaDir(), "bin");
+}
+
 export function getManagedOllamaCliPath(): string {
-  return resolve(getManagedOllamaAppPath(), "Contents", "Resources", "ollama");
+  return resolve(getManagedOllamaBinDir(), "ollama");
 }
 
 export function getManagedOllamaModelsDir(): string {
   return resolve(getManagedOllamaDir(), "models");
 }
 
+export function getRuntimeManagerStatePath(): string {
+  return resolve(getDataDir(), "runtime-manager-state.json");
+}
+
 export function getAppRootDir(): string | undefined {
   return process.env.CHILLCLAW_APP_ROOT;
+}
+
+export function getRuntimeBundleDir(): string | undefined {
+  return process.env.CHILLCLAW_RUNTIME_BUNDLE_DIR ?? (getAppRootDir() ? resolve(getAppRootDir()!, "app/runtime-artifacts") : undefined);
+}
+
+export function getRuntimeManifestPath(): string | undefined {
+  return process.env.CHILLCLAW_RUNTIME_MANIFEST_PATH ?? (getRuntimeBundleDir() ? resolve(getRuntimeBundleDir()!, "runtime-manifest.lock.json") : undefined);
+}
+
+export function getRuntimeUpdateFeedUrl(): string | undefined {
+  return process.env.CHILLCLAW_RUNTIME_UPDATE_FEED_URL?.trim() || undefined;
 }
 
 export function getStaticDir(): string | undefined {

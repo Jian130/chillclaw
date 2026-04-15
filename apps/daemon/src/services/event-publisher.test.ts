@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createDefaultLocalModelRuntimeOverview } from "@chillclaw/contracts";
+import { createDefaultLocalModelRuntimeOverview, createDefaultRuntimeManagerOverview } from "@chillclaw/contracts";
 
 import { EventBusService } from "./event-bus-service.js";
 import { EventPublisher } from "./event-publisher.js";
@@ -74,6 +74,7 @@ test("event publisher emits authoritative snapshot events and returns sync metad
       gatewayStarted: false,
       gatewaySummary: "Idle."
     },
+    runtimeManager: createDefaultRuntimeManagerOverview(),
     profiles: [],
     templates: [],
     healthChecks: [],
@@ -149,6 +150,7 @@ test("event bus replays the latest retained snapshot events to new subscribers",
           gatewayStarted: false,
           gatewaySummary: "Idle."
         },
+        runtimeManager: createDefaultRuntimeManagerOverview(),
         profiles: [],
         templates: [],
         healthChecks: [],
@@ -250,4 +252,56 @@ test("event publisher emits local runtime progress and completion events", () =>
   });
 
   assert.deepEqual(events, ["local-runtime.progress", "local-runtime.completed"]);
+});
+
+test("event publisher emits generic runtime progress, completion, and staged update events", () => {
+  const bus = new EventBusService();
+  const publisher = new EventPublisher(bus);
+  const events: string[] = [];
+  const runtimeManager = createDefaultRuntimeManagerOverview({
+    checkedAt: "2026-04-13T00:00:00.000Z",
+    resources: [
+      {
+        id: "ollama-runtime",
+        kind: "local-ai-runtime",
+        label: "Ollama runtime",
+        status: "staged-update",
+        sourcePolicy: ["bundled", "download"],
+        updatePolicy: "stage-silently-apply-safely",
+        installedVersion: "0.20.5",
+        stagedVersion: "0.20.6",
+        updateAvailable: true,
+        summary: "Ollama update is staged.",
+        detail: "ChillClaw can apply this update when local AI is idle."
+      }
+    ]
+  });
+
+  bus.subscribe((event) => {
+    events.push(event.type);
+  });
+
+  publisher.publishRuntimeProgress({
+    resourceId: "ollama-runtime",
+    action: "stage-update",
+    phase: "downloading",
+    percent: 50,
+    message: "Downloading Ollama update.",
+    runtimeManager
+  });
+  publisher.publishRuntimeUpdateStaged({
+    resourceId: "ollama-runtime",
+    version: "0.20.6",
+    message: "Ollama update is staged.",
+    runtimeManager
+  });
+  publisher.publishRuntimeCompleted({
+    resourceId: "ollama-runtime",
+    action: "apply-update",
+    status: "completed",
+    message: "Ollama runtime updated.",
+    runtimeManager
+  });
+
+  assert.deepEqual(events, ["runtime.progress", "runtime.update-staged", "runtime.completed"]);
 });

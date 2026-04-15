@@ -28,7 +28,14 @@ public enum ChillClawClientError: Error, LocalizedError {
 public final class ChillClawAPIClient: @unchecked Sendable {
     private enum RequestTimeout {
         static let ping: TimeInterval = 2
+        static let runtimeInstall: TimeInterval = 86_400
         static let longRunning: TimeInterval = 1_200
+    }
+
+    private static func pathComponent(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private let session: URLSession
@@ -70,7 +77,7 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post(
             "/api/onboarding/runtime/install",
             body: InstallRequest(autoConfigure: true, forceLocal: forceLocal),
-            timeout: RequestTimeout.longRunning
+            timeout: RequestTimeout.runtimeInstall
         )
     }
 
@@ -79,7 +86,7 @@ public final class ChillClawAPIClient: @unchecked Sendable {
     }
 
     public func updateOnboardingRuntime() async throws -> SetupRunResponse {
-        try await post("/api/onboarding/runtime/update", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+        try await post("/api/onboarding/runtime/update", body: EmptyBody(), timeout: RequestTimeout.runtimeInstall)
     }
 
     public func confirmOnboardingPermissions() async throws -> OnboardingStateResponse {
@@ -107,6 +114,7 @@ public final class ChillClawAPIClient: @unchecked Sendable {
     }
 
     public func fetchOverview() async throws -> ProductOverview { try await get("/api/overview?fresh=1") }
+    public func fetchRuntimeResources() async throws -> RuntimeManagerOverview { try await get("/api/runtime/resources") }
     public func fetchDeploymentTargets() async throws -> DeploymentTargetsResponse { try await get("/api/deploy/targets?fresh=1") }
     public func fetchModelConfig() async throws -> ModelConfigOverview { try await get("/api/models/config?fresh=1") }
     public func fetchChannelConfig() async throws -> ChannelConfigOverview { try await get("/api/channels/config?fresh=1") }
@@ -177,6 +185,30 @@ public final class ChillClawAPIClient: @unchecked Sendable {
 
     public func repairLocalModelRuntime() async throws -> LocalModelRuntimeActionResponse {
         try await post("/api/models/local-runtime/repair", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func prepareRuntimeResource(_ resourceId: String) async throws -> RuntimeActionResponse {
+        try await post("/api/runtime/resources/\(Self.pathComponent(resourceId))/prepare", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func repairRuntimeResource(_ resourceId: String) async throws -> RuntimeActionResponse {
+        try await post("/api/runtime/resources/\(Self.pathComponent(resourceId))/repair", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func checkRuntimeResourceUpdate(_ resourceId: String) async throws -> RuntimeActionResponse {
+        try await post("/api/runtime/resources/\(Self.pathComponent(resourceId))/check-update", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func stageRuntimeResourceUpdate(_ resourceId: String) async throws -> RuntimeActionResponse {
+        try await post("/api/runtime/resources/\(Self.pathComponent(resourceId))/stage-update", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func applyRuntimeResourceUpdate(_ resourceId: String) async throws -> RuntimeActionResponse {
+        try await post("/api/runtime/resources/\(Self.pathComponent(resourceId))/apply-update", body: EmptyBody(), timeout: RequestTimeout.longRunning)
+    }
+
+    public func rollbackRuntimeResource(_ resourceId: String) async throws -> RuntimeActionResponse {
+        try await post("/api/runtime/resources/\(Self.pathComponent(resourceId))/rollback", body: EmptyBody(), timeout: RequestTimeout.longRunning)
     }
 
     public func replaceFallbackModels(entryIds: [String]) async throws -> ModelConfigActionResponse {

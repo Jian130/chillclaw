@@ -15,7 +15,8 @@ export {
   shouldResetStateAfterDeploymentUninstall
 } from "./routes/runtime-reset.js";
 
-const LONG_RUNNING_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
+const LONG_RUNNING_REQUEST_TIMEOUT_MS = 0;
+const RUNTIME_UPDATE_CHECK_INTERVAL_MS = Number(process.env.CHILLCLAW_RUNTIME_UPDATE_CHECK_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.writeHead(statusCode, {
@@ -103,6 +104,7 @@ export function startServer(port = 4545) {
       scope: "server.startServer.resumePendingLocalModelRuntime"
     });
   });
+  scheduleRuntimeUpdateStaging(context);
   const eventSocketServer = new WebSocketServer({ noServer: true });
 
   eventSocketServer.on("connection", (socket: WebSocket) => {
@@ -201,7 +203,7 @@ export function startServer(port = 4545) {
       sendJson(response, 500, { error: message });
     }
   });
-  // Managed runtime installs can exceed Node's 5-minute default on slow networks.
+  // Managed runtime installs can exceed any fixed request budget on slow networks.
   server.requestTimeout = LONG_RUNNING_REQUEST_TIMEOUT_MS;
 
   server.on("error", (error) => {
@@ -244,4 +246,23 @@ export function startServer(port = 4545) {
   });
 
   return server;
+}
+
+function scheduleRuntimeUpdateStaging(context: ReturnType<typeof createServerContext>): void {
+  const run = () => {
+    void context.runtimeManager.stageApprovedUpdates().catch((error) => {
+      void writeErrorLog("ChillClaw could not stage approved runtime updates in the background.", {
+        error: errorToLogDetails(error)
+      }, {
+        scope: "server.runtimeUpdateStaging"
+      });
+    });
+  };
+
+  run();
+
+  if (RUNTIME_UPDATE_CHECK_INTERVAL_MS > 0) {
+    const timer = setInterval(run, RUNTIME_UPDATE_CHECK_INTERVAL_MS);
+    timer.unref?.();
+  }
 }

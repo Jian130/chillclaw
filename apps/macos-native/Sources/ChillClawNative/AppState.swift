@@ -35,6 +35,8 @@ func shouldRefreshNativeOverviewForEvent(_ event: ChillClawEvent) -> Bool {
         return false
     case .localRuntimeProgress, .localRuntimeCompleted:
         return false
+    case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
+        return false
     case .deployCompleted, .gatewayStatus:
         return true
     case let .taskProgress(_, status, _):
@@ -54,6 +56,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
             return false
         case .localRuntimeProgress, .localRuntimeCompleted:
             return false
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
+            return false
         case .deployCompleted, .gatewayStatus:
             return true
         case let .taskProgress(_, status, _):
@@ -66,6 +70,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
             return false
         case .localRuntimeProgress, .localRuntimeCompleted:
+            return false
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return false
         case .deployCompleted, .gatewayStatus:
             return true
@@ -80,6 +86,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
             return false
         case .localRuntimeProgress, .localRuntimeCompleted:
             return false
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
+            return false
         case .channelSessionUpdated:
             return true
         case .configApplied, .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
@@ -92,6 +100,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
             return false
         case .localRuntimeProgress, .localRuntimeCompleted:
+            return false
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return false
         case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated, .configApplied:
             return false
@@ -106,6 +116,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
             return false
         case .localRuntimeProgress, .localRuntimeCompleted:
             return false
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
+            return false
         case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated:
             return false
         }
@@ -118,6 +130,8 @@ func shouldRefreshNativeSectionForEvent(_ event: ChillClawEvent, selectedSection
         case .overviewUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated:
             return false
         case .localRuntimeProgress, .localRuntimeCompleted:
+            return false
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return false
         case .chatStream, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .channelSessionUpdated:
             return false
@@ -280,6 +294,12 @@ final class ChillClawAppState {
         syncChatSendBlockReason()
     }
 
+    func applyRuntimeManagerOverview(_ runtimeManager: RuntimeManagerOverview) {
+        guard var overview else { return }
+        overview.runtimeManager = runtimeManager
+        applyOverviewSnapshot(overview)
+    }
+
     var requiresOnboarding: Bool {
         guard let overview else { return false }
         return !overview.firstRun.setupCompleted
@@ -356,6 +376,10 @@ final class ChillClawAppState {
             break
         case .localRuntimeProgress, .localRuntimeCompleted:
             break
+        case let .runtimeProgress(_, _, _, _, _, runtimeManager),
+            let .runtimeCompleted(_, _, _, _, runtimeManager),
+            let .runtimeUpdateStaged(_, _, _, runtimeManager):
+            applyRuntimeManagerOverview(runtimeManager)
         case .deployProgress, .deployCompleted, .gatewayStatus, .taskProgress, .chatStream, .channelSessionUpdated, .configApplied:
             break
         }

@@ -436,6 +436,36 @@ struct OnboardingTests {
     }
 
     @Test
+    func nativeOnboardingMapsRuntimeProgressIntoInstallProgress() {
+        let nodeProgress = nativeOnboardingInstallProgressForRuntimeResource(
+            resourceID: "node-npm-runtime",
+            action: "prepare",
+            percent: 55,
+            message: "Preparing Node.js and npm."
+        )
+        let openClawProgress = nativeOnboardingInstallProgressForRuntimeResource(
+            resourceID: "openclaw-runtime",
+            action: "prepare",
+            percent: 55,
+            message: "Installing OpenClaw."
+        )
+        let ignoredProgress = nativeOnboardingInstallProgressForRuntimeResource(
+            resourceID: "ollama-runtime",
+            action: "prepare",
+            percent: 55,
+            message: "Preparing Ollama."
+        )
+
+        #expect(nodeProgress?.phase == .installing)
+        #expect(nodeProgress?.percent == 54)
+        #expect(nodeProgress?.message == "Preparing Node.js and npm.")
+        #expect(openClawProgress?.phase == .installing)
+        #expect(openClawProgress?.percent == 68)
+        #expect(openClawProgress?.message == "Installing OpenClaw.")
+        #expect(ignoredProgress == nil)
+    }
+
+    @Test
     func advancePastInstallPersistsPermissionsStep() async throws {
         let recorder = NativeRequestRecorder()
         let session = await recorder.session { request in
@@ -1628,6 +1658,24 @@ struct OnboardingTests {
                 draftModelEntryID: nil,
                 summaryModelEntryID: nil,
                 localRuntime: makeLocalRuntime(recommendation: "local", status: "idle")
+            ) == .localSetup
+        )
+
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: false,
+                providerId: "",
+                selectedProviderPresent: false,
+                modelViewKind: .picker,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
+                localRuntime: makeLocalRuntime(
+                    recommendation: "local",
+                    status: "idle",
+                    activeInOpenClaw: false,
+                    managedEntryId: "stale-managed-entry"
+                )
             ) == .localSetup
         )
 
@@ -3779,6 +3827,113 @@ struct OnboardingTests {
     }
 
     @Test
+    func runInstallKeepsPollingAfterTimeoutWhileRuntimeIsStillInstalling() async throws {
+        let recorder = NativeRequestRecorder()
+        let stateReads = AsyncCounter()
+        let refreshedTargets = DeploymentTargetsResponse(
+            checkedAt: "2026-03-20T00:00:00.000Z",
+            targets: [
+                .init(
+                    id: "managed-local",
+                    title: "Managed Local OpenClaw",
+                    description: "ChillClaw manages this local OpenClaw install.",
+                    installMode: "managed-local",
+                    installed: true,
+                    installable: true,
+                    planned: true,
+                    recommended: true,
+                    active: true,
+                    version: "2026.3.14",
+                    desiredVersion: "2026.3.14",
+                    latestVersion: "2026.3.14",
+                    updateAvailable: false,
+                    summary: "Managed local OpenClaw 2026.3.14 is ready on this Mac.",
+                    updateSummary: nil,
+                    requirements: ["macOS"],
+                    requirementsSourceUrl: nil
+                )
+            ]
+        )
+        let recoveredOverview = makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14")
+
+        let session = await recorder.session { request in
+            let url = try #require(request.url)
+            switch (request.httpMethod ?? "GET", url.path) {
+            case ("POST", "/api/onboarding/runtime/install"):
+                throw URLError(.timedOut)
+            case ("GET", "/api/onboarding/state"):
+                let read = await stateReads.increment()
+                var state = makeOnboardingStateResponse(step: read >= 13 ? .permissions : .install)
+                if read >= 13 {
+                    state.draft.install = .init(
+                        installed: true,
+                        version: "2026.3.14",
+                        disposition: "installed-managed",
+                        updateAvailable: false,
+                        latestVersion: "2026.3.14",
+                        updateSummary: nil
+                    )
+                    state.summary.install = state.draft.install
+                }
+                let body = try JSONEncoder.chillClaw.encode(state)
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let read = await stateReads.value()
+                let overview = read >= 13
+                    ? recoveredOverview
+                    : makeOverview(setupCompleted: false, installed: false, running: false, version: nil)
+                let body = try JSONEncoder.chillClaw.encode(overview)
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/deploy/targets"):
+                let body = try JSONEncoder.chillClaw.encode(refreshedTargets)
+                return (jsonResponse(url: url), body)
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
+        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
+        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
+        let chatViewModel = ChillClawChatViewModel(transport: FakeChatTransport())
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: endpointStore,
+            processManager: processManager,
+            chatViewModel: chatViewModel,
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: false, installed: false, running: false, version: nil) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { emptyAITeamOverview() }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: false, installed: false, running: false, version: nil)
+        appState.deploymentTargets = .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: [])
+
+        let viewModel = NativeOnboardingViewModel(
+            appState: appState,
+            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+        )
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .install)
+
+        await viewModel.runInstall()
+
+        #expect(await stateReads.value() >= 13)
+        #expect(viewModel.currentStep == .permissions)
+        #expect(viewModel.pageError == nil)
+        #expect(viewModel.installBusy == false)
+    }
+
+    @Test
     func onboardingRefreshResourceMapsDaemonEventsByStep() {
         let installEvent = ChillClawEvent.deployCompleted(
             correlationId: "deploy-1",
@@ -4841,6 +4996,19 @@ private actor NativeLoadRecorder {
 
     func events() -> [String] {
         recorded
+    }
+}
+
+private actor AsyncCounter {
+    private var count = 0
+
+    func increment() -> Int {
+        count += 1
+        return count
+    }
+
+    func value() -> Int {
+        count
     }
 }
 

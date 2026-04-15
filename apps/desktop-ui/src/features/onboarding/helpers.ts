@@ -295,6 +295,60 @@ const INSTALL_PROGRESS_FALLBACKS: Record<ChillClawDeployPhase, number> = {
   "restarting-gateway": 94
 };
 
+const INSTALL_RUNTIME_PROGRESS_RANGES = {
+  "node-npm-runtime": { start: 46, end: 60 },
+  "openclaw-runtime": { start: 58, end: 76 }
+} as const;
+
+function clampPercent(value: number): number {
+  return Math.min(Math.max(value, 0), 100);
+}
+
+function scaleRuntimeInstallProgress(resourceId: keyof typeof INSTALL_RUNTIME_PROGRESS_RANGES, percent: number | undefined): number {
+  const range = INSTALL_RUNTIME_PROGRESS_RANGES[resourceId];
+  const runtimePercent = clampPercent(percent ?? 55);
+  return Math.round(range.start + (runtimePercent / 100) * (range.end - range.start));
+}
+
+function installPhaseForRuntimeAction(action: string): ChillClawDeployPhase {
+  return action === "apply-update" || action === "stage-update" ? "updating" : "installing";
+}
+
+export function mergeOnboardingInstallProgress(
+  current: OnboardingInstallProgressSnapshot | undefined,
+  next: OnboardingInstallProgressSnapshot
+): OnboardingInstallProgressSnapshot {
+  return {
+    phase: next.phase ?? current?.phase,
+    percent:
+      current?.percent === undefined || next.percent === undefined
+        ? next.percent ?? current?.percent
+        : Math.max(current.percent, next.percent),
+    message: next.message?.trim() || current?.message
+  };
+}
+
+export function onboardingInstallProgressFromRuntimeEvent(
+  event: ChillClawEvent
+): OnboardingInstallProgressSnapshot | undefined {
+  if (event.type !== "runtime.progress" && event.type !== "runtime.completed") {
+    return undefined;
+  }
+
+  if (event.resourceId !== "node-npm-runtime" && event.resourceId !== "openclaw-runtime") {
+    return undefined;
+  }
+
+  return {
+    phase: installPhaseForRuntimeAction(event.action),
+    percent: scaleRuntimeInstallProgress(
+      event.resourceId,
+      event.type === "runtime.completed" ? 100 : event.percent
+    ),
+    message: event.message
+  };
+}
+
 export function resolveOnboardingProviderId<T extends { id: string }>(
   currentProviderId: string,
   draftProviderId: string | undefined,

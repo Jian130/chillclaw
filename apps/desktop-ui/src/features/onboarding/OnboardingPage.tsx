@@ -80,6 +80,8 @@ import {
   applyPresetSkillSyncToOnboardingState,
   buildOnboardingChannelSaveValues,
   describeOnboardingLocalModelDownload,
+  mergeOnboardingInstallProgress,
+  onboardingInstallProgressFromRuntimeEvent,
   onboardingDestinationPath,
   resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingEmployeePresets,
@@ -654,12 +656,19 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     return subscribeToDaemonEvents((event) => {
-      if (currentStep === "install" && event.type === "deploy.progress") {
-        setInstallProgress({
-          phase: event.phase,
-          percent: event.percent,
-          message: event.message
-        });
+      if (currentStep === "install") {
+        const nextInstallProgress =
+          event.type === "deploy.progress"
+            ? {
+                phase: event.phase,
+                percent: event.percent,
+                message: event.message
+              }
+            : onboardingInstallProgressFromRuntimeEvent(event);
+
+        if (nextInstallProgress) {
+          setInstallProgress((current) => mergeOnboardingInstallProgress(current, nextInstallProgress));
+        }
       }
 
       if (event.type === "overview.updated") {

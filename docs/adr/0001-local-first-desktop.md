@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted, amended by [ADR 0004: Native macOS client over the local daemon](./0004-native-macos-client.md).
 
 ## Context
 
@@ -12,12 +12,12 @@ ChillClaw targets non-technical users who need installation, onboarding, task ex
 
 ChillClaw will use a local-first architecture:
 
-- a first-party UI served as a desktop-ready React application
+- a first-party UI initially served as a desktop-ready React application
 - a localhost daemon that owns orchestration, policy, health checks, recovery, and diagnostics
-- a future Tauri shell as packaging and OS integration layer
+- a future desktop shell as packaging and OS integration layer
 
 ## Consequences
 
 - The UI can iterate independently of the engine implementation
 - The daemon becomes the durable product control plane for future appliance deployments
-- Tauri packaging is deferred until the Rust toolchain is present, but the architecture remains compatible
+- The original React-first packaging direction was superseded by ADR 0004. The packaged macOS app now uses a native SwiftUI client over the same daemon, while the React UI remains the local web fallback and developer surface.

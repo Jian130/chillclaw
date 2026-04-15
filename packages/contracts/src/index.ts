@@ -231,6 +231,93 @@ export interface LocalModelRuntimeOverview {
   recoveryHint?: string;
 }
 
+export type RuntimeResourceId =
+  | "node-npm-runtime"
+  | "openclaw-runtime"
+  | "ollama-runtime"
+  | "local-model-catalog"
+  | `ollama-model:${string}`
+  | `runtime:${string}`;
+
+export type RuntimeResourceKind =
+  | "node-npm"
+  | "engine"
+  | "local-ai-runtime"
+  | "model-catalog"
+  | "model-weights"
+  | "local-ai-backend";
+
+export type RuntimeResourceStatus =
+  | "missing"
+  | "bundled-available"
+  | "installed"
+  | "staged-update"
+  | "updating"
+  | "ready"
+  | "degraded"
+  | "failed"
+  | "rollback-required";
+
+export type RuntimeSourcePolicy = "bundled" | "download" | "existing-managed";
+export type RuntimeUpdatePolicy = "none" | "manual" | "stage-silently-apply-safely";
+export type RuntimeAction =
+  | "prepare"
+  | "repair"
+  | "check-update"
+  | "stage-update"
+  | "apply-update"
+  | "rollback"
+  | "remove";
+export type RuntimeJobPhase =
+  | "checking"
+  | "resolving-source"
+  | "downloading"
+  | "verifying-artifact"
+  | "installing"
+  | "staging"
+  | "switching"
+  | "verifying-runtime"
+  | "rolling-back"
+  | "completed";
+
+export interface RuntimeResourceOverview {
+  id: RuntimeResourceId;
+  kind: RuntimeResourceKind;
+  label: string;
+  status: RuntimeResourceStatus;
+  sourcePolicy: RuntimeSourcePolicy[];
+  updatePolicy: RuntimeUpdatePolicy;
+  installedVersion?: string;
+  bundledVersion?: string;
+  desiredVersion?: string;
+  latestApprovedVersion?: string;
+  stagedVersion?: string;
+  activePath?: string;
+  updateAvailable: boolean;
+  blockingResourceIds?: RuntimeResourceId[];
+  summary: string;
+  detail: string;
+  lastCheckedAt?: string;
+  lastUpdatedAt?: string;
+  lastError?: string;
+}
+
+export interface RuntimeManagerOverview {
+  checkedAt: string;
+  resources: RuntimeResourceOverview[];
+  summary: string;
+  detail: string;
+}
+
+export interface RuntimeJobProgress {
+  resourceId: RuntimeResourceId;
+  action: RuntimeAction;
+  phase: RuntimeJobPhase;
+  percent?: number;
+  message: string;
+  runtimeManager: RuntimeManagerOverview;
+}
+
 export interface ModelConfigOverview {
   providers: ModelProviderConfig[];
   models: ModelCatalogEntry[];
@@ -1087,6 +1174,30 @@ export type ChillClawEvent =
       localRuntime: LocalModelRuntimeOverview;
     }
   | {
+      type: "runtime.progress";
+      resourceId: RuntimeResourceId;
+      action: RuntimeAction;
+      phase: RuntimeJobPhase;
+      percent?: number;
+      message: string;
+      runtimeManager: RuntimeManagerOverview;
+    }
+  | {
+      type: "runtime.completed";
+      resourceId: RuntimeResourceId;
+      action: RuntimeAction;
+      status: "completed" | "failed";
+      message: string;
+      runtimeManager: RuntimeManagerOverview;
+    }
+  | {
+      type: "runtime.update-staged";
+      resourceId: RuntimeResourceId;
+      version: string;
+      message: string;
+      runtimeManager: RuntimeManagerOverview;
+    }
+  | {
       type: "config.applied";
       resource: ChillClawConfigResource;
       summary: string;
@@ -1105,6 +1216,7 @@ export interface ProductOverview {
   installChecks: InstallCheck[];
   channelSetup: ChannelSetupOverview;
   localRuntime?: LocalModelRuntimeOverview;
+  runtimeManager: RuntimeManagerOverview;
   profiles: UserProfile[];
   templates: TaskTemplate[];
   healthChecks: HealthCheckResult[];
@@ -1207,6 +1319,15 @@ export interface LocalModelRuntimeActionResponse extends MutationSyncMeta {
   localRuntime: LocalModelRuntimeOverview;
   modelConfig: ModelConfigOverview;
   overview: ProductOverview;
+}
+
+export interface RuntimeActionResponse extends MutationSyncMeta {
+  action: RuntimeAction;
+  status: "completed" | "failed";
+  message: string;
+  resource: RuntimeResourceOverview;
+  runtimeManager: RuntimeManagerOverview;
+  overview?: ProductOverview;
 }
 
 export interface SetupRunResponse {
@@ -1470,9 +1591,95 @@ export function createDefaultLocalModelRuntimeOverview(): LocalModelRuntimeOverv
   };
 }
 
+export function createDefaultRuntimeManagerOverview(options?: {
+  checkedAt?: string;
+  resources?: RuntimeResourceOverview[];
+}): RuntimeManagerOverview {
+  const checkedAt = options?.checkedAt ?? new Date().toISOString();
+  const resources =
+    options?.resources ?? defaultRuntimeResources(checkedAt);
+  const stagedCount = resources.filter((resource) => resource.status === "staged-update").length;
+  const failedCount = resources.filter(
+    (resource) => resource.status === "failed" || resource.status === "rollback-required"
+  ).length;
+  const readyCount = resources.filter((resource) => resource.status === "ready").length;
+
+  return {
+    checkedAt,
+    resources,
+    summary:
+      failedCount > 0
+        ? "Some managed prerequisites need repair."
+        : stagedCount > 0
+          ? "Runtime updates are ready to apply."
+          : readyCount === resources.length
+            ? "All managed prerequisites are ready."
+            : "ChillClaw has not prepared every managed prerequisite yet.",
+    detail:
+      "ChillClaw manages pinned runtimes through a curated manifest, stages approved updates in the background, and applies them only when it is safe."
+  };
+}
+
+function defaultRuntimeResources(checkedAt: string): RuntimeResourceOverview[] {
+  return [
+    {
+      id: "node-npm-runtime",
+      kind: "node-npm",
+      label: "Node.js and npm runtime",
+      status: "missing",
+      sourcePolicy: ["bundled", "download"],
+      updatePolicy: "stage-silently-apply-safely",
+      desiredVersion: "22.22.2",
+      updateAvailable: false,
+      summary: "Node.js and npm have not been prepared yet.",
+      detail: "ChillClaw uses its managed Node.js and npm runtime instead of relying on whatever is on PATH.",
+      lastCheckedAt: checkedAt
+    },
+    {
+      id: "openclaw-runtime",
+      kind: "engine",
+      label: "OpenClaw runtime",
+      status: "missing",
+      sourcePolicy: ["bundled", "download"],
+      updatePolicy: "stage-silently-apply-safely",
+      blockingResourceIds: ["node-npm-runtime"],
+      updateAvailable: false,
+      summary: "OpenClaw has not been prepared yet.",
+      detail: "ChillClaw installs and updates the managed OpenClaw runtime through the daemon.",
+      lastCheckedAt: checkedAt
+    },
+    {
+      id: "ollama-runtime",
+      kind: "local-ai-runtime",
+      label: "Ollama runtime",
+      status: "missing",
+      sourcePolicy: ["bundled", "download"],
+      updatePolicy: "stage-silently-apply-safely",
+      desiredVersion: "0.20.6",
+      updateAvailable: false,
+      summary: "Ollama has not been prepared yet.",
+      detail: "ChillClaw manages the Ollama CLI separately from downloaded model weights.",
+      lastCheckedAt: checkedAt
+    },
+    {
+      id: "local-model-catalog",
+      kind: "model-catalog",
+      label: "Local model catalog",
+      status: "missing",
+      sourcePolicy: ["bundled", "download"],
+      updatePolicy: "stage-silently-apply-safely",
+      updateAvailable: false,
+      summary: "Local model metadata has not been prepared yet.",
+      detail: "Catalog updates refresh model metadata only. They never download model weights.",
+      lastCheckedAt: checkedAt
+    }
+  ];
+}
+
 export function createDefaultProductOverview(options?: {
   appVersion?: string;
   appUpdate?: AppUpdateStatus;
+  runtimeManager?: RuntimeManagerOverview;
 }): ProductOverview {
   const now = new Date().toISOString();
   const appVersion = options?.appVersion?.trim() || "0.0.0";
@@ -1604,6 +1811,7 @@ export function createDefaultProductOverview(options?: {
       gatewaySummary: "Next recommended channel: Telegram."
     },
     localRuntime: createDefaultLocalModelRuntimeOverview(),
+    runtimeManager: options?.runtimeManager ?? createDefaultRuntimeManagerOverview({ checkedAt: now }),
     profiles: defaultProfiles,
     templates: defaultTemplates,
     healthChecks: [

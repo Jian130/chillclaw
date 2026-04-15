@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelConfigOverview, ProductOverview } from "@chillclaw/contracts";
+import { createDefaultRuntimeManagerOverview, type ModelConfigOverview, type ProductOverview } from "@chillclaw/contracts";
 
 import DashboardPage, { connectedModelCount, connectedModelDetail } from "./DashboardPage.js";
 
@@ -117,6 +117,7 @@ describe("DashboardPage model metrics", () => {
         gatewayStarted: false,
         gatewaySummary: ""
       },
+      runtimeManager: createDefaultRuntimeManagerOverview(),
       healthChecks: [],
       recentTasks: [],
       recoveryActions: [],
@@ -199,6 +200,7 @@ describe("DashboardPage model metrics", () => {
             summary: "Local AI is ready on this Mac.",
             detail: "OpenClaw is connected to the local runtime."
           },
+          runtimeManager: createDefaultRuntimeManagerOverview(),
           healthChecks: [],
           recentTasks: [],
           recoveryActions: [],

@@ -19,6 +19,8 @@ This document lists the current daemon HTTP surface after the route-module refac
 | `GET` | `/api/ping` | route module | Basic daemon reachability check. |
 | `GET` | `/api/events` | server shell + route module | Reject plain HTTP and instruct clients to use WebSocket upgrade. |
 | `GET` | `/api/overview` | `OverviewService` | Return the product overview used by app shells and dashboards. |
+| `GET` | `/api/app/update` | `AppUpdateService` | Return packaged app update status for settings and overview surfaces. |
+| `POST` | `/api/app/update/check` | `AppUpdateService` + `OverviewService` | Check GitHub release metadata for app updates and publish refreshed overview state. |
 | `GET` | `/api/deploy/targets` | `adapter.instances` | List deployment targets and runtime install choices. |
 | `POST` | `/api/deploy/targets/:targetId/install` | `adapter.instances` + `EventPublisher` | Install the selected OpenClaw runtime target and publish deploy progress/completion events. |
 | `POST` | `/api/deploy/targets/:targetId/update` | `adapter.instances` + `EventPublisher` | Update the selected OpenClaw runtime target and publish deploy events. |
@@ -37,6 +39,7 @@ This document lists the current daemon HTTP surface after the route-module refac
 | `POST` | `/api/plugins/:pluginId/update` | `PluginService` | Update a managed plugin. |
 | `DELETE` | `/api/plugins/:pluginId` | `PluginService` | Remove a managed plugin. |
 | `POST` | `/api/tasks` | `TaskService` | Run an engine task through the gateway/task path. |
+| `POST` | `/api/engine/update` | `adapter.instances` | Run the engine update flow. |
 | `POST` | `/api/update` | `adapter.instances` | Run the general engine update flow. |
 | `GET` | `/api/service/status` | `AppServiceManager` | Report packaged daemon service status. |
 | `POST` | `/api/service/install` | `AppServiceManager` + `OverviewService` | Install the packaged app service and return refreshed overview data. |
@@ -46,6 +49,18 @@ This document lists the current daemon HTTP surface after the route-module refac
 | `POST` | `/api/app/uninstall` | `AppControlService` | Run packaged app uninstall behavior. |
 | `GET` | `/api/diagnostics` | `adapter.instances` | Export a diagnostics bundle and write it into the ChillClaw data directory. |
 | `POST` | `/api/recovery/:actionId` | `OverviewService` + `adapter.instances` | Resolve a recovery action from overview metadata and execute repair. |
+
+## `routes/runtime.ts`
+
+| Method | Path | Primary owner | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/runtime/resources` | `RuntimeManager` | Return daemon-owned prerequisite status for Node/npm, managed OpenClaw, Ollama, and local model catalog metadata. |
+| `POST` | `/api/runtime/resources/:resourceId/prepare` | `RuntimeManager` + `EventPublisher` | Prepare a prerequisite from packaged artifacts or the approved download fallback. |
+| `POST` | `/api/runtime/resources/:resourceId/repair` | `RuntimeManager` + `EventPublisher` | Re-run provider preparation for a broken prerequisite. |
+| `POST` | `/api/runtime/resources/:resourceId/check-update` | `RuntimeManager` | Check the curated runtime update manifest for a resource. |
+| `POST` | `/api/runtime/resources/:resourceId/stage-update` | `RuntimeManager` + `EventPublisher` | Stage an approved runtime update without switching the active install. |
+| `POST` | `/api/runtime/resources/:resourceId/apply-update` | `RuntimeManager` + `EventPublisher` | Apply a staged runtime update and roll back automatically when provider verification fails. |
+| `POST` | `/api/runtime/resources/:resourceId/rollback` | `RuntimeManager` + `EventPublisher` | Restore the previous recorded runtime version after a failed apply. |
 
 ## `routes/models.ts`
 
@@ -61,6 +76,8 @@ This document lists the current daemon HTTP surface after the route-module refac
 | `GET` | `/api/models/auth/session/:sessionId` | `adapter.config` | Read the current model auth session state. |
 | `POST` | `/api/models/auth/session/:sessionId/input` | `adapter.config` + `EventPublisher` | Submit follow-up input into a model auth session. |
 | `POST` | `/api/models/default` | `adapter.config` + `EventPublisher` | Set the runtime default model by model key. |
+| `POST` | `/api/models/local-runtime/install` | `LocalModelRuntimeService` | Install or resume the managed local Ollama model runtime path and return updated model/overview state. |
+| `POST` | `/api/models/local-runtime/repair` | `LocalModelRuntimeService` | Repair the managed local model runtime path and return updated model/overview state. |
 
 ## `routes/onboarding.ts`
 
@@ -142,4 +159,5 @@ These routes are still registered so older clients fail explicitly instead of fa
 
 - The server shell owns transport concerns: request parsing, route resolution, cache invalidation, WebSocket upgrades, and static asset fallback.
 - Most ChillClaw business orchestration lives in daemon services such as `OverviewService`, `OnboardingService`, `ChannelSetupService`, `ChatService`, `SkillService`, `PluginService`, and `TaskService`.
+- Generic prerequisite lifecycle lives in `RuntimeManager`; feature services and adapters should ask it for Node/npm, managed OpenClaw, Ollama, and local model catalog resources instead of adding separate installer paths.
 - Engine-specific behavior stays behind `EngineAdapter` and its OpenClaw implementation.

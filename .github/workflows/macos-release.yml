@@ -74,7 +74,12 @@ jobs:
       - name: Run native macOS tests
         run: npm run test:mac-native
 
+      - name: Prepare bundled CLI runtime artifacts
+        run: npm run prepare:runtime-artifacts
+
       - name: Stage macOS app bundle
+        env:
+          CHILLCLAW_REQUIRE_CLI_RUNTIME_ARTIFACTS: "1"
         run: npm run build:mac-installer -- --skip-build --stage-only
 
       - name: Install Apple signing certificates
@@ -101,6 +106,11 @@ jobs:
         env:
           APP_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APP_IDENTITY }}
         run: |
+          while IFS= read -r -d '' RUNTIME_EXECUTABLE; do
+            if file "$RUNTIME_EXECUTABLE" | grep -q 'Mach-O'; then
+              codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$RUNTIME_EXECUTABLE"
+            fi
+          done < <(find "$APP_PATH/Contents/Resources/app/runtime-artifacts" -type f -perm -111 -print0)
           codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp --entitlements "$DAEMON_ENTITLEMENTS" "$APP_PATH/Contents/Resources/runtime/chillclaw-daemon"
           codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$APP_PATH/Contents/MacOS/ChillClaw"
           codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp "$APP_PATH"

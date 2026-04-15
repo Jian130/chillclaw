@@ -5,11 +5,13 @@ import { channelsRoutes } from "./channels.js";
 import { chatRoutes } from "./chat.js";
 import { modelsRoutes } from "./models.js";
 import { onboardingRoutes } from "./onboarding.js";
+import { runtimeRoutes } from "./runtime.js";
 import { systemRoutes } from "./system.js";
 
 export const routeDefinitions: RouteDefinition[] = [
   ...systemRoutes,
   ...modelsRoutes,
+  ...runtimeRoutes,
   ...onboardingRoutes,
   ...channelsRoutes,
   ...catalogRoutes,

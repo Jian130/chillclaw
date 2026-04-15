@@ -9,6 +9,7 @@ import {
 } from "@chillclaw/contracts";
 
 import type { EngineAdapter } from "../engine/adapter.js";
+import type { RuntimeManager } from "../runtime-manager/runtime-manager.js";
 import { AppServiceManager } from "./app-service-manager.js";
 import { AppUpdateService } from "./app-update-service.js";
 import { getDefaultAppSupportDir } from "../runtime-paths.js";
@@ -26,7 +27,8 @@ export class OverviewService {
     private readonly store: StateStore,
     private readonly appServiceManager = new AppServiceManager(),
     private readonly appUpdateService = new AppUpdateService(),
-    private readonly localModelRuntimeService?: LocalModelRuntimeService
+    private readonly localModelRuntimeService?: LocalModelRuntimeService,
+    private readonly runtimeManager?: RuntimeManager
   ) {}
 
   async getOverview(options?: OverviewReadOptions): Promise<ProductOverview> {
@@ -40,6 +42,7 @@ export class OverviewService {
     const healthChecks = await this.adapter.gateway.healthCheck(state.selectedProfileId);
     const appService = await this.appServiceManager.getStatus();
     const installChecks = await this.getInstallChecks(base.installSpec.prerequisites);
+    const runtimeManager = this.runtimeManager ? await this.runtimeManager.getOverview() : base.runtimeManager;
     const liveWhatsapp = await this.adapter.config.getChannelState("whatsapp");
     const storedChannels = state.channelOnboarding?.channels ?? {};
     const baseChannels = Object.fromEntries(base.channelSetup.channels.map((channel) => [channel.id, channel])) as Record<
@@ -111,6 +114,7 @@ export class OverviewService {
           : "All channel setup steps are complete. Restart the gateway to load every channel."
       },
       localRuntime,
+      runtimeManager,
       healthChecks: mergedHealthChecks,
       recoveryActions,
       recentTasks: state.tasks.slice(-5).reverse(),

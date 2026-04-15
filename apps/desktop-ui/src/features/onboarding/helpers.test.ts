@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createDefaultRuntimeManagerOverview } from "@chillclaw/contracts";
 import type {
   ChannelConfigOverview,
   ChannelSession,
@@ -16,6 +17,7 @@ import {
   describeOnboardingLocalModelDownload,
   onboardingDestinationPath,
   onboardingRefreshResourceForEvent,
+  onboardingInstallProgressFromRuntimeEvent,
   resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingModelSetupVariant,
   resolveOnboardingModelStepMode,
@@ -1421,6 +1423,53 @@ describe("onboarding helpers", () => {
       kind: "complete",
       version: "2026.3.13"
     });
+  });
+
+  it("maps managed runtime progress into onboarding install progress", () => {
+    const runtimeManager = createDefaultRuntimeManagerOverview({
+      checkedAt: "2026-04-13T00:00:00.000Z",
+      resources: []
+    });
+    const nodeProgress = onboardingInstallProgressFromRuntimeEvent({
+      type: "runtime.progress",
+      resourceId: "node-npm-runtime",
+      action: "prepare",
+      phase: "installing",
+      percent: 55,
+      message: "Preparing Node.js and npm.",
+      runtimeManager
+    });
+    const openClawProgress = onboardingInstallProgressFromRuntimeEvent({
+      type: "runtime.progress",
+      resourceId: "openclaw-runtime",
+      action: "prepare",
+      phase: "installing",
+      percent: 55,
+      message: "Installing OpenClaw.",
+      runtimeManager
+    });
+
+    expect(nodeProgress).toEqual({
+      phase: "installing",
+      percent: 54,
+      message: "Preparing Node.js and npm."
+    });
+    expect(openClawProgress).toEqual({
+      phase: "installing",
+      percent: 68,
+      message: "Installing OpenClaw."
+    });
+    expect(
+      onboardingInstallProgressFromRuntimeEvent({
+        type: "runtime.progress",
+        resourceId: "ollama-runtime",
+        action: "prepare",
+        phase: "installing",
+        percent: 55,
+        message: "Preparing Ollama.",
+        runtimeManager
+      })
+    ).toBeUndefined();
   });
 
   it("advances to the permissions step when the user confirms an existing OpenClaw install", () => {

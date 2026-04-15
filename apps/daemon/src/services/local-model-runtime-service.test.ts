@@ -16,6 +16,7 @@ import {
   resolveDiskProbePath,
   type PersistedLocalModelRuntimeState
 } from "./local-model-runtime-service.js";
+import { getManagedOllamaCliPath } from "../runtime-paths.js";
 
 type LocalModelRuntimeAccess = ConstructorParameters<typeof LocalModelRuntimeService>[0];
 
@@ -80,7 +81,7 @@ function createHarness(overrides: Partial<LocalModelRuntimeAccess> = {}) {
       managed: false
     }),
     installManagedRuntime: async () => ({
-      command: "/tmp/chillclaw/Ollama.app/Contents/Resources/ollama",
+      command: "/tmp/chillclaw/ollama-runtime/bin/ollama",
       source: "managed-install",
       managed: true
     }),
@@ -372,6 +373,11 @@ test("resolveInstalledRuntimeCandidate accepts a PATH ollama executable when pre
   } finally {
     process.env.PATH = originalPath;
   }
+});
+
+test("managed Ollama runtime path points to a CLI-only binary", () => {
+  assert.match(getManagedOllamaCliPath(), /ollama-runtime\/bin\/ollama$/u);
+  assert.doesNotMatch(getManagedOllamaCliPath(), /Ollama\.app/u);
 });
 
 test("resolveDiskProbePath falls back to the nearest existing parent for first-run local runtime paths", async () => {

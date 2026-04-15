@@ -1,5 +1,7 @@
 import { createEngineAdapter } from "../engine/registry.js";
 import { createDefaultSecretsAdapter } from "../platform/macos-keychain-secrets-adapter.js";
+import { createRuntimeManager } from "../runtime-manager/default-runtime-manager.js";
+import type { RuntimeManager } from "../runtime-manager/runtime-manager.js";
 import { AppControlService } from "../services/app-control-service.js";
 import { AppServiceManager } from "../services/app-service-manager.js";
 import { AppUpdateService } from "../services/app-update-service.js";
@@ -24,6 +26,7 @@ export interface ServerContext {
   store: StateStore;
   appServiceManager: AppServiceManager;
   appUpdateService: AppUpdateService;
+  runtimeManager: RuntimeManager;
   overviewService: OverviewService;
   localModelRuntimeService: LocalModelRuntimeService;
   eventBus: EventBusService;
@@ -41,15 +44,16 @@ export interface ServerContext {
 }
 
 export function createServerContext(setServerStop: () => void): ServerContext {
-  const adapter = createEngineAdapter();
   const secrets = createDefaultSecretsAdapter();
   const store = new StateStore();
   const appServiceManager = new AppServiceManager();
   const appUpdateService = new AppUpdateService();
   const eventBus = new EventBusService();
   const eventPublisher = new EventPublisher(eventBus);
-  const localModelRuntimeService = createLocalModelRuntimeService(adapter, store, eventPublisher);
-  const overviewService = new OverviewService(adapter, store, appServiceManager, appUpdateService, localModelRuntimeService);
+  const runtimeManager = createRuntimeManager(eventPublisher);
+  const adapter = createEngineAdapter({ runtimeManager });
+  const localModelRuntimeService = createLocalModelRuntimeService(adapter, store, eventPublisher, runtimeManager);
+  const overviewService = new OverviewService(adapter, store, appServiceManager, appUpdateService, localModelRuntimeService, runtimeManager);
   const presetSkillService = new PresetSkillService(adapter, store, eventPublisher);
   const channelSetupService = new ChannelSetupService(adapter, store, eventPublisher, secrets);
   const pluginService = new PluginService(adapter, eventPublisher);
@@ -76,6 +80,7 @@ export function createServerContext(setServerStop: () => void): ServerContext {
     store,
     appServiceManager,
     appUpdateService,
+    runtimeManager,
     overviewService,
     localModelRuntimeService,
     eventBus,

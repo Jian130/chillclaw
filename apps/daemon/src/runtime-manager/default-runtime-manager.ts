@@ -1,0 +1,664 @@
+import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, delimiter, dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import type { RuntimeSourcePolicy } from "@chillclaw/contracts";
+
+import { ensureManagedNodeNpmInvocation, resolveManagedNodeNpmInvocation } from "../platform/managed-node-runtime.js";
+import { probeCommand, runCommand } from "../platform/cli-runner.js";
+import {
+  getManagedNodeBinDir,
+  getManagedNodeBinPath,
+  getManagedNodeDir,
+  getManagedNodeDistName,
+  getManagedNodeNpmBinPath,
+  getManagedNodeVersion,
+  getLegacyManagedOllamaAppPath,
+  getManagedOllamaBinDir,
+  getManagedOllamaCliPath,
+  getManagedOllamaDir,
+  getManagedOllamaModelsDir,
+  getManagedOpenClawBinPath,
+  getManagedOpenClawDir,
+  getRuntimeBundleDir,
+  getRuntimeManagerStatePath,
+  getRuntimeManifestPath,
+  getRuntimeUpdateFeedUrl
+} from "../runtime-paths.js";
+import { logDevelopmentCommand } from "../services/logger.js";
+import type { EventPublisher } from "../services/event-publisher.js";
+import { RuntimeManager } from "./runtime-manager.js";
+import type {
+  RuntimeArtifactManifest,
+  RuntimeManifestDocument,
+  RuntimeManagerState,
+  RuntimeResourceManifest,
+  RuntimeResourceProvider
+} from "./types.js";
+
+const DEFAULT_OPENCLAW_VERSION = process.env.CHILLCLAW_MANAGED_OPENCLAW_VERSION?.trim() || "latest";
+const DEFAULT_OLLAMA_VERSION = process.env.CHILLCLAW_MANAGED_OLLAMA_VERSION?.trim() || "0.20.6";
+const DEFAULT_OLLAMA_CLI_ARCHIVE_NAME = "ollama-darwin.tgz";
+
+export function createRuntimeManager(eventPublisher?: EventPublisher): RuntimeManager {
+  return new RuntimeManager({
+    loadManifest: loadPackagedRuntimeManifest,
+    loadUpdateManifest: loadRuntimeUpdateManifest,
+    readState: readRuntimeManagerState,
+    writeState: writeRuntimeManagerState,
+    providers: [
+      createNodeRuntimeProvider(),
+      createOpenClawRuntimeProvider(),
+      createOllamaRuntimeProvider(),
+      createLocalModelCatalogProvider()
+    ],
+    publishProgress: (args) => eventPublisher?.publishRuntimeProgress(args),
+    publishCompleted: (args) => eventPublisher?.publishRuntimeCompleted(args),
+    publishUpdateStaged: (args) => eventPublisher?.publishRuntimeUpdateStaged(args)
+  });
+}
+
+async function loadPackagedRuntimeManifest(): Promise<RuntimeManifestDocument> {
+  const manifestPath = getRuntimeManifestPath();
+  if (!manifestPath) {
+    return defaultRuntimeManifest();
+  }
+
+  try {
+    return resolveManifestArtifactPaths(
+      JSON.parse(await readFile(manifestPath, "utf8")) as RuntimeManifestDocument,
+      dirname(manifestPath)
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return defaultRuntimeManifest();
+    }
+    throw error;
+  }
+}
+
+function resolveManifestArtifactPaths(document: RuntimeManifestDocument, baseDir: string): RuntimeManifestDocument {
+  return {
+    ...document,
+    resources: document.resources.map((resource) => ({
+      ...resource,
+      artifacts: resource.artifacts.map((artifact) => ({
+        ...artifact,
+        path: artifact.path && !isAbsolute(artifact.path) ? resolve(baseDir, artifact.path) : artifact.path
+      }))
+    }))
+  };
+}
+
+async function loadRuntimeUpdateManifest(): Promise<RuntimeManifestDocument> {
+  const feedUrl = getRuntimeUpdateFeedUrl();
+  if (!feedUrl) {
+    return {
+      resources: []
+    };
+  }
+
+  if (feedUrl.startsWith("http://") || feedUrl.startsWith("https://")) {
+    const response = await fetch(feedUrl, {
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok) {
+      throw new Error(`Runtime update feed returned HTTP ${response.status}.`);
+    }
+    return (await response.json()) as RuntimeManifestDocument;
+  }
+
+  const path = feedUrl.startsWith("file://") ? fileURLToPath(feedUrl) : feedUrl;
+  return JSON.parse(await readFile(path, "utf8")) as RuntimeManifestDocument;
+}
+
+async function readRuntimeManagerState(): Promise<RuntimeManagerState | undefined> {
+  try {
+    return JSON.parse(await readFile(getRuntimeManagerStatePath(), "utf8")) as RuntimeManagerState;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function writeRuntimeManagerState(state: RuntimeManagerState): Promise<void> {
+  const statePath = getRuntimeManagerStatePath();
+  await mkdir(dirname(statePath), { recursive: true });
+  const tempPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, JSON.stringify(state, null, 2));
+  await rename(tempPath, statePath);
+}
+
+function defaultRuntimeManifest(): RuntimeManifestDocument {
+  const bundleDir = getRuntimeBundleDir();
+  const nodeArchiveName = `${getManagedNodeDistName()}.tar.gz`;
+  const now = new Date().toISOString();
+
+  return {
+    schemaVersion: 1,
+    generatedAt: now,
+    resources: [
+      {
+        id: "node-npm-runtime",
+        kind: "node-npm",
+        label: "Node.js and npm runtime",
+        version: getManagedNodeVersion(),
+        platforms: [
+          {
+            os: "darwin",
+            arch: process.arch === "x64" ? "x64" : "arm64"
+          }
+        ],
+        sourcePolicy: ["bundled", "download"],
+        updatePolicy: "stage-silently-apply-safely",
+        installDir: getManagedNodeDir(),
+        activePath: getManagedNodeNpmBinPath(),
+        artifacts: [
+          ...(bundleDir
+            ? [
+                {
+                  source: "bundled" as const,
+                  format: "directory" as const,
+                  path: resolve(bundleDir, "node", getManagedNodeDistName())
+                }
+              ]
+            : []),
+          {
+            source: "download",
+            format: "tgz",
+            url: `https://nodejs.org/dist/v${getManagedNodeVersion()}/${nodeArchiveName}`
+          }
+        ],
+        dependencies: []
+      },
+      {
+        id: "openclaw-runtime",
+        kind: "engine",
+        label: "OpenClaw runtime",
+        version: DEFAULT_OPENCLAW_VERSION,
+        platforms: [
+          {
+            os: "darwin",
+            arch: "*"
+          }
+        ],
+        sourcePolicy: ["bundled", "download"],
+        updatePolicy: "stage-silently-apply-safely",
+        installDir: getManagedOpenClawDir(),
+        activePath: getManagedOpenClawBinPath(),
+        artifacts: bundleDir
+          ? [
+              {
+                source: "bundled",
+                format: "tgz",
+                path: resolve(bundleDir, "openclaw", "openclaw-runtime.tgz")
+              }
+            ]
+          : [],
+        dependencies: ["node-npm-runtime"]
+      },
+      {
+        id: "ollama-runtime",
+        kind: "local-ai-runtime",
+        label: "Ollama runtime",
+        version: DEFAULT_OLLAMA_VERSION,
+        platforms: [
+          {
+            os: "darwin",
+            arch: "arm64"
+          }
+        ],
+        sourcePolicy: ["bundled", "download"],
+        updatePolicy: "stage-silently-apply-safely",
+        installDir: getManagedOllamaDir(),
+        activePath: getManagedOllamaCliPath(),
+        artifacts: [
+          ...(bundleDir
+            ? [
+                {
+                  source: "bundled" as const,
+                  format: "file" as const,
+                  path: resolve(bundleDir, "ollama", "ollama")
+                }
+              ]
+            : []),
+          {
+            source: "download",
+            format: "tgz",
+            url: defaultOllamaCliArchiveUrl(DEFAULT_OLLAMA_VERSION)
+          }
+        ],
+        dependencies: []
+      },
+      {
+        id: "local-model-catalog",
+        kind: "model-catalog",
+        label: "Local model catalog",
+        version: "2026.04.13",
+        platforms: [
+          {
+            os: "*",
+            arch: "*"
+          }
+        ],
+        sourcePolicy: ["bundled", "download"],
+        updatePolicy: "stage-silently-apply-safely",
+        installDir: getManagedOllamaDir(),
+        artifacts: bundleDir
+          ? [
+              {
+                source: "bundled",
+                format: "json",
+                path: resolve(bundleDir, "models", "local-model-catalog.json")
+              }
+            ]
+          : [],
+        dependencies: []
+      }
+    ]
+  };
+}
+
+function createNodeRuntimeProvider(): RuntimeResourceProvider {
+  return {
+    id: "node-npm-runtime",
+    async inspect() {
+      const invocation = await resolveManagedNodeNpmInvocation();
+      const nodeReady = invocation
+        ? await probeCommand(getManagedNodeBinPath(), ["--version"])
+        : false;
+      return {
+        installed: Boolean(invocation),
+        ready: Boolean(invocation && nodeReady),
+        version: invocation ? await probeVersion(getManagedNodeBinPath(), ["--version"]) : undefined,
+        activePath: invocation?.command,
+        summary: invocation && nodeReady ? "Node.js and npm are ready." : "Node.js and npm are not prepared yet.",
+        detail: invocation && nodeReady
+          ? "ChillClaw verified the managed Node.js and npm binaries."
+          : "ChillClaw will prepare its managed Node.js and npm runtime before installing OpenClaw."
+      };
+    },
+    async prepare(context) {
+      const runtimeDir = context.source === "bundled" && context.artifact?.format === "directory"
+        ? context.artifact.path
+        : undefined;
+      const archiveUrl = context.source === "bundled" && context.artifact?.path && context.artifact.format !== "directory"
+        ? pathToFileURL(context.artifact.path).toString()
+        : context.artifact?.url;
+      const invocation = await ensureManagedNodeNpmInvocation({
+        archiveUrl,
+        runtimeDir
+      });
+      const nodeVersion = await probeVersion(getManagedNodeBinPath(), ["--version"]);
+      const npmVersion = await probeVersion(invocation.command, ["--version"]);
+      return {
+        version: nodeVersion?.replace(/^v/, "") ?? context.manifest.version,
+        activePath: invocation.command,
+        changed: true,
+        summary: "Node.js and npm are ready.",
+        detail: `ChillClaw verified Node.js ${nodeVersion ?? context.manifest.version} and npm ${npmVersion ?? "available"}.`
+      };
+    },
+    async applyUpdate(context) {
+      return this.prepare({
+        manifest: context.staged,
+        source: providerSourceFor(context.staged, context.state?.source),
+        artifact: providerArtifactFor(context.staged, context.state?.source),
+        state: context.state
+      });
+    },
+    async rollback(context) {
+      if (!context.previousVersion) {
+        return {
+          changed: false,
+          summary: "No previous Node.js runtime was recorded.",
+          detail: "ChillClaw did not find a previous managed Node.js runtime to restore."
+        };
+      }
+      return {
+        version: context.previousVersion,
+        activePath: getManagedNodeNpmBinPath(),
+        changed: false,
+        summary: "Node.js rollback recorded.",
+        detail: "ChillClaw restored the previous Node.js runtime pointer."
+      };
+    },
+    async remove() {
+      await rm(getManagedNodeDir(), { recursive: true, force: true });
+      return {
+        changed: true,
+        summary: "Node.js runtime removed.",
+        detail: "ChillClaw removed the managed Node.js runtime."
+      };
+    }
+  };
+}
+
+function createOpenClawRuntimeProvider(): RuntimeResourceProvider {
+  return {
+    id: "openclaw-runtime",
+    async inspect() {
+      const ready = await probeCommand(getManagedOpenClawBinPath(), ["--version"]);
+      return {
+        installed: ready,
+        ready,
+        version: ready ? await probeVersion(getManagedOpenClawBinPath(), ["--version"]) : undefined,
+        activePath: ready ? getManagedOpenClawBinPath() : undefined,
+        summary: ready ? "OpenClaw runtime is ready." : "OpenClaw runtime is not installed yet.",
+        detail: ready
+          ? "ChillClaw verified the managed OpenClaw CLI."
+          : "ChillClaw will install the managed OpenClaw runtime through its pinned Node.js and npm runtime."
+      };
+    },
+    async prepare(context) {
+      await mkdir(getManagedOpenClawDir(), { recursive: true });
+      const invocation = await ensureManagedNodeNpmInvocation();
+      const packageSpec = context.artifact?.path ?? `openclaw@${context.manifest.version}`;
+      await runCommand(invocation.command, ["install", "--prefix", getManagedOpenClawDir(), packageSpec], {
+        env: managedNodeEnv(invocation.command),
+        beforeSpawn: (command, args) => logDevelopmentCommand("runtimeManager.openclaw.install", command, args)
+      });
+      const version = await probeVersion(getManagedOpenClawBinPath(), ["--version"]);
+      return {
+        version: version ?? context.manifest.version,
+        activePath: getManagedOpenClawBinPath(),
+        changed: true,
+        summary: "OpenClaw runtime is ready.",
+        detail: "ChillClaw installed and verified the managed OpenClaw runtime."
+      };
+    },
+    async applyUpdate(context) {
+      return this.prepare({
+        manifest: context.staged,
+        source: providerSourceFor(context.staged, context.state?.source),
+        artifact: providerArtifactFor(context.staged, context.state?.source),
+        state: context.state
+      });
+    },
+    async rollback(context) {
+      if (!context.previousVersion) {
+        return {
+          changed: false,
+          summary: "No previous OpenClaw runtime was recorded.",
+          detail: "ChillClaw did not find a previous managed OpenClaw runtime to restore."
+        };
+      }
+      const invocation = await ensureManagedNodeNpmInvocation();
+      await runCommand(invocation.command, ["install", "--prefix", getManagedOpenClawDir(), `openclaw@${context.previousVersion}`], {
+        env: managedNodeEnv(invocation.command),
+        beforeSpawn: (command, args) => logDevelopmentCommand("runtimeManager.openclaw.rollback", command, args)
+      });
+      return {
+        version: context.previousVersion,
+        activePath: getManagedOpenClawBinPath(),
+        changed: true,
+        summary: "OpenClaw rollback completed.",
+        detail: "ChillClaw restored the previous managed OpenClaw runtime."
+      };
+    },
+    async remove() {
+      await rm(getManagedOpenClawDir(), { recursive: true, force: true });
+      return {
+        changed: true,
+        summary: "OpenClaw runtime removed.",
+        detail: "ChillClaw removed the managed OpenClaw runtime."
+      };
+    }
+  };
+}
+
+function createOllamaRuntimeProvider(): RuntimeResourceProvider {
+  return {
+    id: "ollama-runtime",
+    async inspect() {
+      const ready = await probeCommand(getManagedOllamaCliPath(), ["--version"], {
+        env: ollamaEnv()
+      });
+      return {
+        installed: ready,
+        ready,
+        version: ready ? await probeVersion(getManagedOllamaCliPath(), ["--version"], ollamaEnv()) : undefined,
+        activePath: ready ? getManagedOllamaCliPath() : undefined,
+        summary: ready ? "Ollama runtime is ready." : "Ollama runtime is not installed yet.",
+        detail: ready
+          ? "ChillClaw verified the managed Ollama command."
+          : "ChillClaw will install the managed Ollama CLI without changing model weights."
+      };
+    },
+    async prepare(context) {
+      const artifact = context.artifact ?? providerArtifactFor(context.manifest);
+      await installOllamaFromArtifact(context.manifest, context.source, artifact);
+      return {
+        version: await probeVersion(getManagedOllamaCliPath(), ["--version"], ollamaEnv()) ?? context.manifest.version,
+        activePath: getManagedOllamaCliPath(),
+        changed: true,
+        summary: "Ollama runtime is ready.",
+        detail: "ChillClaw installed and verified the managed Ollama runtime. Model files were preserved."
+      };
+    },
+    async applyUpdate(context) {
+      await installOllamaFromArtifact(
+        context.staged,
+        providerSourceFor(context.staged, context.state?.source),
+        providerArtifactFor(context.staged, context.state?.source)
+      );
+      return {
+        version: await probeVersion(getManagedOllamaCliPath(), ["--version"], ollamaEnv()) ?? context.staged.version,
+        activePath: getManagedOllamaCliPath(),
+        changed: true,
+        summary: "Ollama runtime updated.",
+        detail: "ChillClaw updated Ollama and preserved the managed model directory."
+      };
+    },
+    async rollback(context) {
+      return {
+        version: context.previousVersion,
+        activePath: getManagedOllamaCliPath(),
+        changed: false,
+        summary: "Ollama rollback recorded.",
+        detail: "ChillClaw kept the managed model directory untouched."
+      };
+    },
+    async remove() {
+      await rm(getManagedOllamaBinDir(), { recursive: true, force: true });
+      await rm(getLegacyManagedOllamaAppPath(), { recursive: true, force: true });
+      return {
+        changed: true,
+        summary: "Ollama CLI removed.",
+        detail: "ChillClaw removed the managed Ollama command and left model files in place."
+      };
+    }
+  };
+}
+
+function createLocalModelCatalogProvider(): RuntimeResourceProvider {
+  return {
+    id: "local-model-catalog",
+    async inspect({ manifest, state }) {
+      const ready = state?.installedVersion === manifest.version && state.status === "ready";
+      return {
+        installed: ready,
+        ready,
+        version: state?.installedVersion,
+        summary: ready ? "Local model catalog is ready." : "Local model catalog has not been prepared yet.",
+        detail: "Catalog updates refresh metadata only. They never download model weights."
+      };
+    },
+    async prepare(context) {
+      return {
+        version: context.manifest.version,
+        changed: true,
+        summary: "Local model catalog is ready.",
+        detail: "ChillClaw prepared local model metadata without downloading model weights."
+      };
+    },
+    async applyUpdate(context) {
+      return {
+        version: context.staged.version,
+        changed: true,
+        summary: "Local model catalog updated.",
+        detail: "ChillClaw refreshed local model metadata only."
+      };
+    }
+  };
+}
+
+function managedNodeEnv(command?: string): NodeJS.ProcessEnv {
+  const pathEntries = [
+    command && command.startsWith("/") ? dirname(command) : undefined,
+    getManagedNodeBinDir(),
+    ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin"
+  ].filter((entry): entry is string => Boolean(entry));
+
+  return {
+    ...process.env,
+    PATH: [...new Set(pathEntries)].join(delimiter),
+    NO_COLOR: "1"
+  };
+}
+
+async function probeVersion(command: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string | undefined> {
+  try {
+    const result = await runCommand(command, args, {
+      allowFailure: true,
+      env
+    });
+    if (result.code !== 0) {
+      return undefined;
+    }
+    return normalizeVersion(result.stdout || result.stderr);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeVersion(output: string): string | undefined {
+  const trimmed = output.trim();
+  const version = trimmed.match(/v?(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/u)?.[1];
+  return version ?? (trimmed.length ? trimmed : undefined);
+}
+
+function providerSourceFor(manifest: RuntimeResourceManifest, preferredSource?: RuntimeSourcePolicy): RuntimeSourcePolicy {
+  return preferredSource ?? manifest.sourcePolicy[0] ?? "download";
+}
+
+function providerArtifactFor(
+  manifest: RuntimeResourceManifest,
+  preferredSource?: RuntimeSourcePolicy
+): RuntimeArtifactManifest | undefined {
+  return manifest.artifacts.find((artifact) => artifact.source === providerSourceFor(manifest, preferredSource)) ?? manifest.artifacts[0];
+}
+
+async function installOllamaFromArtifact(
+  manifest: RuntimeResourceManifest,
+  source: RuntimeSourcePolicy,
+  artifact: RuntimeArtifactManifest | undefined
+): Promise<void> {
+  await mkdir(getManagedOllamaDir(), { recursive: true });
+  await mkdir(getManagedOllamaBinDir(), { recursive: true });
+  await mkdir(getManagedOllamaModelsDir(), { recursive: true });
+  await rm(getLegacyManagedOllamaAppPath(), { recursive: true, force: true });
+
+  const workspace = await mkdtemp(resolve(tmpdir(), "chillclaw-ollama-runtime-"));
+  const archivePath = artifact?.path && artifact.format === "tgz"
+    ? artifact.path
+    : resolve(workspace, DEFAULT_OLLAMA_CLI_ARCHIVE_NAME);
+  const extractedPath = resolve(workspace, "extracted");
+
+  try {
+    const cliPath = await resolveOllamaCliArtifact(source, artifact, archivePath, extractedPath);
+    await copyOllamaCli(cliPath);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+
+  if (!(await probeCommand(getManagedOllamaCliPath(), ["--version"], { env: ollamaEnv() }))) {
+    throw new Error(`${manifest.label} installed, but the managed Ollama command is not executable.`);
+  }
+}
+
+function ollamaEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    OLLAMA_MODELS: getManagedOllamaModelsDir(),
+    OLLAMA_HOST: "127.0.0.1:11434"
+  };
+}
+
+async function resolveOllamaCliArtifact(
+  source: RuntimeSourcePolicy,
+  artifact: RuntimeArtifactManifest | undefined,
+  archivePath: string,
+  extractedPath: string
+): Promise<string> {
+  if (artifact?.path && artifact.format === "file") {
+    return artifact.path;
+  }
+
+  if (artifact?.path && artifact.format === "directory") {
+    return findOllamaCliInDirectory(artifact.path);
+  }
+
+  await mkdir(dirname(archivePath), { recursive: true });
+  if (!artifact?.path || artifact.format !== "tgz") {
+    if (source === "bundled" && artifact?.path) {
+      await copyFile(artifact.path, archivePath);
+    } else {
+      const url = artifact?.url ?? defaultOllamaCliArchiveUrl(DEFAULT_OLLAMA_VERSION);
+      await runCommand("/usr/bin/curl", ["-L", url, "-o", archivePath], {
+        beforeSpawn: (command, args) => logDevelopmentCommand("runtimeManager.ollama.download", command, args)
+      });
+    }
+  }
+
+  await mkdir(extractedPath, { recursive: true });
+  await runCommand("/usr/bin/tar", ["-xzf", archivePath, "-C", extractedPath], {
+    beforeSpawn: (command, args) => logDevelopmentCommand("runtimeManager.ollama.extract", command, args)
+  });
+  return findOllamaCliInDirectory(extractedPath);
+}
+
+async function findOllamaCliInDirectory(root: string): Promise<string> {
+  const candidates = [
+    resolve(root, "ollama"),
+    resolve(root, "bin", "ollama"),
+    resolve(root, "ollama-darwin", "ollama"),
+    resolve(root, "ollama-darwin", "bin", "ollama")
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Try the next common CLI artifact layout.
+    }
+  }
+  throw new Error(`Ollama CLI artifact did not contain an executable named ollama under ${root}.`);
+}
+
+async function copyOllamaCli(sourcePath: string): Promise<void> {
+  const destination = getManagedOllamaCliPath();
+  await mkdir(dirname(destination), { recursive: true });
+  if (sourcePath === destination) {
+    await chmod(destination, 0o755);
+    return;
+  }
+  await rm(destination, { force: true });
+  if (basename(sourcePath) === "ollama" && sourcePath !== destination) {
+    await copyFile(sourcePath, destination);
+  } else {
+    await cp(sourcePath, destination, { force: true });
+  }
+  await chmod(destination, 0o755);
+}
+
+function defaultOllamaCliArchiveUrl(version: string): string {
+  return `https://github.com/ollama/ollama/releases/download/v${version}/${DEFAULT_OLLAMA_CLI_ARCHIVE_NAME}`;
+}

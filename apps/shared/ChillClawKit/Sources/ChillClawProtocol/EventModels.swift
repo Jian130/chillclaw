@@ -40,6 +40,9 @@ public enum ChillClawEvent: Codable, Sendable {
     case taskProgress(taskId: String, status: ChillClawTaskProgressStatus, message: String)
     case localRuntimeProgress(action: String, phase: String, percent: Int?, message: String, localRuntime: LocalModelRuntimeOverview)
     case localRuntimeCompleted(action: String, status: String, message: String, localRuntime: LocalModelRuntimeOverview)
+    case runtimeProgress(resourceId: String, action: String, phase: String, percent: Int?, message: String, runtimeManager: RuntimeManagerOverview)
+    case runtimeCompleted(resourceId: String, action: String, status: String, message: String, runtimeManager: RuntimeManagerOverview)
+    case runtimeUpdateStaged(resourceId: String, version: String, message: String, runtimeManager: RuntimeManagerOverview)
     case chatStream(threadId: String, sessionKey: String, payload: ChatStreamEvent)
     case channelSessionUpdated(channelId: SupportedChannelId, session: ChannelSession)
     case configApplied(resource: ChillClawConfigResource, summary: String)
@@ -65,6 +68,9 @@ public enum ChillClawEvent: Codable, Sendable {
         case session
         case resource
         case localRuntime
+        case resourceId
+        case runtimeManager
+        case version
         case snapshot
     }
 
@@ -129,6 +135,30 @@ public enum ChillClawEvent: Codable, Sendable {
                 status: try container.decode(String.self, forKey: .status),
                 message: try container.decode(String.self, forKey: .message),
                 localRuntime: try container.decode(LocalModelRuntimeOverview.self, forKey: .localRuntime)
+            )
+        case "runtime.progress":
+            self = .runtimeProgress(
+                resourceId: try container.decode(String.self, forKey: .resourceId),
+                action: try container.decode(String.self, forKey: .action),
+                phase: try container.decode(String.self, forKey: .phase),
+                percent: try container.decodeIfPresent(Int.self, forKey: .percent),
+                message: try container.decode(String.self, forKey: .message),
+                runtimeManager: try container.decode(RuntimeManagerOverview.self, forKey: .runtimeManager)
+            )
+        case "runtime.completed":
+            self = .runtimeCompleted(
+                resourceId: try container.decode(String.self, forKey: .resourceId),
+                action: try container.decode(String.self, forKey: .action),
+                status: try container.decode(String.self, forKey: .status),
+                message: try container.decode(String.self, forKey: .message),
+                runtimeManager: try container.decode(RuntimeManagerOverview.self, forKey: .runtimeManager)
+            )
+        case "runtime.update-staged":
+            self = .runtimeUpdateStaged(
+                resourceId: try container.decode(String.self, forKey: .resourceId),
+                version: try container.decode(String.self, forKey: .version),
+                message: try container.decode(String.self, forKey: .message),
+                runtimeManager: try container.decode(RuntimeManagerOverview.self, forKey: .runtimeManager)
             )
         case "chat.stream":
             self = .chatStream(
@@ -217,6 +247,27 @@ public enum ChillClawEvent: Codable, Sendable {
             try container.encode(status, forKey: .status)
             try container.encode(message, forKey: .message)
             try container.encode(localRuntime, forKey: .localRuntime)
+        case let .runtimeProgress(resourceId, action, phase, percent, message, runtimeManager):
+            try container.encode("runtime.progress", forKey: .type)
+            try container.encode(resourceId, forKey: .resourceId)
+            try container.encode(action, forKey: .action)
+            try container.encode(phase, forKey: .phase)
+            try container.encodeIfPresent(percent, forKey: .percent)
+            try container.encode(message, forKey: .message)
+            try container.encode(runtimeManager, forKey: .runtimeManager)
+        case let .runtimeCompleted(resourceId, action, status, message, runtimeManager):
+            try container.encode("runtime.completed", forKey: .type)
+            try container.encode(resourceId, forKey: .resourceId)
+            try container.encode(action, forKey: .action)
+            try container.encode(status, forKey: .status)
+            try container.encode(message, forKey: .message)
+            try container.encode(runtimeManager, forKey: .runtimeManager)
+        case let .runtimeUpdateStaged(resourceId, version, message, runtimeManager):
+            try container.encode("runtime.update-staged", forKey: .type)
+            try container.encode(resourceId, forKey: .resourceId)
+            try container.encode(version, forKey: .version)
+            try container.encode(message, forKey: .message)
+            try container.encode(runtimeManager, forKey: .runtimeManager)
         case let .chatStream(threadId, sessionKey, payload):
             try container.encode("chat.stream", forKey: .type)
             try container.encode(threadId, forKey: .threadId)

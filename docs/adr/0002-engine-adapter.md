@@ -12,14 +12,17 @@ ChillClaw starts with OpenClaw but must remain able to switch to engines such as
 
 All engine operations flow through a narrow `EngineAdapter` contract.
 
-Internally, that adapter is composed into four engine-neutral managers:
+Internally, that adapter is composed into five engine-neutral managers:
 
 - `instances`: deployment target detection plus install, update, uninstall, and reuse strategy
 - `config`: static engine configuration such as models, channels, skills, workspace-level config, and tool policy
 - `aiEmployees`: product-managed OpenClaw agent configuration plus per-agent workspace scaffolding
 - `gateway`: live gateway lifecycle, health, chat, pairing/login sessions, and apply/restart behavior
+- `plugins`: managed plugin discovery, installation, update, removal, and feature prerequisite enforcement
 
 Config and AI-employee mutations are staged writes. They update engine config or agent workspace state immediately without requiring the gateway to be running. The gateway manager is the only live-apply boundary and is solely responsible for reload/restart plus reachability verification.
+
+Plugin operations are a separate adapter manager because managed plugins can be a prerequisite for product features without being ordinary static config or live gateway RPC. Product services still reach them only through `EngineAdapter`.
 
 Engine-specific files, commands, and wire formats are confined to adapter implementations.
 

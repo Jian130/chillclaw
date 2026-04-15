@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { copyFile, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { get } from "node:https";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, resolve } from "node:path";
@@ -23,8 +23,13 @@ export interface ManagedNodeInvocation {
   display: string;
 }
 
-function managedNodeArchiveUrl(): string {
-  return process.env.CHILLCLAW_MANAGED_NODE_DIST_URL?.trim() || `https://nodejs.org/dist/v${getManagedNodeVersion()}/${getManagedNodeDistName()}.tar.gz`;
+export interface ManagedNodeInstallOptions {
+  archiveUrl?: string;
+  runtimeDir?: string;
+}
+
+function managedNodeArchiveUrl(options?: ManagedNodeInstallOptions): string {
+  return options?.archiveUrl?.trim() || process.env.CHILLCLAW_MANAGED_NODE_DIST_URL?.trim() || `https://nodejs.org/dist/v${getManagedNodeVersion()}/${getManagedNodeDistName()}.tar.gz`;
 }
 
 function managedNodeEnv(command?: string): NodeJS.ProcessEnv {
@@ -89,6 +94,27 @@ async function probeManagedNpm(command: string): Promise<boolean> {
   });
 }
 
+async function installManagedNodeRuntime(options?: ManagedNodeInstallOptions): Promise<void> {
+  const workspace = await mkdtemp(resolve(tmpdir(), "chillclaw-node-runtime-"));
+  const archivePath = resolve(workspace, `${getManagedNodeDistName()}.tar.gz`);
+  const extractedPath = resolve(workspace, getManagedNodeDistName());
+  const installPath = getManagedNodeInstallDir();
+
+  try {
+    await mkdir(getManagedNodeDir(), { recursive: true });
+    if (options?.runtimeDir) {
+      await cp(options.runtimeDir, extractedPath, { recursive: true, force: true, verbatimSymlinks: true });
+    } else {
+      await downloadArchive(managedNodeArchiveUrl(options), archivePath);
+      await extractArchive(archivePath, workspace);
+    }
+    await rm(installPath, { recursive: true, force: true });
+    await rename(extractedPath, installPath);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
 export async function resolveManagedNodeNpmInvocation(): Promise<ManagedNodeInvocation | undefined> {
   const npmPath = getManagedNodeNpmBinPath();
 
@@ -103,7 +129,7 @@ export async function resolveManagedNodeNpmInvocation(): Promise<ManagedNodeInvo
   };
 }
 
-export async function ensureManagedNodeNpmInvocation(): Promise<ManagedNodeInvocation> {
+export async function ensureManagedNodeNpmInvocation(options?: ManagedNodeInstallOptions): Promise<ManagedNodeInvocation> {
   const existing = await resolveManagedNodeNpmInvocation();
   if (existing) {
     return existing;
@@ -117,22 +143,16 @@ export async function ensureManagedNodeNpmInvocation(): Promise<ManagedNodeInvoc
     throw new Error(`ChillClaw does not have a managed Node.js runtime for ${process.arch} Macs.`);
   }
 
-  const workspace = await mkdtemp(resolve(tmpdir(), "chillclaw-node-runtime-"));
-  const archivePath = resolve(workspace, `${getManagedNodeDistName()}.tar.gz`);
-  const extractedPath = resolve(workspace, getManagedNodeDistName());
   const installPath = getManagedNodeInstallDir();
 
-  try {
-    await mkdir(getManagedNodeDir(), { recursive: true });
-    await downloadArchive(managedNodeArchiveUrl(), archivePath);
-    await extractArchive(archivePath, workspace);
-    await rm(installPath, { recursive: true, force: true });
-    await rename(extractedPath, installPath);
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
+  await installManagedNodeRuntime(options);
+  let invocation = await resolveManagedNodeNpmInvocation();
+
+  if (!invocation && options?.runtimeDir) {
+    await installManagedNodeRuntime({ archiveUrl: options.archiveUrl });
+    invocation = await resolveManagedNodeNpmInvocation();
   }
 
-  const invocation = await resolveManagedNodeNpmInvocation();
   if (!invocation) {
     throw new Error(`ChillClaw installed Node.js into ${installPath}, but npm is not executable.`);
   }

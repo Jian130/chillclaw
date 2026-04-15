@@ -450,18 +450,20 @@ The sections below keep the original repo-specific reference intact. These are t
 
 ### Install
 
-ChillClaw installs the latest OpenClaw by default.
+ChillClaw-managed installs go through the daemon Runtime Manager. Runtime Manager updates come from ChillClaw-curated manifests, not upstream `latest` discovery.
+
+The npm commands below are still the development and recovery fallback when no packaged OpenClaw artifact is available. They should use the pinned version selected by ChillClaw release metadata or an explicit diagnostics override, not an unreviewed upstream latest version.
 
 System install:
 
 ```bash
-npm install --global openclaw@latest
+npm install --global openclaw@<pinnedVersion>
 ```
 
 Managed-local install:
 
 ```bash
-npm install --prefix <installDir> openclaw@latest
+npm install --prefix <installDir> openclaw@<pinnedVersion>
 ```
 
 Version override for diagnostics or compatibility testing:

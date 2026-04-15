@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { constants } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -20,6 +21,7 @@ const APP_RUNTIME = resolve(APP_RESOURCES, "runtime");
 const APP_RUNTIME_ROOT = resolve(APP_RESOURCES, "app");
 const APP_UI = resolve(APP_RUNTIME_ROOT, "ui");
 const APP_SCRIPTS = resolve(APP_RUNTIME_ROOT, "scripts");
+const APP_RUNTIME_ARTIFACTS = resolve(APP_RUNTIME_ROOT, "runtime-artifacts");
 const PACKAGED_DAEMON_BUNDLE = resolve(BUILD_DIR, "chillclaw-daemon.cjs");
 const PACKAGED_DAEMON_BINARY = resolve(APP_RUNTIME, "chillclaw-daemon");
 const MACOS_NATIVE_PACKAGE_DIR = resolve(ROOT, "apps/macos-native");
@@ -31,6 +33,9 @@ const APP_BRAND_LOGO_FILENAME = "ChillClawBrandLogo.png";
 const APP_ICON_SOURCE = resolve(MACOS_NATIVE_PACKAGE_DIR, "Sources/ChillClawNative/Resources", APP_ICON_FILENAME);
 const APP_ICON_PNG_SOURCE = resolve(MACOS_NATIVE_PACKAGE_DIR, "Sources/ChillClawNative/Resources", APP_ICON_PNG_FILENAME);
 const APP_BRAND_LOGO_SOURCE = resolve(MACOS_NATIVE_PACKAGE_DIR, "Sources/ChillClawNative/Resources", APP_BRAND_LOGO_FILENAME);
+const RUNTIME_MANIFEST_SOURCE = resolve(ROOT, "runtime-manifest.lock.json");
+const RUNTIME_ARTIFACTS_SOURCE = resolve(ROOT, "runtime-artifacts");
+const REQUIRE_CLI_RUNTIME_ARTIFACTS = process.env.CHILLCLAW_REQUIRE_CLI_RUNTIME_ARTIFACTS === "1";
 const DMG_OUTPUT = resolve(DIST_DIR, `${APP_NAME}-macOS.dmg`);
 const LEGACY_PKG_OUTPUT = resolve(DIST_DIR, `${APP_NAME}-macOS.pkg`);
 const INSTALLER_ICON_PNG = resolve(BUILD_DIR, "installer-icon.png");
@@ -220,6 +225,9 @@ PLIST_PATH="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 DAEMON_BIN="$APP_ROOT/runtime/chillclaw-daemon"
 STATIC_DIR="$APP_ROOT/app/ui"
 BOOTSTRAP_SCRIPT="$APP_ROOT/app/scripts/bootstrap-openclaw.mjs"
+RUNTIME_BUNDLE_DIR="$APP_ROOT/app/runtime-artifacts"
+RUNTIME_MANIFEST_PATH="$RUNTIME_BUNDLE_DIR/runtime-manifest.lock.json"
+RUNTIME_UPDATE_FEED_URL="\${CHILLCLAW_RUNTIME_UPDATE_FEED_URL:-}"
 
 mkdir -p "$DATA_DIR" "$LOG_DIR" "$LAUNCH_AGENTS_DIR"
 
@@ -251,6 +259,12 @@ cat >"$PLIST_PATH" <<EOF
       <string>$STATIC_DIR</string>
       <key>CHILLCLAW_OPENCLAW_BOOTSTRAP_SCRIPT</key>
       <string>$BOOTSTRAP_SCRIPT</string>
+      <key>CHILLCLAW_RUNTIME_BUNDLE_DIR</key>
+      <string>$RUNTIME_BUNDLE_DIR</string>
+      <key>CHILLCLAW_RUNTIME_MANIFEST_PATH</key>
+      <string>$RUNTIME_MANIFEST_PATH</string>
+      <key>CHILLCLAW_RUNTIME_UPDATE_FEED_URL</key>
+      <string>$RUNTIME_UPDATE_FEED_URL</string>
       <key>CHILLCLAW_LAUNCHAGENT_LABEL</key>
       <string>$LABEL</string>
     </dict>
@@ -369,6 +383,7 @@ async function stageBundle() {
   await mkdir(APP_RUNTIME, { recursive: true });
   await mkdir(APP_UI, { recursive: true });
   await mkdir(APP_SCRIPTS, { recursive: true });
+  await mkdir(APP_RUNTIME_ARTIFACTS, { recursive: true });
 
   await buildStandaloneDaemon();
   await buildNativeClient();
@@ -377,6 +392,7 @@ async function stageBundle() {
   await copyFile(APP_BRAND_LOGO_SOURCE, resolve(APP_RESOURCES, APP_BRAND_LOGO_FILENAME));
   await cp(resolve(ROOT, "apps/desktop-ui/dist"), APP_UI, { recursive: true });
   await copyFile(resolve(ROOT, "scripts/bootstrap-openclaw.mjs"), resolve(APP_SCRIPTS, "bootstrap-openclaw.mjs"));
+  await copyRuntimeArtifacts();
 
   await writeFile(resolve(APP_SCRIPTS, "install-launchagent.sh"), installLaunchAgentScript());
   await writeFile(resolve(APP_SCRIPTS, "restart-launchagent.sh"), restartLaunchAgentScript());
@@ -388,6 +404,79 @@ async function stageBundle() {
   await chmod(resolve(APP_SCRIPTS, "uninstall-launchagent.sh"), 0o755);
   await writeFile(resolve(APP_CONTENTS, "Info.plist"), infoPlist());
   await writeFile(resolve(APP_CONTENTS, "PkgInfo"), "APPL????");
+}
+
+async function copyRuntimeArtifacts() {
+  try {
+    await cp(RUNTIME_ARTIFACTS_SOURCE, APP_RUNTIME_ARTIFACTS, { recursive: true, verbatimSymlinks: true });
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  await copyFile(RUNTIME_MANIFEST_SOURCE, resolve(APP_RUNTIME_ARTIFACTS, "runtime-manifest.lock.json"));
+  await assertNoInstallerRuntimePayloads(APP_RUNTIME_ARTIFACTS);
+  if (REQUIRE_CLI_RUNTIME_ARTIFACTS) {
+    await assertPackagedCliRuntimeArtifacts();
+  }
+}
+
+async function assertPackagedCliRuntimeArtifacts() {
+  const manifest = JSON.parse(await readFile(resolve(APP_RUNTIME_ARTIFACTS, "runtime-manifest.lock.json"), "utf8"));
+  const node = runtimeResourceFor(manifest, "node-npm-runtime");
+  const ollama = runtimeResourceFor(manifest, "ollama-runtime");
+  const nodeArtifact = bundledArtifactFor(node, "directory");
+  const ollamaArtifact = bundledArtifactFor(ollama, "file");
+  const nodeDir = resolve(APP_RUNTIME_ARTIFACTS, nodeArtifact.path);
+  const ollamaPath = resolve(APP_RUNTIME_ARTIFACTS, ollamaArtifact.path);
+
+  await requireExecutablePath(resolve(nodeDir, "bin/node"), "Packaged Node.js runtime node is not executable.");
+  await requireExecutablePath(resolve(nodeDir, "bin/npm"), "Packaged Node.js runtime npm is not executable.");
+  await requireExecutablePath(ollamaPath, "Packaged Ollama runtime is missing the runnable ollama CLI binary.");
+}
+
+function runtimeResourceFor(manifest, id) {
+  const resource = manifest.resources?.find((candidate) => candidate.id === id);
+  if (!resource) {
+    throw new Error(`Runtime manifest is missing ${id}.`);
+  }
+  return resource;
+}
+
+function bundledArtifactFor(resource, format) {
+  const artifact = resource.artifacts?.find((candidate) => candidate.source === "bundled");
+  if (!artifact) {
+    throw new Error(`${resource.id} is missing a bundled runtime artifact.`);
+  }
+  if (artifact.format !== format) {
+    throw new Error(`${resource.id} must bundle a ${format} runtime artifact, got ${artifact.format}.`);
+  }
+  if (!artifact.path) {
+    throw new Error(`${resource.id} bundled runtime artifact is missing a path.`);
+  }
+  return artifact;
+}
+
+async function assertNoInstallerRuntimePayloads(dir) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const childPath = resolve(dir, entry.name);
+    if (entry.name.endsWith(".app") || entry.name.endsWith(".dmg") || entry.name.endsWith(".pkg")) {
+      throw new Error(`Runtime artifacts must be runnable CLI payloads, not installer/UI payloads: ${childPath}`);
+    }
+    if (entry.isDirectory()) {
+      await assertNoInstallerRuntimePayloads(childPath);
+    }
+  }
+}
+
+async function requireExecutablePath(path, message) {
+  try {
+    await access(path, constants.X_OK);
+  } catch {
+    throw new Error(message);
+  }
 }
 
 async function buildInstaller() {
@@ -409,7 +498,7 @@ async function assertStagedAppBundleExists() {
 async function stageDiskImageContents() {
   await rm(DMG_STAGING_DIR, { recursive: true, force: true });
   await mkdir(DMG_STAGING_DIR, { recursive: true });
-  await cp(APP_BUNDLE, resolve(DMG_STAGING_DIR, `${APP_NAME}.app`), { recursive: true });
+  await cp(APP_BUNDLE, resolve(DMG_STAGING_DIR, `${APP_NAME}.app`), { recursive: true, verbatimSymlinks: true });
   await symlink("/Applications", resolve(DMG_STAGING_DIR, "Applications"));
 }
 

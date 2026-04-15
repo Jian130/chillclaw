@@ -17,12 +17,16 @@
       "description": "Daemon status, install, recovery, diagnostics, and app lifecycle routes."
     },
     {
+      "name": "Runtime",
+      "description": "Managed prerequisite provisioning, verification, and curated runtime updates."
+    },
+    {
       "name": "Models",
       "description": "Model configuration, auth, default selection, and local runtime routes."
     },
     {
       "name": "Onboarding",
-      "description": "Guided setup state machine and first-run workflow routes."
+      "description": "Guided onboarding state machine and first-run setup routes."
     },
     {
       "name": "Channels",
@@ -2814,6 +2818,288 @@
         },
         "description": "This route is currently stubbed and intentionally returns HTTP 501 from the daemon."
       }
+    },
+    "/api/runtime/resources": {
+      "get": {
+        "operationId": "get_api_runtime_resources",
+        "tags": [
+          "Runtime"
+        ],
+        "description": "Return daemon-owned prerequisite status for Node/npm, managed OpenClaw, Ollama, and local model catalog metadata.",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeManagerOverview"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/runtime/resources/{resourceId}/prepare": {
+      "post": {
+        "operationId": "post_api_runtime_resources_resourceId_prepare",
+        "tags": [
+          "Runtime"
+        ],
+        "description": "Prepare a managed prerequisite from a packaged artifact or approved download fallback.",
+        "parameters": [
+          {
+            "name": "resourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node-npm-runtime",
+                "openclaw-runtime",
+                "ollama-runtime",
+                "local-model-catalog"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime resource or action."
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/runtime/resources/{resourceId}/repair": {
+      "post": {
+        "operationId": "post_api_runtime_resources_resourceId_repair",
+        "tags": [
+          "Runtime"
+        ],
+        "description": "Repair a managed prerequisite through its provider.",
+        "parameters": [
+          {
+            "name": "resourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node-npm-runtime",
+                "openclaw-runtime",
+                "ollama-runtime",
+                "local-model-catalog"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime resource or action."
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/runtime/resources/{resourceId}/check-update": {
+      "post": {
+        "operationId": "post_api_runtime_resources_resourceId_checkUpdate",
+        "tags": [
+          "Runtime"
+        ],
+        "description": "Check the ChillClaw-curated runtime update feed for this prerequisite.",
+        "parameters": [
+          {
+            "name": "resourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node-npm-runtime",
+                "openclaw-runtime",
+                "ollama-runtime",
+                "local-model-catalog"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime resource or action."
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/runtime/resources/{resourceId}/stage-update": {
+      "post": {
+        "operationId": "post_api_runtime_resources_resourceId_stageUpdate",
+        "tags": [
+          "Runtime"
+        ],
+        "description": "Stage an approved runtime update without changing the active install.",
+        "parameters": [
+          {
+            "name": "resourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node-npm-runtime",
+                "openclaw-runtime",
+                "ollama-runtime",
+                "local-model-catalog"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime resource or action."
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/runtime/resources/{resourceId}/apply-update": {
+      "post": {
+        "operationId": "post_api_runtime_resources_resourceId_applyUpdate",
+        "tags": [
+          "Runtime"
+        ],
+        "description": "Apply a staged runtime update and roll back automatically when verification fails.",
+        "parameters": [
+          {
+            "name": "resourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node-npm-runtime",
+                "openclaw-runtime",
+                "ollama-runtime",
+                "local-model-catalog"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime resource or action."
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/runtime/resources/{resourceId}/rollback": {
+      "post": {
+        "operationId": "post_api_runtime_resources_resourceId_rollback",
+        "tags": [
+          "Runtime"
+        ],
+        "description": "Restore the previous recorded managed runtime version.",
+        "parameters": [
+          {
+            "name": "resourceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node-npm-runtime",
+                "openclaw-runtime",
+                "ollama-runtime",
+                "local-model-catalog"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime resource or action."
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4744,6 +5030,101 @@
               "localRuntime",
               "message",
               "status",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "resourceId": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "percent": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              },
+              "runtimeManager": {
+                "$ref": "#/components/schemas/RuntimeManagerOverview"
+              },
+              "type": {
+                "const": "runtime.progress",
+                "type": "string"
+              }
+            },
+            "required": [
+              "resourceId",
+              "action",
+              "phase",
+              "message",
+              "runtimeManager",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "resourceId": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "runtimeManager": {
+                "$ref": "#/components/schemas/RuntimeManagerOverview"
+              },
+              "type": {
+                "const": "runtime.completed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "resourceId",
+              "action",
+              "status",
+              "message",
+              "runtimeManager",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "resourceId": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "runtimeManager": {
+                "$ref": "#/components/schemas/RuntimeManagerOverview"
+              },
+              "type": {
+                "const": "runtime.update-staged",
+                "type": "string"
+              }
+            },
+            "required": [
+              "resourceId",
+              "version",
+              "message",
+              "runtimeManager",
               "type"
             ],
             "type": "object"
@@ -7372,6 +7753,9 @@
           },
           "revision": {
             "type": "number"
+          },
+          "runtimeManager": {
+            "$ref": "#/components/schemas/RuntimeManagerOverview"
           }
         },
         "required": [
@@ -8510,6 +8894,190 @@
             "type": "string"
           }
         }
+      },
+      "RuntimeResourceKind": {
+        "enum": [
+          "node-npm",
+          "engine",
+          "local-ai-runtime",
+          "model-catalog",
+          "model-weights",
+          "local-ai-backend"
+        ],
+        "type": "string"
+      },
+      "RuntimeResourceStatus": {
+        "enum": [
+          "missing",
+          "bundled-available",
+          "installed",
+          "staged-update",
+          "updating",
+          "ready",
+          "degraded",
+          "failed",
+          "rollback-required"
+        ],
+        "type": "string"
+      },
+      "RuntimeSourcePolicy": {
+        "enum": [
+          "bundled",
+          "download",
+          "existing-managed"
+        ],
+        "type": "string"
+      },
+      "RuntimeUpdatePolicy": {
+        "enum": [
+          "none",
+          "manual",
+          "stage-silently-apply-safely"
+        ],
+        "type": "string"
+      },
+      "RuntimeResourceOverview": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RuntimeResourceKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuntimeResourceStatus"
+          },
+          "sourcePolicy": {
+            "$ref": "#/components/schemas/RuntimeSourcePolicy"
+          },
+          "updatePolicy": {
+            "$ref": "#/components/schemas/RuntimeUpdatePolicy"
+          },
+          "installedVersion": {
+            "type": "string"
+          },
+          "bundledVersion": {
+            "type": "string"
+          },
+          "desiredVersion": {
+            "type": "string"
+          },
+          "latestApprovedVersion": {
+            "type": "string"
+          },
+          "stagedVersion": {
+            "type": "string"
+          },
+          "activePath": {
+            "type": "string"
+          },
+          "updateAvailable": {
+            "type": "boolean"
+          },
+          "blockingResourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "lastCheckedAt": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "status",
+          "sourcePolicy",
+          "updatePolicy",
+          "updateAvailable",
+          "summary",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "RuntimeManagerOverview": {
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeResourceOverview"
+            }
+          },
+          "summary": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkedAt",
+          "resources",
+          "summary",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "RuntimeActionResponse": {
+        "properties": {
+          "action": {
+            "enum": [
+              "prepare",
+              "repair",
+              "check-update",
+              "stage-update",
+              "apply-update",
+              "rollback",
+              "remove"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "failed",
+              "in-progress"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/RuntimeResourceOverview"
+          },
+          "runtimeManager": {
+            "$ref": "#/components/schemas/RuntimeManagerOverview"
+          }
+        },
+        "required": [
+          "action",
+          "status",
+          "message",
+          "resource",
+          "runtimeManager"
+        ],
+        "type": "object"
       }
     },
     "responses": {

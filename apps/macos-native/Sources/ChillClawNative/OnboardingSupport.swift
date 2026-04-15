@@ -688,6 +688,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
             return .installContext
         case .localRuntimeProgress, .localRuntimeCompleted:
             return nil
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
+            return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
              .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress:
             return nil
@@ -700,6 +702,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
             return .onboarding
         case .localRuntimeProgress:
             return nil
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
+            return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
              .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
@@ -710,6 +714,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
             return nil
         case .localRuntimeProgress, .localRuntimeCompleted:
             return nil
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
+            return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated,
              .chatStream, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
             return nil
@@ -719,6 +725,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
         case .presetSkillSyncUpdated:
             return nil
         case .localRuntimeProgress, .localRuntimeCompleted:
+            return nil
+        case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated,
              .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress:
@@ -827,6 +835,52 @@ private func nativeOnboardingInstallProgressAnimationStep(_ phase: ChillClawDepl
     case .none:
         return 0.35
     }
+}
+
+private struct NativeOnboardingRuntimeInstallProgressRange {
+    let start: Double
+    let end: Double
+}
+
+private func nativeOnboardingRuntimeInstallProgressRange(
+    resourceID: String
+) -> NativeOnboardingRuntimeInstallProgressRange? {
+    switch resourceID {
+    case "node-npm-runtime":
+        return .init(start: 46, end: 60)
+    case "openclaw-runtime":
+        return .init(start: 58, end: 76)
+    default:
+        return nil
+    }
+}
+
+private func nativeOnboardingInstallPhaseForRuntimeAction(_ action: String) -> ChillClawDeployPhase {
+    switch action {
+    case "apply-update", "stage-update":
+        return .updating
+    default:
+        return .installing
+    }
+}
+
+func nativeOnboardingInstallProgressForRuntimeResource(
+    resourceID: String,
+    action: String,
+    percent: Int?,
+    message: String
+) -> NativeOnboardingInstallProgressSnapshot? {
+    guard let range = nativeOnboardingRuntimeInstallProgressRange(resourceID: resourceID) else {
+        return nil
+    }
+
+    let runtimePercent = min(max(Double(percent ?? 55), 0), 100)
+    let scaledPercent = (range.start + runtimePercent / 100 * (range.end - range.start)).rounded()
+    return .init(
+        phase: nativeOnboardingInstallPhaseForRuntimeAction(action),
+        percent: scaledPercent,
+        message: message
+    )
 }
 
 func mergeNativeOnboardingInstallProgress(
@@ -958,10 +1012,8 @@ func resolveNativeOnboardingHasManagedModelSelection(
     let hasPersistedModel =
         !(draftModelEntryID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
         !(summaryModelEntryID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    let managedEntryID = (localRuntime?.managedEntryId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let hasManagedLocalRuntimeEntry = !managedEntryID.isEmpty
     let hasActiveLocalRuntimeSelection = localRuntime?.activeInOpenClaw == true
-    return hasPersistedModel || hasManagedLocalRuntimeEntry || hasActiveLocalRuntimeSelection
+    return hasPersistedModel || hasActiveLocalRuntimeSelection
 }
 
 func resolveNativeOnboardingLocalRuntimeConnected(

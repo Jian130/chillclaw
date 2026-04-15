@@ -12,16 +12,19 @@ flowchart TB
 
   subgraph Shared["Shared daemon objects"]
     Adapter["EngineAdapter<br/>currently OpenClawAdapter"]
+    RuntimeManager["RuntimeManager<br/>managed prerequisites"]
     Store["StateStore"]
     Secrets["SecretsAdapter<br/>macOS keychain by default"]
     EventBus["EventBusService"]
     Publisher["EventPublisher<br/>+ RevisionStore"]
     AppSvc["AppServiceManager"]
+    AppUpdate["AppUpdateService"]
     AppCtrl["AppControlService"]
   end
 
   subgraph Services["Product services"]
     Overview["OverviewService"]
+    LocalRuntime["LocalModelRuntimeService"]
     Setup["SetupService"]
     Onboarding["OnboardingService"]
     Channels["ChannelSetupService"]
@@ -31,14 +34,18 @@ flowchart TB
     Presets["PresetSkillService"]
     Plugins["PluginService"]
     Tasks["TaskService"]
-    Feature["FeatureWorkflowService"]
+    Feature["FeatureWorkflowService<br/>(inside ChannelSetupService)"]
   end
 
   Server --> EventBus
   Server --> AppCtrl
+  Server --> AppUpdate
   Publisher --> EventBus
+  RuntimeManager --> Publisher
 
   Server --> Overview
+  Server --> RuntimeManager
+  Server --> LocalRuntime
   Server --> Setup
   Server --> Onboarding
   Server --> Channels
@@ -50,8 +57,16 @@ flowchart TB
   Server --> Tasks
 
   Overview --> Adapter
+  Overview --> RuntimeManager
   Overview --> Store
   Overview --> AppSvc
+  Overview --> AppUpdate
+  Overview --> LocalRuntime
+
+  LocalRuntime --> Adapter
+  LocalRuntime --> Store
+  LocalRuntime --> Publisher
+  LocalRuntime --> RuntimeManager
 
   Setup --> Adapter
   Setup --> Store
@@ -65,6 +80,7 @@ flowchart TB
   Onboarding --> Channels
   Onboarding --> Team
   Onboarding --> Presets
+  Onboarding --> LocalRuntime
 
   Channels --> Adapter
   Channels --> Store
@@ -105,7 +121,13 @@ flowchart TB
 
 ```mermaid
 flowchart LR
+  RuntimeManager["RuntimeManager"] --> Node["node-npm-runtime"]
+  RuntimeManager --> OpenClawRuntime["openclaw-runtime"]
+  RuntimeManager --> Ollama["ollama-runtime"]
+  RuntimeManager --> Catalog["local-model-catalog"]
+
   Adapter["EngineAdapter"] --> OpenClaw["OpenClawAdapter"]
+  OpenClaw --> RuntimeManager
   OpenClaw --> Inst["instances<br/>OpenClawInstanceManager"]
   OpenClaw --> Conf["config<br/>OpenClawConfigManager"]
   OpenClaw --> AI["aiEmployees<br/>OpenClawAIEmployeeManager"]
@@ -147,5 +169,9 @@ flowchart LR
 
 - `StateStore` is ChillClaw-owned product state for onboarding, AI team data, stored channel entries, chat thread metadata, preset-skill sync state, and recent task history.
 - `EventBusService` plus `EventPublisher` is the daemon-owned push path for retained snapshots, deploy progress, task progress, gateway state, and chat stream events.
+- `RuntimeManager` owns generic prerequisite lifecycle for Node/npm, managed OpenClaw, Ollama, and local model catalog metadata. It is manifest-driven and update-aware, but OpenClaw-specific product behavior still stays inside `OpenClawAdapter`.
+- `AppUpdateService` owns packaged app release checks. It feeds overview/settings state but does not manage prerequisite runtimes.
+- `LocalModelRuntimeService` owns managed local-model setup state, model download/resume behavior, and the handoff from Ollama readiness to OpenClaw model entries.
+- `FeatureWorkflowService` is a helper used by `ChannelSetupService` for feature prerequisites such as OpenClaw plugins or external installers; it is not a separately wired server-context singleton.
 - Product services stay engine-agnostic. They coordinate user-facing behavior and reach OpenClaw only through the `EngineAdapter` seam.
 - OpenClaw-specific behavior is confined to the `OpenClaw*Manager` classes and the platform adapters in `apps/daemon/src/platform`.

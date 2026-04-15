@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.1.6 - 2026-04-15
+
+### 2026-04-15 12:35 CST
+
+- fixed long OpenClaw installs by removing the daemon's fixed request timeout, giving native install and update calls a 24-hour budget, and keeping the macOS onboarding install screen polling after recoverable client timeouts instead of showing a timeout popup while the runtime is still installing
+- fixed native local-model onboarding so a stale managed Ollama entry that is not active in OpenClaw no longer skips the Ollama setup screen
+
+### 2026-04-13 17:28 CST
+
+- added a daemon-owned runtime manager with shared TypeScript and Swift contracts, `/api/runtime` endpoints, WebSocket runtime progress events, OpenAPI/reference docs, and runtime manifest metadata so managed artifacts can be inspected, prepared, updated, repaired, and removed through one backend path
+- added macOS runtime artifact preparation and release packaging support for bundled Node.js/npm and Ollama resources, including executable validation, release workflow signing coverage, packaged LaunchAgent runtime environment wiring, and runtime artifact documentation
+- hardened clean macOS OpenClaw installation by requiring the ChillClaw-managed Node.js, npm, and packaged runtime artifacts to be executable, falling back from a broken bundled Node/npm runtime to the archive download path, and preserving the managed OpenClaw install boundary under ChillClaw app data
+- improved onboarding step 2 feedback across the React and native macOS clients by mapping Node/npm and OpenClaw runtime-manager progress events into the install progress indicator so users see install-stage movement while ChillClaw prepares the managed runtime
+
 ## 0.1.5 - 2026-04-12
 
 ### 2026-04-12 23:04 CST

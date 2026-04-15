@@ -79,6 +79,35 @@ This file defines the operating rules for agents working in this repository.
 - Treat the local web interface as another view of the same daemon truth, not as a separate product model.
 - All web UI changes must remain responsive across desktop and narrow-screen layouts.
 
+### Public website rules
+
+- `apps/website` is a separate public marketing app, not another daemon client.
+- Do not call the daemon, OpenClaw, or any runtime API from the website.
+- Keep the website fully static and GitHub Pages compatible.
+- Treat the approved Figma website design as the source of truth for layout, section order, copy direction, and visual tone. Keep divergence minimal and intentional.
+- Replace `figma:asset` references with repo-owned local assets before shipping.
+- The website may use website-local components and styles instead of product-app primitives when fidelity or static-site simplicity requires it.
+- Keep website dependencies trimmed. Do not pull product-layer packages or heavy UI libraries into the website without a clear need.
+- Keep the website responsive across desktop and mobile layouts.
+- If a future custom domain is introduced, preserve the existing path-aware build setup instead of hardcoding repo-relative assumptions into page code.
+
+## UI system rules
+
+- New UI work must start from the shared primitive families before adding page-specific visuals: `SurfaceCard`, `StatusBadge`, `TagBadge`, `MetricCard`, `InfoBanner`, `ProgressBar`, `ActionButton`, `SettingRow`, `AvatarView`, `LoadingState`, `EmptyState`, and `ErrorState`.
+- New top-level screens must start from an approved scaffold: `WorkspaceScaffold`, `SplitContentScaffold`, `GuidedFlowScaffold`, or `OperationsScaffold`.
+- SwiftUI and React implementations may differ technically, but the primitive names, status vocabulary, tone semantics, spacing scale, and scaffold taxonomy must stay aligned across clients.
+- Status UI must use the shared `StatusBadge` path. Do not add page-local status chips, ad hoc colored status text, or duplicate status helpers.
+- Onboarding and deploy may keep specialized layouts, but they must still be built from shared primitives and the approved flow or operations scaffolds.
+- Web semantic tokens are the source of truth for shared web styling. If a shared visual value changes, update `apps/desktop-ui/src/shared/styles/tokens.css` first instead of hardcoding a new value in page or component CSS.
+- Corner radius is a system, not a per-screen decoration choice. Define shared semantic radius steps in `apps/desktop-ui/src/shared/styles/tokens.css` and matching `NativeUI` constants or helpers for native clients before using them in page-level code.
+- Choose radii by element size group using the shortest side of the shape. Small controls should use the smallest shared radius step, standard controls and compact surfaces should use the middle steps, and only large containers such as cards, dialogs, sheets, and onboarding panels should use the largest steps.
+- Page-local radius aliases are allowed only when they map back to shared semantic tokens or a documented derived rule. Do not introduce one-off raw radius values in page CSS, feature-specific CSS variables, or leaf SwiftUI views when an existing shared step fits.
+- Reserve pill or max radii such as `999px` or `Capsule()` for true pill and circular shapes, such as badges, toggles, and avatar chrome. Do not use pill radii for generic cards, panels, inputs, or buttons unless the product intentionally wants a pill-shaped control.
+- Treat border radii separately from fill radii when a stroke is inset, offset, or drawn on a different layer. Border-specific radii must be derived deliberately from the shape radius, stroke width, and inset instead of copying arbitrary shape values.
+- Keep nested surfaces visually aligned. When an inner panel, button, or input sits inside an outer card or dialog, prefer an outer radius that tracks the inner radius plus the visible padding or inset, snapped to the shared radius scale when needed.
+- If the radius system changes, update the shared web tokens, the native `NativeUI` radius contract, and the affected shared primitives together. Then verify the main onboarding, dashboard, settings, and dialog flows for nesting or visual regression.
+- Reuse shared components and scaffolds before adding new ones. If a page appears to need a one-off primitive, first check whether the existing shared family should be extended instead.
+
 ## OpenClaw integration rules
 
 - ChillClaw owns a managed OpenClaw runtime. Do not depend on whatever happens to be on the user’s `PATH`.
@@ -161,6 +190,7 @@ This file defines the operating rules for agents working in this repository.
 ## Documentation and decision records
 
 - Update `README.md` when install, runtime, packaging, or architecture behavior changes.
+- Every new `CHANGELOG.md` batch entry must include a timestamp in `YYYY-MM-DD HH:MM TZ` format.
 - Keep ADRs aligned when a core architectural rule changes.
 - Preserve future engine-swappability assumptions.
 - Packaging and release steps should be reproducible from scripts, not only from IDE or manual steps.

@@ -208,7 +208,7 @@ sequenceDiagram
 ## Step rules
 
 1. `Welcome` should only start or resume the guided flow.
-2. `Detect Runtime` should decide whether ChillClaw installs, reuses, or updates the managed OpenClaw runtime.
+2. `Detect Runtime` should decide whether ChillClaw installs, reuses, or updates the managed OpenClaw runtime. Managed prerequisite preparation should flow through the daemon Runtime Manager instead of page-local or step-local installers.
 3. `Permissions` should be a real gate owned by the daemon, not just a client-side informational step.
 4. `Configure First Model` should show only the three curated onboarding providers from daemon-owned config and should only write model configuration.
 5. `Configure First Channel` should show only the curated onboarding channels from daemon-owned config and should only write channel configuration.
@@ -216,7 +216,7 @@ sequenceDiagram
 
 ## Flow invariants
 
-- Keep the `UI -> daemon -> EngineAdapter -> OpenClaw` boundary intact for every onboarding step.
+- Keep the `UI -> daemon -> RuntimeManager / EngineAdapter -> OpenClaw` boundary intact for every onboarding step. The Runtime Manager supplies prerequisites; the adapter still owns OpenClaw behavior.
 - Keep curated model and channel metadata daemon-owned so web and native clients render the same choices.
 - Keep curated onboarding employee preset presentation daemon-owned too, including avatar preset ids, starter skill labels, and tool labels.
 - Keep staged config distinct from live applied state in both backend contracts and UI copy.

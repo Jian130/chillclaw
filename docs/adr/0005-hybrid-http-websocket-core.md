@@ -31,12 +31,13 @@ This preserves the existing boundary:
 
 `UI -> local daemon -> EngineAdapter -> engine`
 
-It also aligns with the four-manager engine seam:
+It also aligns with the current five-manager engine seam:
 
 - `instances`
 - `config`
 - `aiEmployees`
 - `gateway`
+- `plugins`
 
 ## Adapter implications
 

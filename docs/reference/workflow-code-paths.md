@@ -17,8 +17,10 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 | --- | --- | --- | --- | --- |
 | App startup and daemon boot | `apps/desktop-ui/src/main.tsx`, `apps/desktop-ui/src/app/routes.tsx` | `apps/macos-native/Sources/ChillClawNative/ChillClawNativeApp.swift`, `apps/macos-native/Sources/ChillClawNative/AppState.swift` | `GET /api/ping`, `GET /api/events` | `apps/daemon/src/index.ts` -> `apps/daemon/src/server.ts` -> `apps/daemon/src/routes/server-context.ts` |
 | Overview and dashboard refresh | `apps/desktop-ui/src/app/providers/OverviewProvider.tsx`, `apps/desktop-ui/src/features/dashboard/DashboardPage.tsx` | `apps/macos-native/Sources/ChillClawNative/AppState.swift`, `apps/macos-native/Sources/ChillClawNative/Screens.swift` | `GET /api/overview`, `GET /api/ai-team/overview`, `GET /api/models/config` | `OverviewService`, `AITeamService`, `adapter.instances.status()`, `adapter.gateway.healthCheck()` |
+| Runtime prerequisites and curated updates | client API surfaces today | shared Swift and TS API clients today | `/api/runtime/resources*` | `RuntimeManager`, runtime providers, `EventPublisher` |
+| Packaged app update checks | `apps/desktop-ui/src/features/settings/SettingsPage.tsx` | `apps/macos-native/Sources/ChillClawNative/Screens.swift` | `GET /api/app/update`, `POST /api/app/update/check` | `AppUpdateService`, `OverviewService`, `EventPublisher` |
 | Deploy runtime lifecycle | `apps/desktop-ui/src/features/deploy/DeployPage.tsx` | `apps/macos-native/Sources/ChillClawNative/DeploySupport.swift`, `apps/macos-native/Sources/ChillClawNative/Screens.swift` | `GET /api/deploy/targets`, deploy target mutations, `POST /api/deploy/gateway/restart` | `adapter.instances.*`, `adapter.gateway.restartGateway()`, `EventPublisher` |
-| Onboarding | `apps/desktop-ui/src/features/onboarding/OnboardingPage.tsx` | `apps/macos-native/Sources/ChillClawNative/OnboardingViewModel.swift`, `apps/macos-native/Sources/ChillClawNative/OnboardingView.swift` | `/api/onboarding/*`, `/api/first-run/*` | `OnboardingService`, `SetupService`, `ChannelSetupService`, `AITeamService`, `adapter.gateway.finalizeOnboardingSetup()` |
+| Onboarding | `apps/desktop-ui/src/features/onboarding/OnboardingPage.tsx` | `apps/macos-native/Sources/ChillClawNative/OnboardingViewModel.swift`, `apps/macos-native/Sources/ChillClawNative/OnboardingView.swift` | `/api/onboarding/*`, `POST /api/install`, runtime/model/channel helper routes | `OnboardingService`, `SetupService`, `ChannelSetupService`, `AITeamService`, `adapter.gateway.finalizeOnboardingSetup()` |
 | Model configuration and auth | `apps/desktop-ui/src/features/config/ConfigPage.tsx`, onboarding page | `apps/macos-native/Sources/ChillClawNative/ConfigurationSupport.swift`, onboarding view model | `/api/models/*`, onboarding model routes | `adapter.config.*`, `apps/daemon/src/engine/openclaw-config-manager.ts`, model coordinators |
 | Channel configuration and sessions | `apps/desktop-ui/src/features/config/ConfigPage.tsx`, onboarding page | `apps/macos-native/Sources/ChillClawNative/ConfigurationSupport.swift`, onboarding view model | `/api/channels/*`, onboarding channel routes, Feishu callback routes | `ChannelSetupService`, `FeatureWorkflowService`, `adapter.config.*`, `adapter.gateway.*`, channels coordinator |
 | Chat threads and streaming | `apps/desktop-ui/src/features/chat/ChatPage.tsx` | `apps/macos-native/Sources/ChillClawNative/AppState.swift`, `apps/shared/ChillClawKit/Sources/ChillClawChatUI/ChatViewModel.swift` | `/api/chat/*`, `GET /api/events` | `ChatService`, `adapter.gateway.getChatThreadDetail()`, `sendChatMessage()`, `abortChatMessage()` |
@@ -93,7 +95,50 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 
 - Overview reads are live, but AI member and team mutation routes are not. The dashboard can read current team state even though standalone member/team writes still fail.
 
-## 3. Deploy, install, update, uninstall, and service lifecycle
+## 3. Runtime prerequisites and curated updates
+
+### Entry points
+
+- Web client methods live in `apps/desktop-ui/src/shared/api/client.ts`.
+- Native client methods live in `apps/shared/ChillClawKit/Sources/ChillClawClient/APIClient.swift`.
+- Shared runtime contracts live in `packages/contracts/src/index.ts` and `apps/shared/ChillClawKit/Sources/ChillClawProtocol/Models.swift`.
+- Current product screens consume runtime state through `ProductOverview.runtimeManager`; dedicated settings/update surfaces can call the runtime action routes directly.
+
+### Daemon routes
+
+- `GET /api/runtime/resources`
+- `POST /api/runtime/resources/:resourceId/prepare`
+- `POST /api/runtime/resources/:resourceId/repair`
+- `POST /api/runtime/resources/:resourceId/check-update`
+- `POST /api/runtime/resources/:resourceId/stage-update`
+- `POST /api/runtime/resources/:resourceId/apply-update`
+- `POST /api/runtime/resources/:resourceId/rollback`
+
+### Service path
+
+- Routes live in `apps/daemon/src/routes/runtime.ts`.
+- `apps/daemon/src/runtime-manager/runtime-manager.ts` owns action orchestration, dependency ordering, staging, apply, and rollback.
+- `apps/daemon/src/runtime-manager/default-runtime-manager.ts` wires the default resource providers and manifest/feed loaders.
+- Runtime paths and environment variables live in `apps/daemon/src/runtime-paths.ts`.
+- The startup scheduler in `apps/daemon/src/server.ts` silently stages approved updates from the curated feed.
+
+### Integration path
+
+- `OpenClawAdapter.ensurePinnedOpenClaw("managed-local")` asks the Runtime Manager for `openclaw-runtime`, then keeps OpenClaw-specific gateway baseline and health verification inside the adapter.
+- `LocalModelRuntimeService.install()` asks the Runtime Manager for `ollama-runtime`; model pulls and resume state remain in local model runtime state.
+- Managed Node/npm install wraps `apps/daemon/src/platform/managed-node-runtime.ts`.
+
+### Support and eventing
+
+- Runtime progress and completion events come from `EventPublisher.publishRuntimeProgress()`, `publishRuntimeCompleted()`, and `publishRuntimeUpdateStaged()`.
+- Web and native event decoders handle `runtime.progress`, `runtime.completed`, and `runtime.update-staged`.
+- macOS release packaging prepares runnable CLI artifacts, then stages them with runtime manifests under `Contents/Resources/app/runtime-artifacts`.
+
+### Notable gap
+
+- The managed OpenClaw manifest supports a bundled artifact path, but release packaging still needs to produce a concrete pinned OpenClaw artifact before npm fallback becomes only a recovery path.
+
+## 4. Deploy, install, update, uninstall, and service lifecycle
 
 ### Entry points
 
@@ -127,7 +172,7 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 - Gateway reachability events come from `EventPublisher.publishGatewayStatus()`.
 - Local dev start/stop flows live in `scripts/start-dev.mjs`, `scripts/stop-dev.mjs`, and `scripts/dev-process-control.mjs`.
 
-## 4. Onboarding
+## 5. Onboarding
 
 ### Entry points
 
@@ -175,7 +220,7 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 - Personal WeChat still breaks the ideal config-only channel step by using a live login session.
 - The completion API still accepts destination shortcuts, so finalization and post-completion navigation are not perfectly separated at the transport layer.
 
-## 5. Model configuration and auth sessions
+## 6. Model configuration and auth sessions
 
 ### Entry points
 
@@ -208,7 +253,7 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 - Model snapshot events are published with `publishModelConfigUpdated()`.
 - Web GET caching and fresh-read invalidation live in `apps/desktop-ui/src/shared/api/client.ts` and route `freshReadInvalidationTargets`.
 
-## 6. Channel configuration, pairing, and channel sessions
+## 7. Channel configuration, pairing, and channel sessions
 
 ### Entry points
 
@@ -253,7 +298,7 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 
 - `ChannelSetupService` currently mixes channel catalog definitions, secrets, state persistence, prerequisite handling, and session orchestration in one file.
 
-## 7. Chat thread creation, send, streaming, and abort
+## 8. Chat thread creation, send, streaming, and abort
 
 ### Entry points
 
@@ -287,7 +332,7 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 - Stored thread metadata lives in `StateStore.chat`.
 - Web event filtering is in `chatStreamEventFromDaemonEvent()` inside `ChatPage.tsx`.
 
-## 8. Skills and plugins
+## 9. Skills and plugins
 
 ### Entry points
 
@@ -324,7 +369,7 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 - Skill custom metadata lives in `StateStore.skills`.
 - Managed-plugin dependency metadata lives in `apps/daemon/src/config/managed-plugins.ts`.
 
-## 9. Task execution
+## 10. Task execution
 
 ### Daemon route
 
@@ -341,7 +386,7 @@ This reference maps the current ChillClaw workflow surface to the code paths tha
 
 - The backend supports task execution and recent-task persistence, but the initiating UI surfaces are thinner than the backend pathway itself.
 
-## 10. AI team overview vs mutation gap
+## 11. AI team overview vs mutation gap
 
 This is a cross-cutting workflow problem worth keeping in view while reading the repo:
 

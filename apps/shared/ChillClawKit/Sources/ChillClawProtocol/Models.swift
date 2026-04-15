@@ -642,6 +642,102 @@ public struct LocalModelRuntimeOverview: Codable, Sendable {
     }
 }
 
+public struct RuntimeResourceOverview: Codable, Sendable, Identifiable {
+    public var id: String
+    public var kind: String
+    public var label: String
+    public var status: String
+    public var sourcePolicy: [String]
+    public var updatePolicy: String
+    public var installedVersion: String?
+    public var bundledVersion: String?
+    public var desiredVersion: String?
+    public var latestApprovedVersion: String?
+    public var stagedVersion: String?
+    public var activePath: String?
+    public var updateAvailable: Bool
+    public var blockingResourceIds: [String]?
+    public var summary: String
+    public var detail: String
+    public var lastCheckedAt: String?
+    public var lastUpdatedAt: String?
+    public var lastError: String?
+
+    public init(
+        id: String,
+        kind: String,
+        label: String,
+        status: String,
+        sourcePolicy: [String],
+        updatePolicy: String,
+        installedVersion: String? = nil,
+        bundledVersion: String? = nil,
+        desiredVersion: String? = nil,
+        latestApprovedVersion: String? = nil,
+        stagedVersion: String? = nil,
+        activePath: String? = nil,
+        updateAvailable: Bool,
+        blockingResourceIds: [String]? = nil,
+        summary: String,
+        detail: String,
+        lastCheckedAt: String? = nil,
+        lastUpdatedAt: String? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+        self.status = status
+        self.sourcePolicy = sourcePolicy
+        self.updatePolicy = updatePolicy
+        self.installedVersion = installedVersion
+        self.bundledVersion = bundledVersion
+        self.desiredVersion = desiredVersion
+        self.latestApprovedVersion = latestApprovedVersion
+        self.stagedVersion = stagedVersion
+        self.activePath = activePath
+        self.updateAvailable = updateAvailable
+        self.blockingResourceIds = blockingResourceIds
+        self.summary = summary
+        self.detail = detail
+        self.lastCheckedAt = lastCheckedAt
+        self.lastUpdatedAt = lastUpdatedAt
+        self.lastError = lastError
+    }
+}
+
+public struct RuntimeManagerOverview: Codable, Sendable {
+    public var checkedAt: String
+    public var resources: [RuntimeResourceOverview]
+    public var summary: String
+    public var detail: String
+
+    public init(checkedAt: String, resources: [RuntimeResourceOverview], summary: String, detail: String) {
+        self.checkedAt = checkedAt
+        self.resources = resources
+        self.summary = summary
+        self.detail = detail
+    }
+
+    public static var empty: RuntimeManagerOverview {
+        RuntimeManagerOverview(
+            checkedAt: "",
+            resources: [],
+            summary: "Runtime manager has not reported yet.",
+            detail: "ChillClaw will report managed prerequisite status after the daemon starts."
+        )
+    }
+}
+
+public struct RuntimeJobProgress: Codable, Sendable {
+    public var resourceId: String
+    public var action: String
+    public var phase: String
+    public var percent: Int?
+    public var message: String
+    public var runtimeManager: RuntimeManagerOverview
+}
+
 public struct SetupStepResult: Codable, Sendable, Identifiable {
     public var id: String
     public var title: String
@@ -689,6 +785,7 @@ public struct ProductOverview: Codable, Sendable {
     public var installChecks: [InstallCheck]
     public var channelSetup: ChannelSetupOverview
     public var localRuntime: LocalModelRuntimeOverview?
+    public var runtimeManager: RuntimeManagerOverview
     public var profiles: [UserProfile]
     public var templates: [TaskTemplate]
     public var healthChecks: [HealthCheckResult]
@@ -708,6 +805,7 @@ public struct ProductOverview: Codable, Sendable {
         installChecks: [InstallCheck],
         channelSetup: ChannelSetupOverview,
         localRuntime: LocalModelRuntimeOverview? = nil,
+        runtimeManager: RuntimeManagerOverview = .empty,
         profiles: [UserProfile],
         templates: [TaskTemplate],
         healthChecks: [HealthCheckResult],
@@ -726,6 +824,7 @@ public struct ProductOverview: Codable, Sendable {
         self.installChecks = installChecks
         self.channelSetup = channelSetup
         self.localRuntime = localRuntime
+        self.runtimeManager = runtimeManager
         self.profiles = profiles
         self.templates = templates
         self.healthChecks = healthChecks
@@ -746,6 +845,7 @@ public struct ProductOverview: Codable, Sendable {
         case installChecks
         case channelSetup
         case localRuntime
+        case runtimeManager
         case profiles
         case templates
         case healthChecks
@@ -771,6 +871,7 @@ public struct ProductOverview: Codable, Sendable {
             installChecks: try container.decode([InstallCheck].self, forKey: .installChecks),
             channelSetup: try container.decode(ChannelSetupOverview.self, forKey: .channelSetup),
             localRuntime: try container.decodeIfPresent(LocalModelRuntimeOverview.self, forKey: .localRuntime),
+            runtimeManager: try container.decodeIfPresent(RuntimeManagerOverview.self, forKey: .runtimeManager) ?? .empty,
             profiles: try container.decode([UserProfile].self, forKey: .profiles),
             templates: try container.decode([TaskTemplate].self, forKey: .templates),
             healthChecks: try container.decode([HealthCheckResult].self, forKey: .healthChecks),
@@ -998,6 +1099,18 @@ public struct LocalModelRuntimeActionResponse: Codable, Sendable {
     public var localRuntime: LocalModelRuntimeOverview
     public var modelConfig: ModelConfigOverview
     public var overview: ProductOverview
+}
+
+public struct RuntimeActionResponse: Codable, Sendable {
+    public var epoch: String
+    public var revision: Int
+    public var settled: Bool
+    public var action: String
+    public var status: String
+    public var message: String
+    public var resource: RuntimeResourceOverview
+    public var runtimeManager: RuntimeManagerOverview
+    public var overview: ProductOverview?
 }
 
 public struct ModelAuthSessionResponse: Codable, Sendable {

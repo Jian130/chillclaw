@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -63,6 +63,43 @@ echo "$@" > "${root}/npm-args.txt"
   return archivePath;
 }
 
+async function createFakeNodeRuntimeDir(root: string, version: string, options?: { npmExecutable?: boolean }): Promise<string> {
+  const distName = `node-v${version}-darwin-${process.arch === "x64" ? "x64" : "arm64"}`;
+  const distRoot = join(root, distName);
+  const binDir = join(distRoot, "bin");
+  const npmCliDir = join(distRoot, "lib", "node_modules", "npm", "bin");
+
+  await mkdir(binDir, { recursive: true });
+  await mkdir(npmCliDir, { recursive: true });
+  await writeFile(
+    join(binDir, "node"),
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "v${version}"
+  exit 0
+fi
+script="$1"
+shift
+exec /bin/sh "$script" "$@"
+`
+  );
+  await writeFile(
+    join(npmCliDir, "npm-cli.js"),
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "10.9.0"
+  exit 0
+fi
+echo "$@" > "${root}/npm-runtime-dir-args.txt"
+`
+  );
+  await chmod(join(binDir, "node"), 0o755);
+  await chmod(join(npmCliDir, "npm-cli.js"), options?.npmExecutable === false ? 0o644 : 0o755);
+  await symlink("../lib/node_modules/npm/bin/npm-cli.js", join(binDir, "npm"));
+
+  return distRoot;
+}
+
 test("ensureManagedNodeNpmInvocation installs npm under the ChillClaw runtime", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "chillclaw-managed-node-test-"));
   const dataDir = join(tempDir, "data");
@@ -104,6 +141,79 @@ test("ensureManagedNodeNpmInvocation installs npm under the ChillClaw runtime", 
       delete process.env.CHILLCLAW_MANAGED_NODE_DIST_URL;
     } else {
       process.env.CHILLCLAW_MANAGED_NODE_DIST_URL = originalNodeUrl;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureManagedNodeNpmInvocation preserves bundled Node relative npm symlink", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "chillclaw-managed-node-runtime-dir-test-"));
+  const dataDir = join(tempDir, "data");
+  const version = "99.0.1";
+  const runtimeDir = await createFakeNodeRuntimeDir(tempDir, version);
+  const originalDataDir = process.env.CHILLCLAW_DATA_DIR;
+  const originalNodeVersion = process.env.CHILLCLAW_MANAGED_NODE_VERSION;
+  const restorePlatform = mockProcessPlatform("darwin");
+
+  process.env.CHILLCLAW_DATA_DIR = dataDir;
+  process.env.CHILLCLAW_MANAGED_NODE_VERSION = version;
+
+  try {
+    const invocation = await ensureManagedNodeNpmInvocation({ runtimeDir });
+
+    assert.equal(invocation.command, getManagedNodeNpmBinPath());
+    assert.equal(await readlink(getManagedNodeNpmBinPath()), "../lib/node_modules/npm/bin/npm-cli.js");
+  } finally {
+    restorePlatform();
+    if (originalDataDir === undefined) {
+      delete process.env.CHILLCLAW_DATA_DIR;
+    } else {
+      process.env.CHILLCLAW_DATA_DIR = originalDataDir;
+    }
+    if (originalNodeVersion === undefined) {
+      delete process.env.CHILLCLAW_MANAGED_NODE_VERSION;
+    } else {
+      process.env.CHILLCLAW_MANAGED_NODE_VERSION = originalNodeVersion;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureManagedNodeNpmInvocation falls back to download when bundled npm cannot run", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "chillclaw-managed-node-runtime-fallback-test-"));
+  const dataDir = join(tempDir, "data");
+  const bundledRoot = join(tempDir, "bundled");
+  const downloadRoot = join(tempDir, "download");
+  const version = "99.0.2";
+  const runtimeDir = await createFakeNodeRuntimeDir(bundledRoot, version, { npmExecutable: false });
+  const archivePath = await createFakeNodeArchive(downloadRoot, version);
+  const originalDataDir = process.env.CHILLCLAW_DATA_DIR;
+  const originalNodeVersion = process.env.CHILLCLAW_MANAGED_NODE_VERSION;
+  const restorePlatform = mockProcessPlatform("darwin");
+
+  process.env.CHILLCLAW_DATA_DIR = dataDir;
+  process.env.CHILLCLAW_MANAGED_NODE_VERSION = version;
+
+  try {
+    const invocation = await ensureManagedNodeNpmInvocation({
+      runtimeDir,
+      archiveUrl: pathToFileURL(archivePath).href
+    });
+
+    await execFile(invocation.command, ["install", "--prefix", join(tempDir, "openclaw-runtime"), "openclaw@latest"]);
+
+    assert.equal(await readFile(join(downloadRoot, "npm-args.txt"), "utf8"), "install --prefix " + join(tempDir, "openclaw-runtime") + " openclaw@latest\n");
+  } finally {
+    restorePlatform();
+    if (originalDataDir === undefined) {
+      delete process.env.CHILLCLAW_DATA_DIR;
+    } else {
+      process.env.CHILLCLAW_DATA_DIR = originalDataDir;
+    }
+    if (originalNodeVersion === undefined) {
+      delete process.env.CHILLCLAW_MANAGED_NODE_VERSION;
+    } else {
+      process.env.CHILLCLAW_MANAGED_NODE_VERSION = originalNodeVersion;
     }
     await rm(tempDir, { recursive: true, force: true });
   }

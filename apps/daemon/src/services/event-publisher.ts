@@ -14,6 +14,10 @@ import type {
   PresetSkillSyncOverview,
   ProductOverview,
   RevisionedSnapshot,
+  RuntimeAction,
+  RuntimeJobPhase,
+  RuntimeManagerOverview,
+  RuntimeResourceId,
   ChillClawDeployPhase,
   ChillClawTaskProgressStatus,
   SkillCatalogOverview,
@@ -90,6 +94,45 @@ export class EventPublisher {
   }): void {
     this.bus.publish({
       type: "local-runtime.completed",
+      ...args
+    });
+  }
+
+  publishRuntimeProgress(args: {
+    resourceId: RuntimeResourceId;
+    action: RuntimeAction;
+    phase: RuntimeJobPhase;
+    percent?: number;
+    message: string;
+    runtimeManager: RuntimeManagerOverview;
+  }): void {
+    this.bus.publish({
+      type: "runtime.progress",
+      ...args
+    });
+  }
+
+  publishRuntimeCompleted(args: {
+    resourceId: RuntimeResourceId;
+    action: RuntimeAction;
+    status: "completed" | "failed";
+    message: string;
+    runtimeManager: RuntimeManagerOverview;
+  }): void {
+    this.bus.publish({
+      type: "runtime.completed",
+      ...args
+    });
+  }
+
+  publishRuntimeUpdateStaged(args: {
+    resourceId: RuntimeResourceId;
+    version: string;
+    message: string;
+    runtimeManager: RuntimeManagerOverview;
+  }): void {
+    this.bus.publish({
+      type: "runtime.update-staged",
       ...args
     });
   }

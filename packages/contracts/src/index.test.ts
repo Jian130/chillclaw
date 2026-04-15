@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   createDefaultProductOverview,
+  createDefaultRuntimeManagerOverview,
   type DeploymentTargetsResponse,
   type AITeamOverview,
   type ChatActionResponse,
@@ -193,6 +194,48 @@ test("default product overview exposes an unchecked local runtime summary", () =
   assert.equal(overview.localRuntime?.status, "unchecked");
   assert.equal(overview.localRuntime?.recommendation, "unknown");
   assert.equal(overview.localRuntime?.supportCode, "unchecked");
+});
+
+test("default product overview exposes daemon-managed runtime resources", () => {
+  const overview = createDefaultProductOverview({ appVersion: "1.2.3" });
+
+  assert.equal(overview.runtimeManager.resources.length >= 4, true);
+  assert.deepEqual(
+    overview.runtimeManager.resources.map((resource) => resource.id),
+    ["node-npm-runtime", "openclaw-runtime", "ollama-runtime", "local-model-catalog"]
+  );
+  assert.equal(overview.runtimeManager.resources[0]?.status, "missing");
+  assert.equal(overview.runtimeManager.resources[0]?.sourcePolicy.includes("bundled"), true);
+  assert.equal(overview.runtimeManager.resources[0]?.updatePolicy, "stage-silently-apply-safely");
+});
+
+test("runtime manager overview serializes staged updates", () => {
+  const overview = createDefaultRuntimeManagerOverview({
+    checkedAt: "2026-04-13T00:00:00.000Z",
+    resources: [
+      {
+        id: "ollama-runtime",
+        kind: "local-ai-runtime",
+        label: "Ollama runtime",
+        status: "staged-update",
+        sourcePolicy: ["bundled", "download"],
+        updatePolicy: "stage-silently-apply-safely",
+        installedVersion: "0.20.5",
+        stagedVersion: "0.20.6",
+        updateAvailable: true,
+        summary: "Ollama update is staged.",
+        detail: "ChillClaw can apply this update when local AI is idle.",
+        lastCheckedAt: "2026-04-13T00:00:00.000Z"
+      }
+    ]
+  });
+
+  const parsed = JSON.parse(JSON.stringify(overview)) as typeof overview;
+
+  assert.equal(parsed.resources[0]?.id, "ollama-runtime");
+  assert.equal(parsed.resources[0]?.status, "staged-update");
+  assert.equal(parsed.resources[0]?.stagedVersion, "0.20.6");
+  assert.equal(parsed.resources[0]?.updateAvailable, true);
 });
 
 test("onboarding state response serializes the optional local runtime snapshot", () => {

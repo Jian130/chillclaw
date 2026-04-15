@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { listTestFiles } from "./run-node-test-files.mjs";
+import { formatGithubErrorAnnotation, listTestFiles } from "./run-node-test-files.mjs";
 
 test("node test file runner lists root and nested tests without shell glob expansion", async (t) => {
   const tempDir = await mkdtemp(join(tmpdir(), "chillclaw-node-test-files-"));
@@ -24,4 +24,17 @@ test("node test file runner lists root and nested tests without shell glob expan
     join(tempDir, "src", "server.test.ts"),
     join(tempDir, "src", "services", "state-store.test.ts")
   ]);
+});
+
+test("node test file runner formats GitHub annotations with escaped failure output", () => {
+  const annotation = formatGithubErrorAnnotation(
+    "/repo/apps/daemon/src/services/example.test.ts",
+    "/repo",
+    "not ok 3 - example\nexpected 100% ready\r\nactual timeout"
+  );
+
+  assert.equal(
+    annotation,
+    "::error file=apps/daemon/src/services/example.test.ts,title=Node test file failed::not ok 3 - example%0Aexpected 100%25 ready%0D%0Aactual timeout"
+  );
 });

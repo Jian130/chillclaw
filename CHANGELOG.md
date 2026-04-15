@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-04-15 14:31 CST
+
+- fixed daemon test discovery in GitHub Actions by replacing shell-expanded globs with a deterministic Node test-file runner, ensuring root-level and nested daemon tests run consistently on Ubuntu and adding per-file CI annotations for future daemon test failures
+
 ## 0.1.6 - 2026-04-15
 
 ### 2026-04-15 12:35 CST

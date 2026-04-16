@@ -36,7 +36,6 @@ import { useLocale } from "../../app/providers/LocaleProvider.js";
 import { useOverview } from "../../app/providers/OverviewProvider.js";
 import {
   completeOnboarding,
-  confirmOnboardingPermissions,
   detectOnboardingRuntime,
   fetchAITeamOverview,
   fetchOnboardingChannelSession,
@@ -93,6 +92,7 @@ import {
   resolveOnboardingChannelSetupVariant,
   resolveOnboardingInstallViewState,
   resolveOnboardingModelPickerProviders,
+  resolveOnboardingLocalRuntime,
   resolveOnboardingLocalSetupProgress,
   resolveOnboardingModelSetupVariant,
   resolveOnboardingModelStepMode,
@@ -106,11 +106,17 @@ import {
   type OnboardingModelStepMode
 } from "./helpers.js";
 
-const ONBOARDING_STEP_ORDER = ["welcome", "install", "permissions", "model", "channel", "employee"] as const;
+const ONBOARDING_STEP_ORDER = ["welcome", "install", "model", "channel", "employee"] as const;
 const MODEL_CLOUD_HANDOFF_DELAY_MS = 2_000;
 
-function isCurrentOrLaterStep(step: OnboardingStateResponse["draft"]["currentStep"], target: typeof ONBOARDING_STEP_ORDER[number]) {
-  return ONBOARDING_STEP_ORDER.indexOf(step) >= ONBOARDING_STEP_ORDER.indexOf(target);
+type ActiveOnboardingStep = typeof ONBOARDING_STEP_ORDER[number];
+
+function normalizeOnboardingStep(step: OnboardingStateResponse["draft"]["currentStep"]): ActiveOnboardingStep {
+  return step === "permissions" ? "model" : step;
+}
+
+function isCurrentOrLaterStep(step: OnboardingStateResponse["draft"]["currentStep"], target: ActiveOnboardingStep) {
+  return ONBOARDING_STEP_ORDER.indexOf(normalizeOnboardingStep(step)) >= ONBOARDING_STEP_ORDER.indexOf(target);
 }
 
 function channelIcon(channelId: string) {
@@ -258,7 +264,7 @@ export default function OnboardingPage() {
   const [completionWarmupMessage, setCompletionWarmupMessage] = useState("");
 
   const currentDraft = onboardingState?.draft ?? { currentStep: "welcome" as const };
-  const currentStep = currentDraft.currentStep;
+  const currentStep = normalizeOnboardingStep(currentDraft.currentStep);
   const showingCompletion = Boolean(completedOnboarding);
   const completionSummary = completedOnboarding?.summary ?? onboardingState?.summary;
   const currentStepIndex = ONBOARDING_STEP_ORDER.indexOf(currentStep);
@@ -369,7 +375,12 @@ export default function OnboardingPage() {
       selectedModelEntry
     ]
   );
-  const localRuntime = localRuntimeSnapshot ?? modelConfig?.localRuntime ?? onboardingState?.localRuntime;
+  const localRuntime = resolveOnboardingLocalRuntime({
+    currentStep,
+    localRuntimeSnapshot,
+    onboardingLocalRuntime: onboardingState?.localRuntime,
+    modelConfigLocalRuntime: modelConfig?.localRuntime
+  });
   const localRuntimeForDisplay = useMemo(
     () =>
       localRuntime
@@ -513,11 +524,6 @@ export default function OnboardingPage() {
   async function stageExistingInstall() {
     setCompletedOnboarding(undefined);
     return applyOnboardingState(await reuseOnboardingRuntime());
-  }
-
-  async function confirmPermissionsStep() {
-    setCompletedOnboarding(undefined);
-    return applyOnboardingState(await confirmOnboardingPermissions());
   }
 
   async function saveEmployeeDraftToDaemon(employee: NonNullable<OnboardingStateResponse["draft"]["employee"]>) {
@@ -1093,14 +1099,9 @@ export default function OnboardingPage() {
     await stageExistingInstall();
   }
 
-  async function handleAdvanceToPermissions() {
-    setPageError(undefined);
-    await goToStep("permissions");
-  }
-
   async function handleAdvanceToModel() {
     setPageError(undefined);
-    await confirmPermissionsStep();
+    await goToStep("model");
   }
 
   async function handleAdvanceToChannel() {
@@ -1161,7 +1162,12 @@ export default function OnboardingPage() {
       setModelConfig(result.modelConfig);
       setLocalRuntimeSnapshot(result.localRuntime);
       setLocalRuntimeMessage(result.message);
-      const nextOnboarding = await refreshOnboardingState();
+      let nextOnboarding: OnboardingStateResponse;
+      if (result.onboarding) {
+        nextOnboarding = await applyOnboardingState(result.onboarding);
+      } else {
+        nextOnboarding = await refreshOnboardingState();
+      }
       if (result.status === "completed" && nextOnboarding.summary.model?.entryId) {
         await goToStep("channel");
       }
@@ -1348,7 +1354,7 @@ export default function OnboardingPage() {
 
   async function handleComplete(destination: "team" | "dashboard" | "chat") {
     if (showingCompletion) {
-      navigate(onboardingDestinationPath(destination), { replace: true });
+      navigate(onboardingDestinationPath(destination, completedOnboarding?.summary.employee?.memberId), { replace: true });
       return;
     }
 
@@ -1357,7 +1363,7 @@ export default function OnboardingPage() {
     try {
       const result = await completeOnboarding({ destination });
       setOverview(result.overview);
-      navigate(onboardingDestinationPath(destination), { replace: true });
+      navigate(onboardingDestinationPath(destination, result.summary.employee?.memberId), { replace: true });
     } catch (actionError) {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not complete onboarding.");
     } finally {
@@ -1396,7 +1402,7 @@ export default function OnboardingPage() {
         }
       >
 
-        {currentStep === "welcome" || currentStep === "install" || currentStep === "permissions" || currentStep === "model" ? (
+        {currentStep === "welcome" || currentStep === "install" || currentStep === "model" ? (
           <div className="onboarding-header onboarding-header--welcome">
             <p>{copy.subtitle}</p>
             <button className="onboarding-skip" onClick={() => void handleComplete("team")} type="button">
@@ -1548,7 +1554,7 @@ export default function OnboardingPage() {
 
                     {installViewState.kind === "complete" ? (
                       <div className="onboarding-install-actions">
-                        <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToPermissions()}>
+                        <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToModel()}>
                           {copy.installContinue}
                         </Button>
                         <button className="onboarding-install-back" onClick={() => void goToStep("welcome")} type="button">
@@ -1558,34 +1564,6 @@ export default function OnboardingPage() {
                     ) : null}
                   </>
                 )}
-              </div>
-            ) : null}
-
-            {currentStep === "permissions" ? (
-              <div className="onboarding-step onboarding-step--install onboarding-step--install-figma">
-                <div className="onboarding-step__intro onboarding-step__intro--welcome onboarding-step__intro--model">
-                  <h2>{copy.permissionsTitle}</h2>
-                  <p>{copy.permissionsBody}</p>
-                </div>
-
-                <div className="onboarding-install-status onboarding-install-status--success">
-                  <div className="onboarding-install-status__icon">
-                    <Info size={28} />
-                  </div>
-                  <div className="onboarding-install-status__copy">
-                    <strong>{copy.permissionsNativeTitle}</strong>
-                    <p>{copy.permissionsNativeBody}</p>
-                  </div>
-                </div>
-
-                <div className="onboarding-install-actions">
-                  <Button className="onboarding-install-next onboarding-primary-action" fullWidth size="lg" onClick={() => void handleAdvanceToModel()}>
-                    {copy.installContinue}
-                  </Button>
-                  <button className="onboarding-install-back" onClick={() => void goToStep("install")} type="button">
-                    {common.back}
-                  </button>
-                </div>
               </div>
             ) : null}
 
@@ -1706,7 +1684,7 @@ export default function OnboardingPage() {
                       ) : null}
 
                       <div className="onboarding-model-actions onboarding-model-actions--picker">
-                        <button className="onboarding-install-back" onClick={() => void goToStep("permissions")} type="button">
+                        <button className="onboarding-install-back" onClick={() => void goToStep("install")} type="button">
                           {common.back}
                         </button>
                         {localRuntime && (localRuntime.status === "failed" || localRuntime.status === "degraded") ? (
@@ -1794,7 +1772,7 @@ export default function OnboardingPage() {
                           ))}
                         </div>
                         <div className="onboarding-model-actions onboarding-model-actions--picker">
-                          <button className="onboarding-install-back" onClick={() => void goToStep("permissions")} type="button">
+                          <button className="onboarding-install-back" onClick={() => void goToStep("install")} type="button">
                             {common.back}
                           </button>
                         </div>

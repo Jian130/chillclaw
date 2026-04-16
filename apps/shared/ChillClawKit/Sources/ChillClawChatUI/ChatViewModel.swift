@@ -113,6 +113,22 @@ public final class ChillClawChatViewModel {
         loadThreadDetail(threadId: threadId)
     }
 
+    public func openThread(memberId: String) async {
+        let normalizedMemberId = memberId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedMemberId.isEmpty else { return }
+
+        if selectedThread?.memberId == normalizedMemberId {
+            return
+        }
+
+        if let existingThread = overview.threads.first(where: { $0.memberId == normalizedMemberId }) {
+            await selectThread(existingThread.id)
+            return
+        }
+
+        await createThread(memberId: normalizedMemberId)
+    }
+
     public func createThread(memberId: String) async {
         do {
             let response = try await transport.createThread(memberId: memberId)

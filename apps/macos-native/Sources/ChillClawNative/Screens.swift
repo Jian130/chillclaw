@@ -2287,9 +2287,9 @@ struct ChatScreen: View {
             guard let selectedMemberId = appState.selectedMemberForChat, !selectedMemberId.isEmpty else { return true }
             return thread.memberId == selectedMemberId
         }
-        let selectedMember = members.first(where: { $0.id == appState.chatViewModel.selectedThread?.memberId })
         let railWidth = nativeChatSidebarWidth(collapsed: sidebarCollapsed)
         let showsSidebarLabels = nativeChatShowsSidebarLabels(collapsed: sidebarCollapsed)
+        let chatOpenTaskID = appState.selectedMemberForChat ?? ""
 
         SplitContentScaffold(title: "Conversations", subtitle: "Talk to ChillClaw employees and inspect thread history.") {
             ActionButton(
@@ -2298,13 +2298,6 @@ struct ChatScreen: View {
                 variant: .outline
             ) {
                 sidebarCollapsed.toggle()
-            }
-
-            ActionButton("New Chat", systemImage: "plus.bubble", variant: .primary) {
-                Task {
-                    guard let memberId = appState.selectedMemberForChat ?? members.first?.id else { return }
-                    await appState.chatViewModel.createThread(memberId: memberId)
-                }
             }
         } sidebar: {
             VStack(alignment: .leading, spacing: 0) {
@@ -2353,17 +2346,10 @@ struct ChatScreen: View {
                         if showsSidebarLabels {
                             Text("No conversations yet")
                                 .font(.headline)
-                            Text("Start a new chat or choose a different AI member filter.")
+                            Text("The conversation will appear here when this member is ready.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
-                        }
-
-                        ActionButton("New Chat", systemImage: "plus", variant: .outline) {
-                            Task {
-                                guard let memberId = appState.selectedMemberForChat ?? members.first?.id else { return }
-                                await appState.chatViewModel.createThread(memberId: memberId)
-                            }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2409,64 +2395,44 @@ struct ChatScreen: View {
             Group {
                 if let thread = appState.chatViewModel.selectedThread {
                     VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .top, spacing: 16) {
-                            HStack(alignment: .center, spacing: 14) {
-                                if let selectedMember {
-                                    AvatarView(avatar: selectedMember.avatar, name: selectedMember.name, size: 42)
-                                } else {
-                                    nativeChatFallbackAvatar(title: thread.title, size: 42)
+                        if nativeChatShouldShowStatusStrip(thread) {
+                            HStack(alignment: .center, spacing: 12) {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        StatusBadge(
+                                            nativeChatComposerLabel(for: thread.composerState.status),
+                                            tone: nativeChatComposerTone(for: thread.composerState.status),
+                                            systemImage: nativeChatComposerIcon(for: thread.composerState.status)
+                                        )
+                                        if let bridgeState = thread.composerState.bridgeState {
+                                            StatusBadge(
+                                                nativeChatBridgeLabel(for: bridgeState),
+                                                tone: nativeChatBridgeTone(for: bridgeState),
+                                                systemImage: nativeChatBridgeIcon(for: bridgeState)
+                                            )
+                                        }
+                                        if let activeRunState = thread.activeRunState, !activeRunState.isEmpty {
+                                            TagBadge(activeRunState, tone: .neutral)
+                                        }
+                                        if thread.composerState.canAbort {
+                                            TagBadge("Live run", tone: .info)
+                                        }
+                                    }
                                 }
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(selectedMember?.name ?? thread.title)
-                                        .font(.headline)
-                                    Text(thread.composerState.activityLabel ?? selectedMember?.jobTitle ?? thread.title)
-                                        .font(.callout)
-                                        .foregroundStyle(.secondary)
-                                    Text(thread.title)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Spacer()
-
-                            if thread.composerState.canAbort {
-                                ActionButton("Stop", variant: .destructive) {
-                                    Task { await appState.chatViewModel.abortCurrentRun() }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 24)
-                        .padding(.bottom, 16)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                StatusBadge(
-                                    nativeChatComposerLabel(for: thread.composerState.status),
-                                    tone: nativeChatComposerTone(for: thread.composerState.status),
-                                    systemImage: nativeChatComposerIcon(for: thread.composerState.status)
-                                )
-                                if let bridgeState = thread.composerState.bridgeState {
-                                    StatusBadge(
-                                        nativeChatBridgeLabel(for: bridgeState),
-                                        tone: nativeChatBridgeTone(for: bridgeState),
-                                        systemImage: nativeChatBridgeIcon(for: bridgeState)
-                                    )
-                                }
-                                if let activeRunState = thread.activeRunState, !activeRunState.isEmpty {
-                                    TagBadge(activeRunState, tone: .neutral)
-                                }
                                 if thread.composerState.canAbort {
-                                    TagBadge("Live run", tone: .info)
+                                    Spacer(minLength: 0)
+                                    ActionButton("Stop", variant: .destructive) {
+                                        Task { await appState.chatViewModel.abortCurrentRun() }
+                                    }
                                 }
                             }
                             .padding(.horizontal, 24)
+                            .padding(.top, 18)
                             .padding(.bottom, 14)
-                        }
 
-                        Divider()
+                            Divider()
+                        }
 
                         if let error = thread.composerState.error, !error.isEmpty {
                             HStack(alignment: .top, spacing: 10) {
@@ -2495,9 +2461,6 @@ struct ChatScreen: View {
                                     .font(.callout)
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
-                                ActionButton("New Chat", systemImage: "plus", variant: .outline) {
-                                    Task { await appState.chatViewModel.createThread(memberId: thread.memberId) }
-                                }
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(32)
@@ -2600,21 +2563,14 @@ struct ChatScreen: View {
                     }
                 } else {
                     VStack(spacing: 16) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                            .font(.system(size: 26, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text("Choose a chat")
+                        ProgressView()
+                            .controlSize(.regular)
+                        Text("Opening chat")
                             .font(.title3.weight(.semibold))
-                        Text("Create a new chat or select an existing conversation.")
+                        Text("Preparing the conversation for this AI member.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                        ActionButton("New Chat", systemImage: "plus.bubble", variant: .outline) {
-                            Task {
-                                guard let memberId = appState.selectedMemberForChat ?? members.first?.id else { return }
-                                await appState.chatViewModel.createThread(memberId: memberId)
-                            }
-                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(32)
@@ -2638,6 +2594,9 @@ struct ChatScreen: View {
                 RoundedRectangle(cornerRadius: NativeUI.heroCornerRadius, style: .continuous)
                     .stroke(Color.black.opacity(0.08), lineWidth: 1)
             )
+        }
+        .task(id: chatOpenTaskID) {
+            await appState.openPreferredChatThread()
         }
     }
 }
@@ -2798,6 +2757,21 @@ func nativeChatComposerIcon(for status: String) -> String? {
     default:
         return "checkmark.circle.fill"
     }
+}
+
+func nativeChatShouldShowStatusStrip(_ thread: ChatThreadDetail) -> Bool {
+    let status = thread.composerState.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if status != "idle" && !status.isEmpty {
+        return true
+    }
+    if thread.composerState.bridgeState != nil || thread.composerState.canAbort {
+        return true
+    }
+    if let activeRunState = thread.activeRunState?.trimmingCharacters(in: .whitespacesAndNewlines), !activeRunState.isEmpty {
+        return true
+    }
+
+    return false
 }
 
 func nativeChatShouldSendComposerShortcut(

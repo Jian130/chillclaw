@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.1.9 - 2026-04-16
+
+### 2026-04-16 21:29 CST
+
+- fixed clean macOS onboarding by keeping Ollama detection tied to fresh onboarding-owned runtime state, automatically preparing the bundled Ollama runtime on supported Apple Silicon Macs, and applying the returned local-model draft before advancing to channel setup
+- packed the missing local model catalog metadata into runtime artifacts and installer validation, while preserving model weights as onboarding downloads and extending release checks for Node.js, OpenClaw, Ollama, and catalog completeness
+- added structured onboarding debug logging across daemon routes, service operations, runtime/model/channel decisions, and warmup state, with secret redaction and no raw employee profile text in logs
+- aligned React and native macOS onboarding tests and contracts for local-runtime action responses, channel auto-advance, and the install-to-model clean-Mac path
+- bumped ChillClaw package metadata and internal workspace dependency pins to 0.1.9 for the next tagged release
+
 ### 2026-04-16 13:22 CST
 
 - pinned ChillClaw-managed OpenClaw installs and packaged runtime artifacts to OpenClaw 2026.3.11, preparing a bundled installed prefix during release artifact staging and copying directory artifacts into app data before gateway setup

@@ -1,9 +1,34 @@
 import AppKit
 import Testing
+@testable import ChillClawChatUI
 @testable import ChillClawNative
 @testable import ChillClawProtocol
 
 struct ChatPresentationTests {
+    @Test
+    func chatScreenOpensComposerDirectlyWithoutNewChatLandingCopy() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/Screens.swift"),
+            encoding: .utf8
+        )
+        let chatScreenSource = try #require(
+            source
+                .components(separatedBy: "struct ChatScreen: View")
+                .dropFirst()
+                .first?
+                .components(separatedBy: "private struct NativeChatSidebarRow")
+                .first
+        )
+
+        #expect(chatScreenSource.contains("New Chat") == false)
+        #expect(chatScreenSource.contains("Choose a chat") == false)
+        #expect(chatScreenSource.contains("Create a new chat") == false)
+    }
+
     @Test
     func chatStatusHelpersMapBridgeAndToolStates() {
         #expect(nativeChatComposerLabel(for: "sending") == "Sending")

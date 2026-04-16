@@ -194,12 +194,30 @@ test("local runtime overview recommends the small Ollama tier for a 36 GB Apple 
   assert.equal(overview.chosenModelKey, "ollama/gemma4:e2b");
 });
 
-test("local runtime overview falls back to cloud setup on underpowered Macs", async () => {
+test("local runtime overview recommends the small Ollama tier for an 8 GB Apple Silicon Mac", async () => {
   const { service } = createHarness({
     inspectHost: async () => ({
       platform: "darwin",
       architecture: "arm64",
       totalMemoryGb: 8,
+      freeDiskGb: 128
+    })
+  });
+
+  const overview = await service.getOverview();
+
+  assert.equal(overview.supported, true);
+  assert.equal(overview.recommendation, "local");
+  assert.equal(overview.recommendedTier, "small");
+  assert.equal(overview.chosenModelKey, "ollama/gemma4:e2b");
+});
+
+test("local runtime overview falls back to cloud setup on underpowered Macs", async () => {
+  const { service } = createHarness({
+    inspectHost: async () => ({
+      platform: "darwin",
+      architecture: "arm64",
+      totalMemoryGb: 6,
       freeDiskGb: 128
     })
   });

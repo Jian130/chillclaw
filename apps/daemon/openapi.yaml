@@ -2079,6 +2079,8 @@ components:
           $ref: "#/components/schemas/ModelConfigOverview"
         overview:
           $ref: "#/components/schemas/ProductOverview"
+        onboarding:
+          $ref: "#/components/schemas/OnboardingStateResponse"
         epoch: { type: string }
         revision: { type: integer }
         settled: { type: boolean }

@@ -72,6 +72,33 @@ struct ChatViewModelTests {
     }
 
     @Test
+    func openThreadForMemberReusesExistingThreadInsteadOfCreatingDuplicate() async {
+        let transport = ExistingMemberThreadChatTransport()
+        let viewModel = ChillClawChatViewModel(transport: transport)
+
+        await viewModel.refresh()
+        await viewModel.openThread(memberId: "member-2")
+
+        #expect(viewModel.selectedThread?.id == "thread-2")
+        #expect(viewModel.selectedThread?.memberId == "member-2")
+        #expect(transport.createMemberIds.isEmpty)
+    }
+
+    @Test
+    func openThreadForMemberCreatesAComposerThreadWhenNoThreadExists() async {
+        let transport = EmptyMemberThreadChatTransport()
+        let viewModel = ChillClawChatViewModel(transport: transport)
+
+        await viewModel.refresh()
+        await viewModel.openThread(memberId: "member-onboarded")
+
+        #expect(transport.createMemberIds == ["member-onboarded"])
+        #expect(viewModel.selectedThread?.id == "thread-created")
+        #expect(viewModel.selectedThread?.memberId == "member-onboarded")
+        #expect(viewModel.selectedThread?.composerState.canSend == true)
+    }
+
+    @Test
     func startAppliesIncomingChatEventsToTheSelectedThread() async {
         let transport = StreamingEventChatTransport()
         let viewModel = ChillClawChatViewModel(transport: transport)
@@ -167,7 +194,7 @@ struct ChatViewModelTests {
 
         await viewModel.start()
         for _ in 0..<100 {
-            if transport.eventsCallCount >= 2 {
+            if transport.eventsCallCount >= 2 && viewModel.errorMessage == nil {
                 break
             }
             try? await Task.sleep(nanoseconds: 10_000_000)
@@ -175,6 +202,124 @@ struct ChatViewModelTests {
 
         #expect(transport.eventsCallCount >= 2)
         #expect(viewModel.errorMessage == nil)
+    }
+}
+
+private func testChatThreadSummary(id: String, memberId: String, updatedAt: String) -> ChatThreadSummary {
+    .init(
+        id: id,
+        memberId: memberId,
+        agentId: "agent-\(memberId)",
+        sessionKey: "session-\(id)",
+        title: "Thread \(id)",
+        createdAt: "2026-03-20T00:00:00.000Z",
+        updatedAt: updatedAt,
+        unreadCount: 0,
+        historyStatus: "ready",
+        composerState: .init(status: "idle", canSend: true, canAbort: false)
+    )
+}
+
+private func testChatThreadDetail(id: String, memberId: String) -> ChatThreadDetail {
+    .init(
+        id: id,
+        memberId: memberId,
+        agentId: "agent-\(memberId)",
+        sessionKey: "session-\(id)",
+        title: "Thread \(id)",
+        createdAt: "2026-03-20T00:00:00.000Z",
+        updatedAt: "2026-03-20T01:00:00.000Z",
+        unreadCount: 0,
+        historyStatus: "ready",
+        composerState: .init(status: "idle", canSend: true, canAbort: false),
+        messages: []
+    )
+}
+
+private final class ExistingMemberThreadChatTransport: ChillClawChatTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var createdMembers: [String] = []
+
+    var createMemberIds: [String] {
+        lock.withLock { createdMembers }
+    }
+
+    func fetchOverview() async throws -> ChatOverview {
+        .init(threads: [
+            testChatThreadSummary(id: "thread-1", memberId: "member-1", updatedAt: "2026-03-20T00:00:00.000Z"),
+            testChatThreadSummary(id: "thread-2", memberId: "member-2", updatedAt: "2026-03-20T01:00:00.000Z")
+        ])
+    }
+
+    func fetchThread(threadId: String) async throws -> ChatThreadDetail {
+        testChatThreadDetail(id: threadId, memberId: threadId == "thread-2" ? "member-2" : "member-1")
+    }
+
+    func createThread(memberId: String) async throws -> ChatActionResponse {
+        lock.withLock {
+            createdMembers.append(memberId)
+        }
+        return .init(status: "completed", message: "ok", overview: .init(threads: []), thread: nil)
+    }
+
+    func sendMessage(threadId: String, message: String, clientMessageId: String?) async throws -> ChatActionResponse {
+        .init(status: "completed", message: "ok", overview: .init(threads: []), thread: nil)
+    }
+
+    func abort(threadId: String) async throws -> ChatActionResponse {
+        .init(status: "completed", message: "ok", overview: .init(threads: []), thread: nil)
+    }
+
+    func events() async throws -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+private final class EmptyMemberThreadChatTransport: ChillClawChatTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var createdMembers: [String] = []
+
+    var createMemberIds: [String] {
+        lock.withLock { createdMembers }
+    }
+
+    func fetchOverview() async throws -> ChatOverview {
+        .init(threads: [])
+    }
+
+    func fetchThread(threadId: String) async throws -> ChatThreadDetail {
+        testChatThreadDetail(id: threadId, memberId: "member-onboarded")
+    }
+
+    func createThread(memberId: String) async throws -> ChatActionResponse {
+        lock.withLock {
+            createdMembers.append(memberId)
+        }
+        let thread = testChatThreadDetail(id: "thread-created", memberId: memberId)
+        return .init(
+            status: "completed",
+            message: "created",
+            overview: .init(threads: [
+                testChatThreadSummary(id: thread.id, memberId: memberId, updatedAt: thread.updatedAt)
+            ]),
+            thread: thread
+        )
+    }
+
+    func sendMessage(threadId: String, message: String, clientMessageId: String?) async throws -> ChatActionResponse {
+        .init(status: "completed", message: "ok", overview: .init(threads: []), thread: nil)
+    }
+
+    func abort(threadId: String) async throws -> ChatActionResponse {
+        .init(status: "completed", message: "ok", overview: .init(threads: []), thread: nil)
+    }
+
+    func events() async throws -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
     }
 }
 

@@ -257,7 +257,7 @@ export function buildExistingInstallAdvanceDraft(
   overview?: Pick<ProductOverview, "engine">
 ): Pick<OnboardingStateResponse["draft"], "currentStep" | "install"> {
   return {
-    currentStep: "permissions",
+    currentStep: "model",
     install: {
       installed: true,
       version: overview?.engine.version,
@@ -372,6 +372,23 @@ export function nextOnboardingStepAfterModelSave(requiresInteraction: boolean): 
   return requiresInteraction ? "model" : "channel";
 }
 
+export function resolveOnboardingLocalRuntime(args: {
+  currentStep: OnboardingStateResponse["draft"]["currentStep"];
+  localRuntimeSnapshot?: ModelConfigOverview["localRuntime"];
+  onboardingLocalRuntime?: ModelConfigOverview["localRuntime"];
+  modelConfigLocalRuntime?: ModelConfigOverview["localRuntime"];
+}): ModelConfigOverview["localRuntime"] {
+  if (args.localRuntimeSnapshot) {
+    return args.localRuntimeSnapshot;
+  }
+
+  if (args.currentStep === "model" || args.currentStep === "permissions") {
+    return args.onboardingLocalRuntime ?? args.modelConfigLocalRuntime;
+  }
+
+  return args.modelConfigLocalRuntime ?? args.onboardingLocalRuntime;
+}
+
 export function resolveOnboardingModelViewState(
   args: ResolveOnboardingModelViewStateArgs
 ): OnboardingModelViewState {
@@ -417,21 +434,26 @@ export function resolveOnboardingModelStepMode(args: {
 }): OnboardingModelStepMode {
   void args.localRuntimeManagedEntryId;
   const hasPersistedModel = Boolean(args.draftModelEntryId || args.summaryModelEntryId);
+  const hasActiveAuthSession = Boolean(args.activeModelAuthSessionId);
   const hasCloudFlow =
     Boolean(args.providerId) ||
     args.selectedProviderPresent ||
-    Boolean(args.activeModelAuthSessionId) ||
+    hasActiveAuthSession ||
     (args.modelViewKind === "configure" && !hasPersistedModel);
 
   if (args.modelViewKind === "connected" || args.localRuntime?.activeInOpenClaw) {
     return "connected";
   }
 
-  if (hasCloudFlow || hasPersistedModel) {
+  if (hasPersistedModel || hasActiveAuthSession) {
     return "cloud-config";
   }
 
   if (args.bootstrapPending) {
+    return "detecting-local";
+  }
+
+  if (args.localRuntime?.status === "unchecked") {
     return "detecting-local";
   }
 
@@ -441,6 +463,10 @@ export function resolveOnboardingModelStepMode(args: {
 
   if (args.localRuntime?.recommendation === "local" && args.localRuntime?.status !== "ready") {
     return "local-setup";
+  }
+
+  if (hasCloudFlow) {
+    return "cloud-config";
   }
 
   return "cloud-config";
@@ -697,12 +723,12 @@ export function resolveOnboardingInstallViewState(
   };
 }
 
-export function onboardingDestinationPath(destination: OnboardingDestination): string {
+export function onboardingDestinationPath(destination: OnboardingDestination, memberId?: string): string {
   switch (destination) {
     case "team":
       return "/team";
     case "chat":
-      return "/chat";
+      return memberId ? `/chat?${new URLSearchParams({ memberId }).toString()}` : "/chat";
     case "dashboard":
     default:
       return "/";

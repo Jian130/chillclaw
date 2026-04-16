@@ -1,3 +1,5 @@
+import starterModelTiers from "./local-model-runtime-catalog.json" with { type: "json" };
+
 export interface LocalModelHostSnapshot {
   platform: string;
   architecture: string;
@@ -21,44 +23,11 @@ export interface LocalModelTierDefinition {
 export const MANAGED_LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 export const MANAGED_LOCAL_OLLAMA_API_KEY = "ollama-local";
 
-export const OLLAMA_STARTER_MODEL_TIERS: LocalModelTierDefinition[] = [
-  {
-    id: "small",
-    label: "Balanced small",
-    modelTag: "gemma4:e2b",
-    modelKey: "ollama/gemma4:e2b",
-    contextWindow: 131072,
-    maxTokens: 8192,
-    reasoning: false,
-    estimatedModelSizeGb: 7.2,
-    requiredDiskGb: 12,
-    minimumMemoryGb: 16
-  },
-  {
-    id: "medium",
-    label: "Balanced medium",
-    modelTag: "gemma4:e4b",
-    modelKey: "ollama/gemma4:e4b",
-    contextWindow: 131072,
-    maxTokens: 8192,
-    reasoning: false,
-    estimatedModelSizeGb: 9.6,
-    requiredDiskGb: 16,
-    minimumMemoryGb: 32
-  },
-  {
-    id: "large",
-    label: "Balanced large",
-    modelTag: "gemma4:26b",
-    modelKey: "ollama/gemma4:26b",
-    contextWindow: 131072,
-    maxTokens: 8192,
-    reasoning: false,
-    estimatedModelSizeGb: 18,
-    requiredDiskGb: 32,
-    minimumMemoryGb: 64
-  }
-];
+export const OLLAMA_STARTER_MODEL_TIERS = starterModelTiers as LocalModelTierDefinition[];
+
+export function minimumLocalModelMemoryGb(): number {
+  return Math.min(...OLLAMA_STARTER_MODEL_TIERS.map((tier) => tier.minimumMemoryGb));
+}
 
 export function chooseLocalModelTier(host: LocalModelHostSnapshot): LocalModelTierDefinition | undefined {
   return OLLAMA_STARTER_MODEL_TIERS.find((tier) => host.totalMemoryGb >= tier.minimumMemoryGb && host.freeDiskGb >= tier.requiredDiskGb);

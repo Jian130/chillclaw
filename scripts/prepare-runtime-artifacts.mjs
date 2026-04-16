@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { constants, createReadStream, createWriteStream } from "node:fs";
-import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, readdir } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -14,6 +14,7 @@ import { writeScriptLogLine } from "./logging.mjs";
 const ROOT = process.cwd();
 const MANIFEST_PATH = resolve(ROOT, "runtime-manifest.lock.json");
 const ARTIFACT_ROOT = resolve(ROOT, "runtime-artifacts");
+const LOCAL_MODEL_CATALOG_SOURCE = resolve(ROOT, "apps/daemon/src/config/local-model-runtime-catalog.json");
 const CACHE_DIR = resolve(ROOT, "dist/runtime-artifact-downloads");
 const SCRIPT_LABEL = "ChillClaw runtime artifacts";
 
@@ -23,6 +24,7 @@ async function main() {
   await prepareNodeRuntime(resourceFor(manifest, "node-npm-runtime"));
   await prepareOpenClawRuntime(resourceFor(manifest, "openclaw-runtime"));
   await prepareOllamaRuntime(resourceFor(manifest, "ollama-runtime"));
+  await prepareLocalModelCatalog(resourceFor(manifest, "local-model-catalog"));
   await assertNoInstallerPayloads(ARTIFACT_ROOT);
 }
 
@@ -156,6 +158,24 @@ async function prepareOllamaRuntime(resource) {
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+async function prepareLocalModelCatalog(resource) {
+  const artifact = bundledArtifact(resource, "json");
+  const targetPath = resolve(ARTIFACT_ROOT, artifact.path);
+  const tiers = JSON.parse(await readFile(LOCAL_MODEL_CATALOG_SOURCE, "utf8"));
+  if (!Array.isArray(tiers) || tiers.length === 0) {
+    throw new Error(`Local model catalog source is empty or invalid: ${LOCAL_MODEL_CATALOG_SOURCE}`);
+  }
+  const catalog = {
+    version: resource.version,
+    provider: "ollama",
+    tiers
+  };
+
+  await mkdir(dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, `${JSON.stringify(catalog, null, 2)}\n`);
+  log(`Prepared local model catalog at ${targetPath}.`);
 }
 
 async function downloadFile(url, destination) {

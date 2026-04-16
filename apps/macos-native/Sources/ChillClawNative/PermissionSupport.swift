@@ -20,8 +20,6 @@ enum NativePermissionCapability: String, CaseIterable, Sendable {
 }
 
 struct NativePermissionsCopy: Sendable {
-    let onboardingTitle: String
-    let sharedBody: String
     let settingsTitle: String
     let settingsBody: String
     let grantButton: String
@@ -46,8 +44,6 @@ func nativePermissionsCopy(localeIdentifier: String = resolveNativeOnboardingLoc
     switch resolveNativeOnboardingLocaleIdentifier(localeIdentifier) {
     case "zh":
         return .init(
-            onboardingTitle: "授予权限",
-            sharedBody: "允许这些权限，以便 ChillClaw 在需要时进行提醒和捕获。",
             settingsTitle: "权限",
             settingsBody: "管理 ChillClaw 在这台 Mac 上请求的系统权限。",
             grantButton: "授权",
@@ -58,8 +54,6 @@ func nativePermissionsCopy(localeIdentifier: String = resolveNativeOnboardingLoc
         )
     case "ja":
         return .init(
-            onboardingTitle: "権限を許可",
-            sharedBody: "必要なときに ChillClaw が通知と取得を行えるよう、以下の権限を許可してください。",
             settingsTitle: "権限",
             settingsBody: "この Mac で ChillClaw が要求するシステム権限を管理します。",
             grantButton: "許可",
@@ -70,8 +64,6 @@ func nativePermissionsCopy(localeIdentifier: String = resolveNativeOnboardingLoc
         )
     case "ko":
         return .init(
-            onboardingTitle: "권한 허용",
-            sharedBody: "필요할 때 ChillClaw가 알림을 보내고 화면을 가져올 수 있도록 아래 권한을 허용하세요.",
             settingsTitle: "권한",
             settingsBody: "이 Mac에서 ChillClaw가 요청하는 시스템 권한을 관리합니다.",
             grantButton: "허용",
@@ -82,8 +74,6 @@ func nativePermissionsCopy(localeIdentifier: String = resolveNativeOnboardingLoc
         )
     case "es":
         return .init(
-            onboardingTitle: "Conceder permisos",
-            sharedBody: "Permite estos accesos para que ChillClaw pueda notificar y capturar contexto cuando haga falta.",
             settingsTitle: "Permisos",
             settingsBody: "Administra los permisos del sistema que ChillClaw solicita en esta Mac.",
             grantButton: "Conceder",
@@ -94,8 +84,6 @@ func nativePermissionsCopy(localeIdentifier: String = resolveNativeOnboardingLoc
         )
     default:
         return .init(
-            onboardingTitle: "Grant permissions",
-            sharedBody: "Allow these so ChillClaw can notify and capture when needed.",
             settingsTitle: "Permissions",
             settingsBody: "Manage the macOS permissions ChillClaw requests on this Mac.",
             grantButton: "Grant",

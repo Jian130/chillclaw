@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AIMemberDetail, ChatThreadDetail, ChatThreadSummary, ChillClawEvent } from "@chillclaw/contracts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   applyChatEventToDetail,
@@ -9,6 +11,7 @@ import {
   chatStreamEventFromDaemonEvent,
   inlineToolActivitiesForMessage,
   memberNameForThread,
+  preferredEmptyChatMemberId,
   preferredNewChatMemberId,
   shouldHandleComposerPlainReturnShortcut,
   storedChatSidebarCollapsed,
@@ -121,6 +124,21 @@ describe("ChatPage helpers", () => {
 
   it("returns no preferred member when there is no concrete member context", () => {
     expect(preferredNewChatMemberId("all", members)).toBeUndefined();
+  });
+
+  it("opens an empty chat page against the selected or first available AI member", () => {
+    expect(preferredEmptyChatMemberId("member-1", members, [], undefined)).toBe("member-1");
+    expect(preferredEmptyChatMemberId("all", members, [], undefined)).toBe("member-1");
+    expect(preferredEmptyChatMemberId("all", members, [summary("thread-1", "2026-03-14T01:00:00.000Z")], undefined)).toBeUndefined();
+    expect(preferredEmptyChatMemberId("all", members, [], "thread-1")).toBeUndefined();
+  });
+
+  it("keeps chat focused on the conversation surface instead of a create-chat landing state", () => {
+    const source = readFileSync(fileURLToPath(new URL("./ChatPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).not.toContain("chat-main__hero");
+    expect(source).not.toContain("<NewChatDialog");
+    expect(source).not.toContain("actions={");
   });
 
   it("adds the collapse class only for the split sidebar layout", () => {

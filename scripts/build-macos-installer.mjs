@@ -418,6 +418,7 @@ async function copyRuntimeArtifacts() {
   await copyFile(RUNTIME_MANIFEST_SOURCE, resolve(APP_RUNTIME_ARTIFACTS, "runtime-manifest.lock.json"));
   await assertNoInstallerRuntimePayloads(APP_RUNTIME_ARTIFACTS);
   await assertPackagedCliRuntimeArtifacts();
+  await assertPackagedLocalModelCatalogArtifact();
 }
 
 async function assertPackagedCliRuntimeArtifacts() {
@@ -466,6 +467,35 @@ async function assertPackagedCliRuntimeArtifacts() {
     "Packaged Ollama runtime CLI cannot run.",
     packagedRuntimeEnv(nodeDir)
   );
+}
+
+async function assertPackagedLocalModelCatalogArtifact() {
+  const manifest = JSON.parse(await readFile(resolve(APP_RUNTIME_ARTIFACTS, "runtime-manifest.lock.json"), "utf8"));
+  const catalog = runtimeResourceFor(manifest, "local-model-catalog");
+  const catalogArtifact = bundledArtifactFor(catalog, "json");
+  const catalogPath = resolve(APP_RUNTIME_ARTIFACTS, catalogArtifact.path);
+  let parsed;
+
+  try {
+    parsed = JSON.parse(await readFile(catalogPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Packaged local model catalog is missing or invalid at ${catalogPath}. ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (parsed?.version !== catalog.version) {
+    throw new Error(`Packaged local model catalog version must be ${catalog.version}.`);
+  }
+
+  const modelTags = new Set((Array.isArray(parsed?.tiers) ? parsed.tiers : []).map((tier) => tier?.modelTag));
+  if (!modelTags.has("gemma4:e2b")) {
+    throw new Error("Packaged local model catalog must include gemma4:e2b.");
+  }
+  if (!modelTags.has("gemma4:e4b")) {
+    throw new Error("Packaged local model catalog must include gemma4:e4b.");
+  }
+  if (!modelTags.has("gemma4:26b")) {
+    throw new Error("Packaged local model catalog must include gemma4:26b.");
+  }
 }
 
 function currentNodeDistName(version) {

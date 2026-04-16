@@ -102,13 +102,13 @@ test("onboarding service persists draft progress and uses full completion as the
   assert.equal(persisted.setupCompletedAt, undefined);
 });
 
-test("installRuntime advances onboarding to permissions when the managed runtime is ready", async () => {
+test("installRuntime advances onboarding to model when the managed runtime is ready", async () => {
   const { service } = createService("onboarding-service-install-runtime-advances");
 
   const result = await service.installRuntime();
 
   assert.equal(result.status, "completed");
-  assert.equal(result.onboarding?.draft.currentStep, "permissions");
+  assert.equal(result.onboarding?.draft.currentStep, "model");
   assert.equal(result.onboarding?.draft.install?.installed, true);
   assert.equal(result.onboarding?.summary.install?.installed, true);
 });
@@ -132,13 +132,13 @@ test("installRuntime defaults onboarding installs to the managed local runtime",
   assert.equal(installOptions?.forceLocal, true);
 });
 
-test("updateRuntime advances onboarding to permissions when the managed runtime is ready", async () => {
+test("updateRuntime advances onboarding to model when the managed runtime is ready", async () => {
   const { service } = createService("onboarding-service-update-runtime-advances");
 
   const result = await service.updateRuntime();
 
   assert.equal(result.status, "completed");
-  assert.equal(result.onboarding?.draft.currentStep, "permissions");
+  assert.equal(result.onboarding?.draft.currentStep, "model");
   assert.equal(result.onboarding?.draft.install?.installed, true);
   assert.equal(result.onboarding?.summary.install?.installed, true);
 });
@@ -452,6 +452,56 @@ test("navigating from an already active local runtime to channels avoids live mo
   assert.equal(updated.summary.model?.entryId, "runtime:ollama-gemma4-e2b");
   assert.equal(localRuntimeCalls, 1);
   assert.equal(modelConfigCalls, 0);
+});
+
+test("onboarding service explicitly adopts an active local runtime model on the model step", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-adopt-local-runtime-${randomUUID()}.json`);
+  const adapter = new MockAdapter();
+  const store = new StateStore(filePath);
+  const overviewService = new OverviewService(adapter, store);
+  const channelSetupService = new ChannelSetupService(adapter, store);
+  const aiTeamService = new AITeamService(adapter, store);
+  const localRuntime: LocalModelRuntimeOverview = {
+    supported: true,
+    recommendation: "local",
+    supportCode: "supported",
+    status: "ready",
+    runtimeInstalled: true,
+    runtimeReachable: true,
+    modelDownloaded: true,
+    activeInOpenClaw: true,
+    chosenModelKey: "ollama/gemma4:e2b",
+    managedEntryId: "runtime:ollama-gemma4-e2b",
+    summary: "Local AI is ready on this Mac.",
+    detail: "OpenClaw is already pointed at the local Ollama runtime."
+  };
+  const localRuntimeService = {
+    async getOverview() {
+      return localRuntime;
+    }
+  } as Pick<LocalModelRuntimeService, "getOverview"> as LocalModelRuntimeService;
+  const service = new OnboardingService(adapter, store, overviewService, channelSetupService, aiTeamService, undefined, undefined, localRuntimeService);
+
+  await service.updateState({
+    currentStep: "model",
+    install: {
+      installed: true,
+      version: "2026.4.5",
+      disposition: "installed-managed"
+    },
+    model: undefined
+  });
+
+  const adopted = await service.adoptActiveLocalRuntimeModel(localRuntime);
+
+  assert.ok(adopted);
+  assert.equal(adopted.draft.currentStep, "model");
+  assert.equal(adopted.draft.model?.providerId, "ollama");
+  assert.equal(adopted.draft.model?.methodId, "ollama-local");
+  assert.equal(adopted.draft.model?.modelKey, "ollama/gemma4:e2b");
+  assert.equal(adopted.draft.model?.entryId, "runtime:ollama-gemma4-e2b");
+  assert.equal(adopted.summary.model?.entryId, "runtime:ollama-gemma4-e2b");
+  assert.equal(adopted.localRuntime?.status, "ready");
 });
 
 test("onboarding state includes the daemon-owned local runtime for the model step", async () => {
@@ -837,7 +887,7 @@ test("completed personal WeChat login advances onboarding once the installer sav
   assert.equal(onboarding.draft.activeChannelSessionId, undefined);
 });
 
-test("saving a model entry keeps the normalized live model key in the onboarding draft", async () => {
+test("saving a model entry after install keeps the normalized live model key in the onboarding draft", async () => {
   const { service, store, adapter } = createService("onboarding-service-normalized-model-key");
 
   await store.update((current) => ({
@@ -849,10 +899,6 @@ test("saving a model entry keeps the normalized live model key in the onboarding
           installed: true,
           version: "2026.3.29",
           disposition: "installed-managed"
-        },
-        permissions: {
-          confirmed: true,
-          confirmedAt: "2026-03-29T00:00:00.000Z"
         }
       }
     }
@@ -1598,6 +1644,60 @@ test("onboarding warmup failures keep onboarding completed and mark the created 
   assert.equal(persisted.onboarding, undefined);
   assert.match(member?.currentStatus ?? "", /repair|finish setup/i);
   assert.equal(taskStatuses.some((entry) => entry.startsWith("failed:")), true);
+});
+
+test("onboarding warmup applies preset skill gateway changes before marking the workspace ready", async () => {
+  const { adapter, service, store } = createService("onboarding-service-warmup-applies-gateway");
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "telegram",
+      entryId: "telegram:default"
+    },
+    channelProgress: {
+      status: "staged",
+      requiresGatewayApply: true
+    }
+  });
+
+  await service.complete({
+    destination: "chat",
+    employee: {
+      name: "Ryo-AI",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: ["research-brief"],
+      knowledgePackIds: ["company-handbook"],
+      workStyles: ["Analytical"],
+      memoryEnabled: true
+    }
+  });
+
+  await waitForCondition(async () => {
+    const warmup = Object.values((await store.read()).onboardingWarmups ?? {})[0];
+    return warmup?.status === "completed";
+  });
+
+  const status = await adapter.instances.status();
+
+  assert.equal(status.running, true);
+  assert.equal(status.pendingGatewayApply, false);
 });
 
 test("onboarding completion trusts installed deployment targets when status temporarily reports not installed", async () => {
@@ -2425,7 +2525,7 @@ test("onboarding service reuses install summary for step-only updates instead of
   assert.equal(statusCalls, 1);
 
   const updated = await service.updateState({
-    currentStep: "permissions"
+    currentStep: "model"
   });
 
   assert.equal(updated.summary.install?.installed, true);

@@ -168,10 +168,13 @@ test("macOS installer builder stages runtime artifacts and LaunchAgent runtime e
   );
   assert.doesNotMatch(buildScript, /CHILLCLAW_REQUIRE_CLI_RUNTIME_ARTIFACTS/);
   assert.match(buildScript, /await assertPackagedCliRuntimeArtifacts\(\);/);
+  assert.match(buildScript, /await assertPackagedLocalModelCatalogArtifact\(\);/);
   assert.match(buildScript, /Packaged Node\.js runtime npm is not executable/);
   assert.match(buildScript, /Packaged OpenClaw runtime CLI is not executable/);
   assert.match(buildScript, /Packaged Ollama runtime is missing the runnable ollama CLI binary/);
   assert.match(buildScript, /Packaged Ollama runtime CLI cannot run/);
+  assert.match(buildScript, /Packaged local model catalog is missing/);
+  assert.match(buildScript, /Packaged local model catalog must include gemma4:e2b/);
   assert.match(buildScript, /Runtime artifacts must be runnable CLI payloads/);
   assert.match(buildScript, /CHILLCLAW_RUNTIME_BUNDLE_DIR/);
   assert.match(buildScript, /CHILLCLAW_RUNTIME_MANIFEST_PATH/);
@@ -185,9 +188,11 @@ test("macOS installer builder stages runtime artifacts and LaunchAgent runtime e
   assert.match(prepareScript, /nodejs\.org\/dist/);
   assert.match(prepareScript, /currentNodeDistName/);
   assert.match(prepareScript, /prepareOpenClawRuntime/);
+  assert.match(prepareScript, /prepareLocalModelCatalog/);
   assert.match(prepareScript, /openclaw-runtime must pin a concrete version/);
   assert.match(prepareScript, /OpenClaw runtime package did not produce node_modules/);
   assert.match(prepareScript, /Prepared OpenClaw/);
+  assert.match(prepareScript, /Prepared local model catalog/);
   assert.match(prepareScript, /process\.arch === "x64" \? "x64" : "arm64"/);
   assert.match(buildScript, /currentNodeDistName/);
   assert.match(buildScript, /resolve\(nodeDir, "bin", "npm"\),\s*\["--version"\]/);
@@ -198,8 +203,11 @@ test("macOS installer builder stages runtime artifacts and LaunchAgent runtime e
   assert.match(runtimeManifest, /node-npm-runtime/);
   assert.match(runtimeManifest, /openclaw-runtime/);
   assert.match(runtimeManifest, /ollama-runtime/);
+  assert.match(runtimeManifest, /local-model-catalog/);
   assert.match(runtimeManifest, /"version": "2026\.3\.11"/);
+  assert.match(runtimeManifest, /"id": "openclaw-runtime"[\s\S]*?"sourcePolicy": \["bundled"\]/);
   assert.match(runtimeManifest, /"path": "openclaw\/openclaw-runtime"/);
+  assert.match(runtimeManifest, /"path": "models\/local-model-catalog\.json"/);
   assert.doesNotMatch(runtimeManifest, /"id": "openclaw-runtime"[\s\S]*?"version": "latest"/);
   assert.match(runtimeManifest, /"format": "directory"/);
   assert.match(runtimeManifest, /"format": "tgz"/);

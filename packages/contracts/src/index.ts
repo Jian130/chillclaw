@@ -1445,6 +1445,7 @@ export interface LocalModelRuntimeActionResponse extends MutationSyncMeta {
   localRuntime: LocalModelRuntimeOverview;
   modelConfig: ModelConfigOverview;
   overview: ProductOverview;
+  onboarding?: OnboardingStateResponse;
 }
 
 export interface RuntimeActionResponse extends MutationSyncMeta {

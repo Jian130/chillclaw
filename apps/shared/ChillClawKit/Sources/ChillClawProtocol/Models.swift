@@ -1240,6 +1240,7 @@ public struct LocalModelRuntimeActionResponse: Codable, Sendable {
     public var localRuntime: LocalModelRuntimeOverview
     public var modelConfig: ModelConfigOverview
     public var overview: ProductOverview
+    public var onboarding: OnboardingStateResponse? = nil
 }
 
 public struct RuntimeActionResponse: Codable, Sendable {

@@ -13,11 +13,15 @@ import type {
   ModelConfigOverview
 } from "@chillclaw/contracts";
 
-import { chooseLocalModelTier, type LocalModelHostSnapshot } from "../config/local-model-runtime-catalog.js";
+import {
+  chooseLocalModelTier,
+  minimumLocalModelMemoryGb,
+  type LocalModelHostSnapshot
+} from "../config/local-model-runtime-catalog.js";
 import type { ManagedLocalModelEntryRequest } from "../engine/adapter.js";
 import { getManagedOllamaCliPath, getManagedOllamaDir, getManagedOllamaModelsDir } from "../runtime-paths.js";
 import { getAvailableDiskBytes } from "../platform/disk-space.js";
-import { logDevelopmentCommand } from "./logger.js";
+import { logDevelopmentCommand, writeInfoLog } from "./logger.js";
 import { StateStore } from "./state-store.js";
 import type { EventPublisher } from "./event-publisher.js";
 import type { EngineAdapter } from "../engine/adapter.js";
@@ -200,6 +204,26 @@ function unsupportedOverview(
   };
 }
 
+function logLocalRuntimeOverview(overview: LocalModelRuntimeOverview): void {
+  void writeInfoLog("Local Ollama runtime overview resolved.", {
+    supported: overview.supported,
+    recommendation: overview.recommendation,
+    supportCode: overview.supportCode,
+    status: overview.status,
+    runtimeInstalled: overview.runtimeInstalled,
+    runtimeReachable: overview.runtimeReachable,
+    modelDownloaded: overview.modelDownloaded,
+    activeInOpenClaw: overview.activeInOpenClaw,
+    recommendedTier: overview.recommendedTier,
+    chosenModelKey: overview.chosenModelKey,
+    totalMemoryGb: overview.totalMemoryGb,
+    freeDiskGb: overview.freeDiskGb,
+    summary: overview.summary
+  }, {
+    scope: "LocalModelRuntimeService.getOverview"
+  });
+}
+
 export class LocalModelRuntimeService {
   private activeJob: ActiveLocalModelRuntimeJob | undefined;
 
@@ -226,22 +250,29 @@ export class LocalModelRuntimeService {
     const host = await this.access.inspectHost();
 
     if (host.platform !== "darwin") {
-      return unsupportedOverview(host, "unsupported-platform", `ChillClaw only automates local Ollama setup on macOS right now. This machine reports ${host.platform}.`);
+      const overview = unsupportedOverview(host, "unsupported-platform", `ChillClaw only automates local Ollama setup on macOS right now. This machine reports ${host.platform}.`);
+      logLocalRuntimeOverview(overview);
+      return overview;
     }
 
     if (host.architecture !== "arm64") {
-      return unsupportedOverview(host, "unsupported-architecture", "Phase 1 local AI automation is limited to Apple Silicon Macs.");
+      const overview = unsupportedOverview(host, "unsupported-architecture", "Phase 1 local AI automation is limited to Apple Silicon Macs.");
+      logLocalRuntimeOverview(overview);
+      return overview;
     }
 
     const recommendedTier = chooseLocalModelTier(host);
     if (!recommendedTier) {
-      return unsupportedOverview(
+      const minimumMemoryGb = minimumLocalModelMemoryGb();
+      const overview = unsupportedOverview(
         host,
-        host.totalMemoryGb < 16 ? "insufficient-memory" : "insufficient-disk",
-        host.totalMemoryGb < 16
-          ? "ChillClaw recommends at least 16 GB of unified memory for the starter local model."
+        host.totalMemoryGb < minimumMemoryGb ? "insufficient-memory" : "insufficient-disk",
+        host.totalMemoryGb < minimumMemoryGb
+          ? `ChillClaw recommends at least ${minimumMemoryGb} GB of unified memory for the starter local model.`
           : "ChillClaw recommends more free disk space before downloading a starter local model."
       );
+      logLocalRuntimeOverview(overview);
+      return overview;
     }
 
     const modelSelection = existingModelConfig ?? (await this.access.fetchModelSelection());
@@ -297,7 +328,7 @@ export class LocalModelRuntimeService {
       detail = persisted?.lastError ?? "ChillClaw could not finish the local Ollama setup.";
     }
 
-    return {
+    const overview: LocalModelRuntimeOverview = {
       supported: true,
       recommendation: "local",
       supportCode: "supported",
@@ -326,6 +357,8 @@ export class LocalModelRuntimeService {
       downloadJobId: persisted?.downloadJobId,
       recoveryHint: status === "degraded" || status === "failed" ? "Repair the local Ollama runtime or switch back to a cloud model." : undefined
     };
+    logLocalRuntimeOverview(overview);
+    return overview;
   }
 
   async install(): Promise<LocalModelRuntimeResult> {

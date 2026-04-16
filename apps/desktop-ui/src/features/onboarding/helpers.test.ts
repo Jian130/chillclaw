@@ -21,6 +21,7 @@ import {
   resolveOnboardingEmployeePresetReadiness,
   resolveOnboardingModelSetupVariant,
   resolveOnboardingModelStepMode,
+  resolveOnboardingLocalRuntime,
   resolveOnboardingLocalSetupProgress,
   shouldShowOnboardingAuthMethodChooser,
   resolveOnboardingInstallViewState,
@@ -262,6 +263,7 @@ describe("onboarding helpers", () => {
     expect(onboardingDestinationPath("team")).toBe("/team");
     expect(onboardingDestinationPath("dashboard")).toBe("/");
     expect(onboardingDestinationPath("chat")).toBe("/chat");
+    expect(onboardingDestinationPath("chat", "member 1")).toBe("/chat?memberId=member+1");
   });
 
   it("builds the onboarding AI employee request with deterministic hidden fields", () => {
@@ -1033,6 +1035,94 @@ describe("onboarding helpers", () => {
     expect(mode).toBe("local-setup");
   });
 
+  it("keeps fresh local setup ahead of stale provider selection on the clean model step", () => {
+    const mode = resolveOnboardingModelStepMode({
+      bootstrapPending: false,
+      providerId: "openai",
+      selectedProviderPresent: true,
+      modelViewKind: "configure",
+      activeModelAuthSessionId: undefined,
+      draftModelEntryId: undefined,
+      summaryModelEntryId: undefined,
+      localRuntime: {
+        supported: true,
+        recommendation: "local",
+        supportCode: "supported",
+        status: "idle",
+        runtimeInstalled: false,
+        runtimeReachable: false,
+        modelDownloaded: false,
+        activeInOpenClaw: false,
+        summary: "Local AI is available on this Mac.",
+        detail: "ChillClaw recommends a starter Ollama tier for this Apple Silicon Mac."
+      }
+    });
+
+    expect(mode).toBe("local-setup");
+  });
+
+  it("prefers the onboarding local runtime snapshot over stale model config while on the model step", () => {
+    const onboardingRuntime: LocalModelRuntimeOverview = {
+      supported: true,
+      recommendation: "local",
+      supportCode: "supported",
+      status: "idle",
+      runtimeInstalled: false,
+      runtimeReachable: false,
+      modelDownloaded: false,
+      activeInOpenClaw: false,
+      summary: "Local AI is available on this Mac.",
+      detail: "ChillClaw recommends a starter Ollama tier for this Apple Silicon Mac."
+    };
+    const staleModelConfigRuntime: LocalModelRuntimeOverview = {
+      supported: false,
+      recommendation: "cloud",
+      supportCode: "unchecked",
+      status: "unchecked",
+      runtimeInstalled: false,
+      runtimeReachable: false,
+      modelDownloaded: false,
+      activeInOpenClaw: false,
+      summary: "Local AI has not been checked yet.",
+      detail: "ChillClaw will inspect local AI support during onboarding."
+    };
+
+    expect(
+      resolveOnboardingLocalRuntime({
+        currentStep: "model",
+        localRuntimeSnapshot: undefined,
+        onboardingLocalRuntime: onboardingRuntime,
+        modelConfigLocalRuntime: staleModelConfigRuntime
+      })
+    ).toBe(onboardingRuntime);
+  });
+
+  it("keeps the model step detecting while local runtime status is unchecked", () => {
+    const mode = resolveOnboardingModelStepMode({
+      bootstrapPending: false,
+      providerId: "",
+      selectedProviderPresent: false,
+      modelViewKind: "picker",
+      activeModelAuthSessionId: undefined,
+      draftModelEntryId: undefined,
+      summaryModelEntryId: undefined,
+      localRuntime: {
+        supported: false,
+        recommendation: "cloud",
+        supportCode: "unchecked",
+        status: "unchecked",
+        runtimeInstalled: false,
+        runtimeReachable: false,
+        modelDownloaded: false,
+        activeInOpenClaw: false,
+        summary: "Local AI has not been checked yet.",
+        detail: "ChillClaw will inspect local AI support during onboarding."
+      }
+    });
+
+    expect(mode).toBe("detecting-local");
+  });
+
   it("keeps the model step in cloud config when onboarding already has a cloud draft or auth session", () => {
     const baseArgs = {
       bootstrapPending: false,
@@ -1439,7 +1529,7 @@ describe("onboarding helpers", () => {
     ).toBeUndefined();
   });
 
-  it("advances to the permissions step when the user confirms an existing OpenClaw install", () => {
+  it("advances to the model step when the user confirms an existing OpenClaw install", () => {
     expect(
       buildExistingInstallAdvanceDraft({
         engine: {
@@ -1452,7 +1542,7 @@ describe("onboarding helpers", () => {
         }
       })
     ).toEqual({
-      currentStep: "permissions",
+      currentStep: "model",
       install: {
         installed: true,
         version: "2026.3.13",

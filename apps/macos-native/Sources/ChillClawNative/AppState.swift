@@ -271,6 +271,39 @@ final class ChillClawAppState {
         bannerMessage = message
     }
 
+    func preferChatMember(_ memberId: String?) {
+        guard let memberId = memberId?.trimmingCharacters(in: .whitespacesAndNewlines), !memberId.isEmpty else {
+            return
+        }
+
+        selectedMemberForChat = memberId
+    }
+
+    func refreshSelectedMemberForChat() {
+        updateSelectedMemberForChat()
+    }
+
+    func openPreferredChatThread() async {
+        if selectedMemberForChat?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            if aiTeamOverview?.members.isEmpty != false {
+                do {
+                    aiTeamOverview = try await loader.fetchAITeamOverview()
+                } catch {
+                    presentErrorUnlessCancelled(error)
+                    return
+                }
+            }
+            updateSelectedMemberForChat()
+        }
+
+        guard let memberId = selectedMemberForChat?.trimmingCharacters(in: .whitespacesAndNewlines), !memberId.isEmpty else {
+            return
+        }
+
+        await chatViewModel.start()
+        await chatViewModel.openThread(memberId: memberId)
+    }
+
     func clearBanner() {
         bannerMessage = nil
     }
@@ -463,6 +496,7 @@ final class ChillClawAppState {
             self.aiTeamOverview = try await loader.fetchAITeamOverview()
             updateSelectedMemberForChat()
             await chatViewModel.start()
+            await openPreferredChatThread()
         case .settings:
             break
         }
@@ -498,8 +532,17 @@ final class ChillClawAppState {
     }
 
     private func updateSelectedMemberForChat() {
-        if selectedMemberForChat == nil {
-            selectedMemberForChat = aiTeamOverview?.members.first?.id
+        guard let aiTeamOverview else { return }
+        let members = aiTeamOverview.members
+        guard !members.isEmpty else {
+            selectedMemberForChat = nil
+            return
         }
+
+        if let selectedMemberForChat, members.contains(where: { $0.id == selectedMemberForChat }) {
+            return
+        }
+
+        selectedMemberForChat = members.first?.id
     }
 }

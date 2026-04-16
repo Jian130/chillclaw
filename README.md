@@ -145,7 +145,7 @@ flowchart LR
 - `ChillClaw-macOS.dmg` lets users drag `ChillClaw.app` into `/Applications`.
 - The app bundle contains the native macOS client, the built fallback React UI, the daemon, LaunchAgent helper scripts, and OpenClaw bootstrap/install logic.
 - OpenClaw itself is reused when an existing install is already available, or deployed into ChillClaw-managed local app data when setup needs to install it. Clean Macs do not need Homebrew or a user-installed npm for the managed install path.
-- Runtime manifests and packaged CLI runtime artifacts are staged under `Contents/Resources/app/runtime-artifacts`; the packaged OpenClaw runtime is a pinned installed prefix that the daemon copies into app data before normal gateway setup. The LaunchAgent passes `CHILLCLAW_RUNTIME_BUNDLE_DIR`, `CHILLCLAW_RUNTIME_MANIFEST_PATH`, and optional `CHILLCLAW_RUNTIME_UPDATE_FEED_URL` to the daemon.
+- Runtime manifests, packaged CLI runtime artifacts, and the local model catalog are staged under `Contents/Resources/app/runtime-artifacts`; the packaged OpenClaw runtime is a pinned installed prefix that the daemon copies into app data before normal gateway setup. The LaunchAgent passes `CHILLCLAW_RUNTIME_BUNDLE_DIR`, `CHILLCLAW_RUNTIME_MANIFEST_PATH`, and optional `CHILLCLAW_RUNTIME_UPDATE_FEED_URL` to the daemon.
 - The packaged Node.js runtime is signing-sensitive: release signing must apply `scripts/macos-node-runtime-entitlements.plist` to `runtime-artifacts/node/node-v*/bin/node` so V8 can run on Apple Silicon under hardened runtime. Missing this entitlement causes clean Mac onboarding to fail with "bundled Node.js runtime is not runnable."
 - Stable macOS releases are published from protected GitHub tags in the form `vX.Y.Z`. The packaged app update check and the public website download button both resolve through GitHub Releases rather than hard-coded release pages.
 - The tag-driven macOS release workflow signs the staged `ChillClaw.app`, builds the drag-to-Applications DMG from that signed app, signs and notarizes the DMG, then publishes `ChillClaw-macOS.dmg` and `ChillClaw-macOS.dmg.sha256.txt`.
@@ -367,13 +367,13 @@ This keeps each OpenClaw agent isolated and closer to the multi-agent workspace 
 ### Local OpenClaw deployment
 
 - Packaged ChillClaw prefers an existing `openclaw` install if one is already available.
-- If no install is found, ChillClaw deploys the ChillClaw-managed OpenClaw runtime into `~/Library/Application Support/ChillClaw/data/openclaw-runtime`. Packaged releases include a pinned OpenClaw runtime artifact and copy it into place; the npm install path remains the development and recovery fallback.
+- If no install is found, ChillClaw deploys the ChillClaw-managed OpenClaw runtime into `~/Library/Application Support/ChillClaw/data/openclaw-runtime`. Packaged releases include a pinned OpenClaw runtime artifact and copy it into place; packaged clean-Mac onboarding does not depend on npm installation from the target machine.
 - Managed OpenClaw commands run with an isolated OpenClaw home under ChillClaw data, so helper tools such as the personal WeChat installer do not read or mutate the user's normal `~/.openclaw` config.
 - Existing OpenClaw installs are reused when they are compatible, but ChillClaw now still normalizes the OpenClaw gateway baseline before treating that runtime as ready.
 - During install or reuse, ChillClaw forces the OpenClaw gateway config back to ChillClaw's safe local baseline: `gateway.mode=local`, `gateway.bind=loopback`, token auth enabled, existing token preserved when present, and inherited `gateway.remote` overrides removed.
 - Once that managed runtime exists, ChillClaw prefers it over an incompatible system-level OpenClaw.
 - If the user clicks `Deploy OpenClaw locally`, ChillClaw deploys the managed local runtime even when a compatible system OpenClaw already exists.
-- Runtime prerequisites are prepared through the daemon Runtime Manager. Packaged builds can satisfy Node/npm and Ollama from bundled artifacts; development and recovery paths delegate approved artifact transfers to the daemon Download Manager before install/unpack logic runs.
+- Runtime prerequisites are prepared through the daemon Runtime Manager. Packaged builds satisfy Node/npm, OpenClaw, Ollama, and local model catalog metadata from bundled artifacts; development paths delegate approved artifact transfers to the daemon Download Manager before install/unpack logic runs. Local model weights are downloaded during onboarding instead of being bundled in the app.
 - If required managed prerequisites cannot be prepared, setup fails with a direct prerequisite message instead of pretending installation succeeded.
 - UI install/setup errors now surface the daemon's real error message instead of only showing a generic HTTP status.
 
@@ -385,7 +385,7 @@ Prepare the bundled CLI runtimes, then build a local smoke testing macOS app bun
 
 `npm run build:mac-installer`
 
-The prepare step downloads and stages the extracted Node.js runtime directory for the current Mac architecture, installs the pinned OpenClaw runtime prefix, and stages the standalone `ollama` CLI binary under `runtime-artifacts`. The installer builder requires those runnable CLI payloads and executes the packaged Node/npm/OpenClaw binaries during staging so a DMG cannot ship with a manifest that points at missing or wrong-architecture runtime files. It deliberately does not stage `Ollama.app`, `Ollama.dmg`, or other runtime installer/UI payloads.
+The prepare step downloads and stages the extracted Node.js runtime directory for the current Mac architecture, installs the pinned OpenClaw runtime prefix, stages the standalone `ollama` CLI binary, and writes `models/local-model-catalog.json` under `runtime-artifacts`. The installer builder requires those runnable CLI payloads plus the catalog metadata and executes the packaged Node/npm/OpenClaw binaries during staging so a DMG cannot ship with a manifest that points at missing or wrong-architecture runtime files. It deliberately does not stage `Ollama.app`, `Ollama.dmg`, other runtime installer/UI payloads, or local model weights.
 
 For signed macOS releases, packaged `node` is signed with `scripts/macos-node-runtime-entitlements.plist`; other runtime executables keep standard hardened-runtime signing. The unsigned local installer smoke build proves staged payload layout and runnability on the build Mac, but it does not prove Developer ID hardened-runtime entitlement behavior on another Mac.
 

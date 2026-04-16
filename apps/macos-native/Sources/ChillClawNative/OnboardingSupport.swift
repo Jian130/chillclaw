@@ -23,7 +23,7 @@ let nativeOnboardingAvatarPresets: [NativeOnboardingAvatarPreset] = [
 ]
 
 let nativeOnboardingChannelIDs: Set<SupportedChannelId> = [.wechat]
-let nativeOnboardingStepOrder: [OnboardingStep] = [.welcome, .install, .permissions, .model, .channel, .employee]
+let nativeOnboardingStepOrder: [OnboardingStep] = [.welcome, .install, .model, .channel, .employee]
 let nativeOnboardingPreferredColorScheme: ColorScheme = .light
 let nativeOnboardingTextPrimary = Color(red: 0.09, green: 0.12, blue: 0.18)
 let nativeOnboardingTextSecondary = Color(red: 0.41, green: 0.45, blue: 0.54)
@@ -671,11 +671,32 @@ func resolveOnboardingProviderID<Provider: Identifiable>(
 }
 
 func onboardingStepIndex(_ step: OnboardingStep) -> Int {
-    nativeOnboardingStepOrder.firstIndex(of: step) ?? 0
+    nativeOnboardingStepOrder.firstIndex(of: normalizeNativeOnboardingStep(step)) ?? 0
+}
+
+func normalizeNativeOnboardingStep(_ step: OnboardingStep) -> OnboardingStep {
+    step == .permissions ? .model : step
 }
 
 func onboardingIsCurrentOrLater(_ step: OnboardingStep, target: OnboardingStep) -> Bool {
     onboardingStepIndex(step) >= onboardingStepIndex(target)
+}
+
+func resolveNativeOnboardingLocalRuntime(
+    currentStep: OnboardingStep,
+    localRuntimeSnapshot: LocalModelRuntimeOverview?,
+    onboardingLocalRuntime: LocalModelRuntimeOverview?,
+    modelConfigLocalRuntime: LocalModelRuntimeOverview?
+) -> LocalModelRuntimeOverview? {
+    if let localRuntimeSnapshot {
+        return localRuntimeSnapshot
+    }
+
+    if normalizeNativeOnboardingStep(currentStep) == .model {
+        return onboardingLocalRuntime ?? modelConfigLocalRuntime
+    }
+
+    return modelConfigLocalRuntime ?? onboardingLocalRuntime
 }
 
 func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillClawEvent) -> OnboardingRefreshResource? {
@@ -1041,10 +1062,11 @@ func resolveNativeOnboardingModelStepMode(
         summaryModelEntryID: summaryModelEntryID,
         localRuntime: localRuntime
     )
+    let hasActiveAuthSession = !(activeModelAuthSessionId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let hasCloudFlow =
         !providerId.isEmpty ||
         selectedProviderPresent ||
-        !(activeModelAuthSessionId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        hasActiveAuthSession ||
         (modelViewKind == .configure && !hasManagedModelSelection)
 
     if modelViewKind == .connected || resolveNativeOnboardingLocalRuntimeConnected(
@@ -1055,11 +1077,15 @@ func resolveNativeOnboardingModelStepMode(
         return .connected
     }
 
-    if hasCloudFlow || hasManagedModelSelection {
+    if hasManagedModelSelection || hasActiveAuthSession {
         return .cloudConfig
     }
 
     if bootstrapPending {
+        return .detectingLocal
+    }
+
+    if localRuntime?.status == "unchecked" {
         return .detectingLocal
     }
 
@@ -1069,6 +1095,10 @@ func resolveNativeOnboardingModelStepMode(
 
     if localRuntime?.recommendation == "local", localRuntime?.status != "ready" {
         return .localSetup
+    }
+
+    if hasCloudFlow {
+        return .cloudConfig
     }
 
     return .cloudConfig
@@ -1434,7 +1464,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skipDetail: "立即前往仪表盘，稍后可在配置中完成剩余设置。",
             progressStep: "第 {current} / {total} 步",
             progressComplete: "已完成",
-            stepLabels: ["欢迎", "安装", "权限", "模型", "渠道", "AI 员工"],
+            stepLabels: ["欢迎", "安装", "模型", "渠道", "AI 员工"],
             welcomeEyebrow: "开始使用",
             welcomeTitle: "欢迎来到 ChillClaw",
             welcomeBody: "几分钟内搭建你的 OpenClaw 数字员工工作区",
@@ -1608,7 +1638,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skipDetail: "今すぐダッシュボードへ進み、残りの設定はあとで構成画面から完了できます。",
             progressStep: "ステップ {current} / {total}",
             progressComplete: "完了",
-            stepLabels: ["開始", "インストール", "権限", "モデル", "チャネル", "AI 社員"],
+            stepLabels: ["開始", "インストール", "モデル", "チャネル", "AI 社員"],
             welcomeEyebrow: "スタート",
             welcomeTitle: "ChillClaw へようこそ",
             welcomeBody: "数分で OpenClaw ベースのデジタル従業員ワークスペースを構築します",
@@ -1782,7 +1812,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skipDetail: "지금 대시보드로 이동하고, 남은 설정은 나중에 구성 화면에서 마무리하세요.",
             progressStep: "{current}/{total}단계",
             progressComplete: "완료",
-            stepLabels: ["시작", "설치", "권한", "모델", "채널", "AI 직원"],
+            stepLabels: ["시작", "설치", "모델", "채널", "AI 직원"],
             welcomeEyebrow: "시작하기",
             welcomeTitle: "ChillClaw에 오신 것을 환영합니다",
             welcomeBody: "몇 분 안에 OpenClaw 기반 디지털 직원 작업 공간을 만드세요",
@@ -1956,7 +1986,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skipDetail: "Ve al panel ahora y termina el resto de la configuración más tarde desde Configuración.",
             progressStep: "Paso {current} de {total}",
             progressComplete: "Completado",
-            stepLabels: ["Inicio", "Instalar", "Permisos", "Modelo", "Canal", "Empleado IA"],
+            stepLabels: ["Inicio", "Instalar", "Modelo", "Canal", "Empleado IA"],
             welcomeEyebrow: "Comenzar",
             welcomeTitle: "Bienvenido a ChillClaw",
             welcomeBody: "Construye en minutos tu espacio de trabajo de empleados digitales impulsado por OpenClaw",
@@ -2130,7 +2160,7 @@ func nativeOnboardingCopy(localeIdentifier: String = resolveNativeOnboardingLoca
             skipDetail: "Go to the Dashboard now and finish the remaining setup later in Configuration.",
             progressStep: "Step {current} of {total}",
             progressComplete: "Complete",
-            stepLabels: ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee"],
+            stepLabels: ["Welcome", "Install", "Model", "Channel", "AI Employee"],
             welcomeEyebrow: "Get started",
             welcomeTitle: "Welcome to ChillClaw",
             welcomeBody: "Build your OpenClaw-powered digital employee workspace in minutes",

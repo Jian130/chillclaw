@@ -27,7 +27,7 @@ import {
   getRuntimeManifestPath,
   getRuntimeUpdateFeedUrl
 } from "../runtime-paths.js";
-import { logDevelopmentCommand } from "../services/logger.js";
+import { logDevelopmentCommand, writeInfoLog } from "../services/logger.js";
 import type { EventPublisher } from "../services/event-publisher.js";
 import type { DownloadManager } from "../download-manager/download-manager.js";
 import { RuntimeManager } from "./runtime-manager.js";
@@ -290,7 +290,7 @@ function defaultRuntimeManifest(): RuntimeManifestDocument {
             arch: "*"
           }
         ],
-        sourcePolicy: ["bundled", "download"],
+        sourcePolicy: ["bundled"],
         updatePolicy: "stage-silently-apply-safely",
         installDir: getManagedOpenClawDir(),
         activePath: getManagedOpenClawBinPath(),
@@ -541,10 +541,21 @@ async function installOpenClawFromDirectory(sourceDir: string): Promise<void> {
   const workspace = await mkdtemp(resolve(tmpdir(), "chillclaw-openclaw-runtime-"));
   const nextDir = resolve(workspace, "openclaw-runtime");
   try {
+    await writeInfoLog("Installing OpenClaw runtime from bundled installer artifact.", {
+      sourceDir,
+      installDir: getManagedOpenClawDir()
+    }, {
+      scope: "runtimeManager.openclaw.installBundle"
+    });
     await cp(sourceDir, nextDir, { recursive: true, force: true, verbatimSymlinks: true });
     await rm(getManagedOpenClawDir(), { recursive: true, force: true });
     await mkdir(dirname(getManagedOpenClawDir()), { recursive: true });
     await rename(nextDir, getManagedOpenClawDir());
+    await writeInfoLog("Installed bundled OpenClaw runtime.", {
+      installDir: getManagedOpenClawDir()
+    }, {
+      scope: "runtimeManager.openclaw.installBundle"
+    });
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -553,6 +564,13 @@ async function installOpenClawFromDirectory(sourceDir: string): Promise<void> {
 async function installOpenClawWithNpm(packageSpec: string): Promise<void> {
   await mkdir(getManagedOpenClawDir(), { recursive: true });
   const invocation = await ensureManagedNodeNpmInvocation();
+  await writeInfoLog("OpenClaw runtime fell back to npm installation.", {
+    packageSpec,
+    installDir: getManagedOpenClawDir(),
+    npm: invocation.display
+  }, {
+    scope: "runtimeManager.openclaw.installNpm"
+  });
   await runCommand(invocation.command, [...invocation.argsPrefix, "install", "--prefix", getManagedOpenClawDir(), packageSpec], {
     env: managedNodeEnv(invocation.command),
     beforeSpawn: (command, args) => logDevelopmentCommand("runtimeManager.openclaw.install", command, args)
@@ -723,6 +741,14 @@ async function installOllamaFromArtifact(
 
   try {
     const cliPath = await resolveOllamaCliArtifact(source, artifact, archivePath, extractedPath);
+    await writeInfoLog("Installing Ollama runtime from managed runtime artifact.", {
+      source,
+      artifactFormat: artifact?.format,
+      artifactPath: artifact?.path,
+      installDir: getManagedOllamaDir()
+    }, {
+      scope: "runtimeManager.ollama.install"
+    });
     await copyOllamaCli(cliPath);
   } finally {
     await rm(workspace, { recursive: true, force: true });

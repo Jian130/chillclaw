@@ -161,7 +161,7 @@ struct OnboardingTests {
         )
         let occurrences = source.components(separatedBy: "variant: nativeOnboardingForwardActionVariant()").count - 1
 
-        #expect(occurrences == 7)
+        #expect(occurrences == 6)
     }
 
     @Test
@@ -242,11 +242,21 @@ struct OnboardingTests {
     }
 
     @Test
-    func nativeOnboardingInsertsPermissionsStepAfterInstall() {
-        #expect(nativeOnboardingStepOrder == [.welcome, .install, .permissions, .model, .channel, .employee])
+    func nativeOnboardingSkipsPermissionsStepAfterInstall() {
+        #expect(nativeOnboardingStepOrder == [.welcome, .install, .model, .channel, .employee])
 
         let copy = nativeOnboardingCopy(localeIdentifier: "en")
-        #expect(copy.stepLabels == ["Welcome", "Install", "Permissions", "Model", "Channel", "AI Employee"])
+        #expect(copy.stepLabels == ["Welcome", "Install", "Model", "Channel", "AI Employee"])
+    }
+
+    @Test
+    func nativeOnboardingUsesOnboardingOwnedLocalRuntimeAndActionState() throws {
+        let source = try String(contentsOfFile: "/Users/home/Ryo/Projects/chillclaw/apps/macos-native/Sources/ChillClawNative/OnboardingViewModel.swift")
+
+        #expect(source.contains("resolveNativeOnboardingLocalRuntime"))
+        #expect(source.contains("onboardingLocalRuntime: onboardingState?.localRuntime"))
+        #expect(source.contains("if let onboarding = result.onboarding"))
+        #expect(source.contains("applyOnboardingState(onboarding)"))
     }
 
     @Test
@@ -272,8 +282,8 @@ struct OnboardingTests {
         let copy = nativePermissionsCopy(localeIdentifier: "en")
         let rows = nativePermissionMetadata(localeIdentifier: "en")
 
-        #expect(copy.onboardingTitle == "Grant permissions")
-        #expect(copy.sharedBody == "Allow these so ChillClaw can notify and capture when needed.")
+        #expect(copy.settingsTitle == "Permissions")
+        #expect(copy.settingsBody == "Manage the macOS permissions ChillClaw requests on this Mac.")
         #expect(copy.grantButton == "Grant")
         #expect(copy.requestAccess == "Request access")
 
@@ -466,13 +476,13 @@ struct OnboardingTests {
     }
 
     @Test
-    func advancePastInstallPersistsPermissionsStep() async throws {
+    func advancePastInstallPersistsModelStep() async throws {
         let recorder = NativeRequestRecorder()
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("POST", "/api/onboarding/navigate"):
-                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .permissions))
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -516,7 +526,7 @@ struct OnboardingTests {
         let body = try #require(bodyData(for: request))
         let payload = try JSONDecoder.chillClaw.decode(OnboardingStepNavigationRequest.self, from: body)
 
-        #expect(payload.step == .permissions)
+        #expect(payload.step == .model)
     }
 
     @Test
@@ -597,15 +607,30 @@ struct OnboardingTests {
     }
 
     @Test
-    func advancePastPermissionsMarksNextButtonBusyWhilePersisting() async throws {
+    func completeToChatOpensThreadForCompletedOnboardingEmployee() async throws {
         let recorder = NativeRequestRecorder()
-        let gate = AsyncGate()
+        let chatTransport = RecordingOnboardingChatTransport()
+        let completedEmployee = OnboardingEmployeeState(
+            memberId: "member-onboarded",
+            name: "AI Ryo",
+            jobTitle: "Research Analyst",
+            avatarPresetId: "ember"
+        )
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("POST", "/api/onboarding/permissions/confirm"):
-                await gate.wait()
-                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
+            case ("POST", "/api/onboarding/complete"):
+                let body = try JSONEncoder.chillClaw.encode(
+                    CompleteOnboardingResponse(
+                        status: "completed",
+                        destination: .chat,
+                        summary: .init(employee: completedEmployee),
+                        overview: makeOverview(setupCompleted: true, installed: true, running: true, version: "2026.3.13")
+                    )
+                )
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/ai-team/overview"):
+                let body = try JSONEncoder.chillClaw.encode(makeAITeamOverview(memberId: "member-onboarded"))
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -617,58 +642,85 @@ struct OnboardingTests {
             fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
         )
         let client = ChillClawAPIClient(session: session, configurationProvider: { configuration })
-        let endpointStore = DaemonEndpointStore(configuration: configuration, ping: { true })
-        let processManager = DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true })
-        let chatViewModel = ChillClawChatViewModel(transport: FakeChatTransport())
         let appState = ChillClawAppState(
             configuration: configuration,
             client: client,
-            endpointStore: endpointStore,
-            processManager: processManager,
-            chatViewModel: chatViewModel,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: ChillClawChatViewModel(transport: chatTransport),
             loader: .init(
-                fetchOverview: { makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13") },
+                fetchOverview: { makeOverview(setupCompleted: false) },
                 fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
                 fetchModelConfig: { emptyModelConfig() },
                 fetchChannelConfig: { emptyChannelConfig() },
                 fetchPluginConfig: { emptyPluginConfig() },
                 fetchSkillsConfig: { emptySkillConfig() },
-                fetchAITeamOverview: { emptyAITeamOverview() }
+                fetchAITeamOverview: { makeAITeamOverview(memberId: "member-onboarded") }
             )
         )
+        appState.overview = makeOverview(setupCompleted: false)
 
         let viewModel = NativeOnboardingViewModel(
             appState: appState,
             daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
         )
-        viewModel.onboardingState = makeOnboardingStateResponse(step: .permissions)
 
-        let task = Task {
-            await viewModel.advancePastPermissions()
-        }
+        await viewModel.complete(destination: .chat)
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
 
-        await waitForRecordedURLCount(recorder, expectedCount: 1)
-        #expect(viewModel.permissionsNextBusy == true)
+        #expect(appState.selectedSection == .chat)
+        #expect(appState.selectedMemberForChat == "member-onboarded")
+        #expect(chatTransport.createMemberIds == ["member-onboarded"])
+        #expect(appState.chatViewModel.selectedThread?.memberId == "member-onboarded")
+    }
 
-        await gate.open()
-        await task.value
+    @Test
+    func openPreferredChatThreadLoadsTeamAndOpensFirstMemberWhenNoMemberIsSelected() async {
+        let chatTransport = RecordingOnboardingChatTransport()
+        let configuration = ChillClawClientConfiguration(
+            daemonURL: URL(string: "http://127.0.0.1:4545")!,
+            fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+        )
+        let client = ChillClawAPIClient(configurationProvider: { configuration })
+        let appState = ChillClawAppState(
+            configuration: configuration,
+            client: client,
+            endpointStore: DaemonEndpointStore(configuration: configuration, ping: { true }),
+            processManager: DaemonProcessManager(launchAgent: FakeLaunchAgentController(), ping: { true }),
+            chatViewModel: ChillClawChatViewModel(transport: chatTransport),
+            loader: .init(
+                fetchOverview: { makeOverview(setupCompleted: true) },
+                fetchDeploymentTargets: { .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: []) },
+                fetchModelConfig: { emptyModelConfig() },
+                fetchChannelConfig: { emptyChannelConfig() },
+                fetchPluginConfig: { emptyPluginConfig() },
+                fetchSkillsConfig: { emptySkillConfig() },
+                fetchAITeamOverview: { makeAITeamOverview(memberId: "member-onboarded") }
+            )
+        )
+        appState.overview = makeOverview(setupCompleted: true)
+        appState.selectedSection = .chat
+        appState.hasBootstrapped = true
 
-        #expect(viewModel.permissionsNextBusy == false)
-        #expect(viewModel.currentStep == .model)
+        await appState.openPreferredChatThread()
+
+        #expect(appState.selectedMemberForChat == "member-onboarded")
+        #expect(chatTransport.createMemberIds == ["member-onboarded"])
+        #expect(appState.chatViewModel.selectedThread?.memberId == "member-onboarded")
     }
 
     @Test
     func advancingToModelBootstrapsLocalDetectionWithoutCrashing() async throws {
         let recorder = NativeRequestRecorder()
-        let confirmGate = AsyncGate()
+        let navigateGate = AsyncGate()
         let onboardingGate = AsyncGate()
         let detectedLocalRuntime = makeLocalRuntime(recommendation: "local", status: "installing-runtime")
 
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
-            case ("POST", "/api/onboarding/permissions/confirm"):
-                await confirmGate.wait()
+            case ("POST", "/api/onboarding/navigate"):
+                await navigateGate.wait()
                 let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .model))
                 return (jsonResponse(url: url), body)
             case ("GET", "/api/onboarding/state"):
@@ -709,14 +761,14 @@ struct OnboardingTests {
             appState: appState,
             daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
         )
-        viewModel.onboardingState = makeOnboardingStateResponse(step: .permissions)
+        viewModel.onboardingState = makeOnboardingStateResponse(step: .install)
 
         let task = Task {
-            await viewModel.advancePastPermissions()
+            await viewModel.advancePastInstall()
         }
 
         await waitForRecordedURLCount(recorder, expectedCount: 1)
-        await confirmGate.open()
+        await navigateGate.open()
         await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         #expect(viewModel.currentStep == .model)
@@ -1644,6 +1696,19 @@ struct OnboardingTests {
                 activeModelAuthSessionId: nil,
                 draftModelEntryID: nil,
                 summaryModelEntryID: nil,
+                localRuntime: makeLocalRuntime(recommendation: "cloud", status: "unchecked", supported: false)
+            ) == .detectingLocal
+        )
+
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: false,
+                providerId: "",
+                selectedProviderPresent: false,
+                modelViewKind: .picker,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
                 localRuntime: makeLocalRuntime(recommendation: "cloud", status: "cloud-recommended", supported: false)
             ) == .cloudHandoff
         )
@@ -1654,6 +1719,19 @@ struct OnboardingTests {
                 providerId: "",
                 selectedProviderPresent: false,
                 modelViewKind: .picker,
+                activeModelAuthSessionId: nil,
+                draftModelEntryID: nil,
+                summaryModelEntryID: nil,
+                localRuntime: makeLocalRuntime(recommendation: "local", status: "idle")
+            ) == .localSetup
+        )
+
+        #expect(
+            resolveNativeOnboardingModelStepMode(
+                bootstrapPending: false,
+                providerId: "openai",
+                selectedProviderPresent: true,
+                modelViewKind: .configure,
                 activeModelAuthSessionId: nil,
                 draftModelEntryID: nil,
                 summaryModelEntryID: nil,
@@ -1740,6 +1818,22 @@ struct OnboardingTests {
                 localRuntime: runtimeDerivedLocalRuntime
             ) == .connected
         )
+    }
+
+    @Test
+    func nativeOnboardingLocalRuntimePrefersFreshOnboardingStateOnModelStep() {
+        let staleModelConfigRuntime = makeLocalRuntime(recommendation: "cloud", status: "unchecked", supported: false)
+        let onboardingRuntime = makeLocalRuntime(recommendation: "local", status: "idle", supported: true)
+
+        let resolved = resolveNativeOnboardingLocalRuntime(
+            currentStep: .model,
+            localRuntimeSnapshot: nil,
+            onboardingLocalRuntime: onboardingRuntime,
+            modelConfigLocalRuntime: staleModelConfigRuntime
+        )
+
+        #expect(resolved?.status == "idle")
+        #expect(resolved?.recommendation == "local")
     }
 
     @Test
@@ -3602,7 +3696,7 @@ struct OnboardingTests {
                 let body = try JSONEncoder.chillClaw.encode(query.contains("fresh=1") ? refreshedTargets : initialTargets)
                 return (jsonResponse(url: url), body)
             case ("POST", "/api/onboarding/runtime/update"):
-                var nextState = makeOnboardingStateResponse(step: .permissions)
+                var nextState = makeOnboardingStateResponse(step: .model)
                 nextState.draft.install = .init(
                     installed: true,
                     version: "2026.3.14",
@@ -3674,7 +3768,7 @@ struct OnboardingTests {
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/update"))
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.updateAvailable == false)
-        #expect(viewModel.currentStep == .permissions)
+        #expect(viewModel.currentStep == .model)
         #expect(viewModel.pageError == nil)
         #expect(viewModel.installBusy == false)
     }
@@ -3715,7 +3809,7 @@ struct OnboardingTests {
                 throw URLError(.timedOut)
             case ("GET", "/api/onboarding/state"):
                 var state = makeOnboardingStateResponse(step: .install)
-                state.draft.currentStep = .permissions
+                state.draft.currentStep = .model
                 state.draft.install = .init(
                     installed: true,
                     version: "2026.3.14",
@@ -3781,7 +3875,7 @@ struct OnboardingTests {
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(appState.deploymentTargets?.targets.first?.installed == true)
         #expect(viewModel.onboardingState?.draft.install?.installed == true)
-        #expect(viewModel.currentStep == .permissions)
+        #expect(viewModel.currentStep == .model)
         #expect(viewModel.pageError == nil)
         #expect(viewModel.installBusy == false)
     }
@@ -3823,7 +3917,7 @@ struct OnboardingTests {
                 throw URLError(.timedOut)
             case ("GET", "/api/onboarding/state"):
                 let read = await stateReads.increment()
-                var state = makeOnboardingStateResponse(step: read >= 13 ? .permissions : .install)
+                var state = makeOnboardingStateResponse(step: read >= 13 ? .model : .install)
                 if read >= 13 {
                     state.draft.install = .init(
                         installed: true,
@@ -3888,7 +3982,7 @@ struct OnboardingTests {
         await viewModel.runInstall()
 
         #expect(await stateReads.value() >= 13)
-        #expect(viewModel.currentStep == .permissions)
+        #expect(viewModel.currentStep == .model)
         #expect(viewModel.pageError == nil)
         #expect(viewModel.installBusy == false)
     }
@@ -4735,6 +4829,39 @@ private func emptyAITeamOverview() -> AITeamOverview {
     )
 }
 
+private func makeAITeamOverview(memberId: String) -> AITeamOverview {
+    var overview = emptyAITeamOverview()
+    overview.members = [
+        .init(
+            id: memberId,
+            agentId: "agent-\(memberId)",
+            source: "managed",
+            hasManagedMetadata: true,
+            name: "AI Ryo",
+            jobTitle: "Research Analyst",
+            status: "ready",
+            currentStatus: "Idle",
+            activeTaskCount: 0,
+            avatar: .init(presetId: "ember", accent: "#EF4444", emoji: "C"),
+            brain: nil,
+            teamIds: [],
+            bindingCount: 0,
+            bindings: [],
+            lastUpdatedAt: "2026-03-20T00:00:00.000Z",
+            personality: "",
+            soul: "",
+            workStyles: [],
+            presetSkillIds: [],
+            skillIds: [],
+            knowledgePackIds: [],
+            capabilitySettings: .init(memoryEnabled: true, contextWindow: 128000),
+            agentDir: nil,
+            workspaceDir: nil
+        )
+    ]
+    return overview
+}
+
 private func makeDeploymentTargetsResponse(targets: [DeploymentTargetStatus]) -> DeploymentTargetsResponse {
     .init(checkedAt: "2026-03-20T00:00:00.000Z", targets: targets)
 }
@@ -5054,6 +5181,96 @@ private struct FakeChatTransport: ChillClawChatTransport {
 
     func createThread(memberId: String) async throws -> ChatActionResponse {
         .init(status: "completed", message: "created", overview: .init(threads: []), thread: nil)
+    }
+
+    func sendMessage(threadId: String, message: String, clientMessageId: String?) async throws -> ChatActionResponse {
+        .init(status: "completed", message: "sent", overview: .init(threads: []), thread: nil)
+    }
+
+    func abort(threadId: String) async throws -> ChatActionResponse {
+        .init(status: "completed", message: "aborted", overview: .init(threads: []), thread: nil)
+    }
+
+    func events() async throws -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+private final class RecordingOnboardingChatTransport: ChillClawChatTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var createdMembers: [String] = []
+
+    var createMemberIds: [String] {
+        lock.withLock { createdMembers }
+    }
+
+    func fetchOverview() async throws -> ChatOverview {
+        .init(threads: [])
+    }
+
+    func fetchThread(threadId: String) async throws -> ChatThreadDetail {
+        .init(
+            id: threadId,
+            memberId: "member-onboarded",
+            agentId: "agent-member-onboarded",
+            sessionKey: "session-\(threadId)",
+            title: "AI Ryo",
+            createdAt: "2026-03-20T00:00:00.000Z",
+            updatedAt: "2026-03-20T00:00:00.000Z",
+            lastPreview: nil,
+            lastMessageAt: nil,
+            unreadCount: 0,
+            activeRunState: nil,
+            historyStatus: "loaded",
+            composerState: .init(status: "idle", canSend: true, canAbort: false),
+            messages: []
+        )
+    }
+
+    func createThread(memberId: String) async throws -> ChatActionResponse {
+        lock.withLock {
+            createdMembers.append(memberId)
+        }
+        let thread = ChatThreadDetail(
+            id: "thread-\(memberId)",
+            memberId: memberId,
+            agentId: "agent-\(memberId)",
+            sessionKey: "session-\(memberId)",
+            title: "AI Ryo",
+            createdAt: "2026-03-20T00:00:00.000Z",
+            updatedAt: "2026-03-20T00:00:00.000Z",
+            lastPreview: nil,
+            lastMessageAt: nil,
+            unreadCount: 0,
+            activeRunState: nil,
+            historyStatus: "loaded",
+            composerState: .init(status: "idle", canSend: true, canAbort: false),
+            messages: []
+        )
+        return .init(
+            status: "completed",
+            message: "created",
+            overview: .init(threads: [
+                .init(
+                    id: thread.id,
+                    memberId: thread.memberId,
+                    agentId: thread.agentId,
+                    sessionKey: thread.sessionKey,
+                    title: thread.title,
+                    createdAt: thread.createdAt,
+                    updatedAt: thread.updatedAt,
+                    lastPreview: nil,
+                    lastMessageAt: nil,
+                    unreadCount: 0,
+                    activeRunState: nil,
+                    historyStatus: thread.historyStatus,
+                    composerState: thread.composerState
+                )
+            ]),
+            thread: thread
+        )
     }
 
     func sendMessage(threadId: String, message: String, clientMessageId: String?) async throws -> ChatActionResponse {

@@ -37,7 +37,7 @@
           "arch": "*"
         }
       ],
-      "sourcePolicy": ["bundled", "download"],
+      "sourcePolicy": ["bundled"],
       "updatePolicy": "stage-silently-apply-safely",
       "installDir": "openclaw-runtime",
       "activePath": "openclaw-runtime/node_modules/.bin/openclaw",

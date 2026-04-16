@@ -10,7 +10,7 @@ describe("OnboardingPage CTA styling", () => {
   it("uses one shared class hook for forward onboarding actions", () => {
     const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
 
-    expect(source.match(/onboarding-primary-action/g)).toHaveLength(7);
+    expect(source.match(/onboarding-primary-action/g)).toHaveLength(6);
   });
 
   it("prefers the provider-defined auth method label and description for onboarding cards", () => {
@@ -76,6 +76,15 @@ describe("OnboardingPage CTA styling", () => {
     expect(source).toContain("const autoLocalRuntimeAction");
     expect(source).toContain("void handleLocalRuntimeAction(autoLocalRuntimeAction);");
     expect(source).toContain('action === "repair" ? await repairLocalModelRuntime() : await installLocalModelRuntime()');
+  });
+
+  it("uses onboarding-owned local runtime state and applies local runtime onboarding responses", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).toContain("resolveOnboardingLocalRuntime");
+    expect(source).toContain("onboardingLocalRuntime: onboardingState?.localRuntime");
+    expect(source).toContain("if (result.onboarding)");
+    expect(source).toContain("await applyOnboardingState(result.onboarding)");
   });
 
   it("hydrates step 4 from onboarding state instead of fetching overview and model config together", () => {

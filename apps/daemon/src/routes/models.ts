@@ -195,6 +195,10 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context }) {
       const result = await context.localModelRuntimeService.install();
       const { sync, modelConfig, overview } = await publishModelAndOverview(context);
+      const onboarding =
+        result.status === "completed"
+          ? await context.onboardingService.adoptActiveLocalRuntimeModel(result.localRuntime)
+          : undefined;
       const response: LocalModelRuntimeActionResponse = {
         action: "install",
         status: result.status,
@@ -202,6 +206,7 @@ export const modelsRoutes: RouteDefinition[] = [
         localRuntime: result.localRuntime,
         modelConfig,
         overview,
+        onboarding,
         ...sync
       };
 
@@ -214,6 +219,10 @@ export const modelsRoutes: RouteDefinition[] = [
     async handle({ context }) {
       const result = await context.localModelRuntimeService.repair();
       const { sync, modelConfig, overview } = await publishModelAndOverview(context);
+      const onboarding =
+        result.status === "completed"
+          ? await context.onboardingService.adoptActiveLocalRuntimeModel(result.localRuntime)
+          : undefined;
       const response: LocalModelRuntimeActionResponse = {
         action: "repair",
         status: result.status,
@@ -221,6 +230,7 @@ export const modelsRoutes: RouteDefinition[] = [
         localRuntime: result.localRuntime,
         modelConfig,
         overview,
+        onboarding,
         ...sync
       };
 

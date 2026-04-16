@@ -363,7 +363,7 @@ struct NativeOnboardingView: View {
                 case .install:
                     installStep
                 case .permissions:
-                    permissionsStep
+                    modelStep
                 case .model:
                     modelStep
                 case .channel:
@@ -1318,42 +1318,6 @@ struct NativeOnboardingView: View {
                                     .font(.system(size: 15, weight: .semibold))
                             }
                         }
-                    }
-                }
-            }
-        }
-    }
-
-    private var permissionsStep: some View {
-        let permissionsCopy = nativePermissionsCopy(localeIdentifier: viewModel.selectedLocaleIdentifier)
-
-        return VStack(alignment: .leading, spacing: 24) {
-            headerBlock(title: permissionsCopy.onboardingTitle, body: permissionsCopy.sharedBody)
-
-            OnboardingGlassPanel {
-                NativePermissionsList(localeIdentifier: viewModel.selectedLocaleIdentifier, compact: false)
-            }
-
-            HStack(spacing: 16) {
-                NativeOnboardingActionButton(variant: .secondary, disabled: viewModel.permissionsNextBusy) {
-                    Task { await viewModel.goToStep(.install) }
-                } label: {
-                    Text(viewModel.copy.back)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-
-                NativeOnboardingActionButton(variant: nativeOnboardingForwardActionVariant(), disabled: viewModel.permissionsNextBusy) {
-                    Task { await viewModel.advancePastPermissions() }
-                } label: {
-                    HStack(spacing: 10) {
-                        if viewModel.permissionsNextBusy {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                        }
-
-                        Text(viewModel.copy.next)
-                            .font(.system(size: 15, weight: .semibold))
                     }
                 }
             }

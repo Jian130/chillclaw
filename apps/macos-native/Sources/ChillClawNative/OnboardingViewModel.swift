@@ -194,7 +194,6 @@ final class NativeOnboardingViewModel {
     var pageLoading = true
     var pageError: String?
     var installBusy = false
-    var permissionsNextBusy = false
     var installProgress = NativeOnboardingInstallProgressSnapshot()
     var modelBusy = ""
     var channelBusy = false
@@ -262,7 +261,7 @@ final class NativeOnboardingViewModel {
     }
 
     var currentStep: OnboardingStep {
-        currentDraft.currentStep
+        normalizeNativeOnboardingStep(currentDraft.currentStep)
     }
 
     var showingCompletion: Bool {
@@ -295,7 +294,12 @@ final class NativeOnboardingViewModel {
     }
 
     var localRuntime: LocalModelRuntimeOverview? {
-        localRuntimeSnapshot ?? appState.modelConfig?.localRuntime ?? onboardingState?.localRuntime
+        resolveNativeOnboardingLocalRuntime(
+            currentStep: currentStep,
+            localRuntimeSnapshot: localRuntimeSnapshot,
+            onboardingLocalRuntime: onboardingState?.localRuntime,
+            modelConfigLocalRuntime: appState.modelConfig?.localRuntime
+        )
     }
 
     var modelViewState: NativeOnboardingModelViewState {
@@ -544,11 +548,6 @@ final class NativeOnboardingViewModel {
         applyOnboardingState(state)
     }
 
-    private func confirmPermissionsStep() async throws {
-        let state = try await appState.client.confirmOnboardingPermissions()
-        applyOnboardingState(state)
-    }
-
     private func saveEmployeeDraftToDaemon(
         _ employee: OnboardingEmployeeState,
         autosaveRevision: Int? = nil
@@ -562,6 +561,7 @@ final class NativeOnboardingViewModel {
 
     private func applyCompletedOnboarding(_ result: CompleteOnboardingResponse) {
         appState.applyOverviewSnapshot(result.overview)
+        applyPreferredChatMember(onboardingPreferredChatMemberId(response: result))
         completedOnboarding = result
         completionWarmupTaskID = result.warmupTaskId
         completionWarmupStatus = result.warmupTaskId == nil ? nil : .running
@@ -574,7 +574,26 @@ final class NativeOnboardingViewModel {
         completionWarmupMessage = nil
     }
 
+    private func onboardingPreferredChatMemberId(response: CompleteOnboardingResponse? = nil) -> String? {
+        [
+            response?.summary.employee?.memberId,
+            completedOnboarding?.summary.employee?.memberId,
+            onboardingState?.summary.employee?.memberId,
+            onboardingState?.draft.employee?.memberId
+        ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
+    private func applyPreferredChatMember(_ memberId: String?) {
+        appState.preferChatMember(memberId)
+    }
+
     private func enterDestination(_ destination: OnboardingDestination, refreshAll: Bool = false) async {
+        if destination == .chat {
+            applyPreferredChatMember(onboardingPreferredChatMemberId())
+        }
+
         appState.selectedSection = onboardingDestinationSection(destination)
         if refreshAll {
             await appState.refreshAll()
@@ -582,7 +601,11 @@ final class NativeOnboardingViewModel {
             _ = try? await readFreshAITeamOverview()
         }
         if destination == .chat {
+            appState.refreshSelectedMemberForChat()
+        }
+        if destination == .chat {
             await appState.chatViewModel.start()
+            await appState.openPreferredChatThread()
         }
     }
 
@@ -753,19 +776,7 @@ final class NativeOnboardingViewModel {
     }
 
     func advancePastInstall() async {
-        await goToStep(.permissions)
-    }
-
-    func advancePastPermissions() async {
-        pageError = nil
-        permissionsNextBusy = true
-        defer { permissionsNextBusy = false }
-
-        do {
-            try await confirmPermissionsStep()
-        } catch {
-            presentErrorUnlessCancelled(error)
-        }
+        await goToStep(.model)
     }
 
     func advancePastModel() async {
@@ -785,6 +796,9 @@ final class NativeOnboardingViewModel {
                 appState.modelConfig = result.modelConfig
                 localRuntimeSnapshot = result.localRuntime
                 localRuntimeMessage = result.message
+                if let onboarding = result.onboarding {
+                    applyOnboardingState(onboarding)
+                }
 
                 let settled = try await settleAfterMutation(
                     mutate: { result },
@@ -1095,6 +1109,9 @@ final class NativeOnboardingViewModel {
 
             let result = try await appState.client.completeOnboarding(.init(destination: destination))
             appState.applyOverviewSnapshot(result.overview)
+            if destination == .chat {
+                applyPreferredChatMember(onboardingPreferredChatMemberId(response: result))
+            }
             await enterDestination(destination, refreshAll: false)
         } catch {
             if await recoverOnboardingCompletionAfterTimeout(error, destination: destination) {
@@ -1749,7 +1766,13 @@ final class NativeOnboardingViewModel {
             appState.modelConfig = result.modelConfig
             localRuntimeSnapshot = result.localRuntime
             localRuntimeMessage = result.message
-            let nextOnboarding = try await refreshOnboardingState()
+            let nextOnboarding: OnboardingStateResponse
+            if let onboarding = result.onboarding {
+                applyOnboardingState(onboarding)
+                nextOnboarding = onboarding
+            } else {
+                nextOnboarding = try await refreshOnboardingState()
+            }
             if result.status == "completed",
                nextOnboarding.draft.currentStep == .model,
                nextOnboarding.summary.model?.entryId != nil

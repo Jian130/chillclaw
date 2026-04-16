@@ -120,6 +120,41 @@ async function serveOllamaPull() {
   };
 }
 
+async function serveNoisyOllamaPull(progressLines: number) {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    request.on("end", () => {
+      requests.push(body);
+      response.writeHead(200, {
+        "Content-Type": "application/x-ndjson"
+      });
+      for (let index = 1; index <= progressLines; index += 1) {
+        response.write(JSON.stringify({ status: "downloading layer", completed: index, total: progressLines }) + "\n");
+      }
+      response.end(JSON.stringify({ status: "success" }) + "\n");
+    });
+  });
+
+  await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+  const address = server.address() as AddressInfo | null;
+  if (!address) {
+    throw new Error("Test server did not expose a bound address.");
+  }
+  return {
+    url: `http://127.0.0.1:${address.port}/api/pull`,
+    requests,
+    close: async () => {
+      await new Promise<void>((resolvePromise, reject) => {
+        server.close((error) => error ? reject(error) : resolvePromise());
+      });
+    }
+  };
+}
+
 test("enqueue dedupes active jobs by artifact identity", async () => {
   const harness = await createHarness();
   try {
@@ -249,6 +284,31 @@ test("ollama pull jobs stream model progress through the download manager", asyn
     assert.deepEqual(JSON.parse(server.requests[0] ?? "{}"), { model: "gemma4:e2b" });
     assert.equal(harness.published.includes("download.progress"), true);
     assert.equal(harness.published.includes("download.completed"), true);
+  } finally {
+    await server.close();
+    await harness.cleanup();
+  }
+});
+
+test("ollama pull progress events are throttled to persisted snapshots", async () => {
+  const server = await serveNoisyOllamaPull(20);
+  const harness = await createHarness({
+    now: () => 1770000000000
+  });
+  try {
+    const job = await harness.manager.enqueue({
+      type: "model",
+      artifactId: "ollama-model:gemma4:e2b",
+      displayName: "Local model gemma4:e2b",
+      source: { kind: "ollama-pull", modelTag: "gemma4:e2b", endpoint: server.url },
+      destinationPolicy: { baseDir: "cache", fileName: "gemma4-e2b.json" },
+      requester: "model-manager"
+    });
+    const completed = await harness.manager.waitForJob(job.id);
+
+    const progressEvents = harness.published.filter((event) => event === "download.progress");
+    assert.equal(completed.status, "completed");
+    assert.equal(progressEvents.length, 2);
   } finally {
     await server.close();
     await harness.cleanup();

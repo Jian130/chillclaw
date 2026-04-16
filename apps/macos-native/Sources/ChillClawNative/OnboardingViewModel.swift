@@ -1690,7 +1690,11 @@ final class NativeOnboardingViewModel {
                 }
 
                 do {
+                    let minimumStep = self.currentStep
                     let nextState = try await self.appState.client.fetchOnboardingState(fresh: true)
+                    guard onboardingIsCurrentOrLater(nextState.draft.currentStep, target: minimumStep) else {
+                        return
+                    }
                     self.applyOnboardingState(nextState)
                     self.pageError = nil
                 } catch {

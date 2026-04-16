@@ -251,7 +251,14 @@ struct OnboardingTests {
 
     @Test
     func nativeOnboardingUsesOnboardingOwnedLocalRuntimeAndActionState() throws {
-        let source = try String(contentsOfFile: "/Users/home/Ryo/Projects/chillclaw/apps/macos-native/Sources/ChillClawNative/OnboardingViewModel.swift")
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingViewModel.swift"),
+            encoding: .utf8
+        )
 
         #expect(source.contains("resolveNativeOnboardingLocalRuntime"))
         #expect(source.contains("onboardingLocalRuntime: onboardingState?.localRuntime"))
@@ -3763,9 +3770,12 @@ struct OnboardingTests {
         viewModel.onboardingState = makeOnboardingStateResponse(step: .install)
 
         await viewModel.updateExistingInstall()
+        await waitForRecordedURLCount(recorder, expectedCount: 3)
+        try? await Task.sleep(nanoseconds: 20_000_000)
 
         let urls = await recorder.recordedURLs()
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/update"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.updateAvailable == false)
         #expect(viewModel.currentStep == .model)

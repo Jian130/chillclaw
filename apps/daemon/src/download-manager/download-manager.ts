@@ -501,17 +501,19 @@ export class DownloadManager {
     const speedWindowMs = Math.max(1, now - run.startedAt);
     const speedBps = Math.round(((downloadedBytes - run.startedBytes) / speedWindowMs) * 1000);
     const shouldPersist = force || now - run.lastPersistAt >= PROGRESS_PERSIST_INTERVAL_MS;
-    if (shouldPersist) {
-      const job = await this.requireJob(jobId);
-      await this.updateJob({
-        ...job,
-        expectedBytes: job.expectedBytes ?? totalBytes,
-        downloadedBytes,
-        progress,
-        updatedAt: now
-      });
-      run.lastPersistAt = now;
+    if (!shouldPersist) {
+      return;
     }
+
+    const job = await this.requireJob(jobId);
+    await this.updateJob({
+      ...job,
+      expectedBytes: job.expectedBytes ?? totalBytes,
+      downloadedBytes,
+      progress,
+      updatedAt: now
+    });
+    run.lastPersistAt = now;
     this.publish({
       type: "download.progress",
       jobId,

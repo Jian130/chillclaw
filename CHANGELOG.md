@@ -4,6 +4,11 @@
 
 ## 0.1.9 - 2026-04-16
 
+### 2026-04-16 22:08 CST
+
+- fixed clean macOS local-model onboarding crashes by throttling noisy Ollama pull progress events to the same cadence as persisted download snapshots, preventing repeated daemon overview probes from exhausting process creation during model download
+- fixed the tag-driven macOS release test run by removing a hard-coded local checkout path from native onboarding coverage and ignoring stale model-step bootstrap reads that could move onboarding backward from model setup to install on slower GitHub runners
+
 ### 2026-04-16 21:29 CST
 
 - fixed clean macOS onboarding by keeping Ollama detection tied to fresh onboarding-owned runtime state, automatically preparing the bundled Ollama runtime on supported Apple Silicon Macs, and applying the returned local-model draft before advancing to channel setup

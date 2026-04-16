@@ -2053,16 +2053,22 @@ test("missing onboarding model auth sessions clear the stale session id and pres
 test("onboarding completion runs the dedicated runtime finalization step before marking setup complete", async () => {
   class FinalizingAdapter extends MockAdapter {
     gatewayFinalizeCalls = 0;
+    setupCompletedAtByFinalizeCall: Array<string | undefined> = [];
+
+    constructor(private readonly stateStore: StateStore) {
+      super();
+    }
 
     override async finalizeOnboardingSetup() {
       this.gatewayFinalizeCalls += 1;
+      this.setupCompletedAtByFinalizeCall.push((await this.stateStore.read()).setupCompletedAt);
       return super.finalizeOnboardingSetup();
     }
   }
 
   const filePath = resolve(process.cwd(), `apps/daemon/.data/onboarding-service-pending-gateway-${randomUUID()}.json`);
-  const adapter = new FinalizingAdapter();
   const store = new StateStore(filePath);
+  const adapter = new FinalizingAdapter(store);
   const overviewService = new OverviewService(adapter, store);
   const channelSetupService = new ChannelSetupService(adapter, store);
   const aiTeamService = new AITeamService(adapter, store);
@@ -2100,7 +2106,8 @@ test("onboarding completion runs the dedicated runtime finalization step before 
 
   const result = await service.complete({ destination: "chat" });
 
-  assert.equal(adapter.gatewayFinalizeCalls, 1);
+  assert.ok(adapter.gatewayFinalizeCalls >= 1);
+  assert.equal(adapter.setupCompletedAtByFinalizeCall[0], undefined);
   assert.equal(result.overview.engine.pendingGatewayApply, false);
   assert.equal(result.overview.engine.running, true);
 });

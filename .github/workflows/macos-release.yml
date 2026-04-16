@@ -145,20 +145,20 @@ jobs:
           parse_notary_field() {
             local field="$1"
             node -e '
-const field = process.argv[1];
-let input = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  input += chunk;
-});
-process.stdin.on("end", () => {
-  const payload = JSON.parse(input);
-  const value = payload[field];
-  if (value) {
-    process.stdout.write(String(value));
-  }
-});
-' "$field"
+          const field = process.argv[1];
+          let input = "";
+          process.stdin.setEncoding("utf8");
+          process.stdin.on("data", (chunk) => {
+            input += chunk;
+          });
+          process.stdin.on("end", () => {
+            const payload = JSON.parse(input);
+            const value = payload[field];
+            if (value) {
+              process.stdout.write(String(value));
+            }
+          });
+          ' "$field"
           }
 
           NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"

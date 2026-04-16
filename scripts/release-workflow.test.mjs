@@ -47,6 +47,7 @@ test("macOS release workflow waits for notarization before Gatekeeper assessment
   const workflow = await readRepoFile(".github/workflows/macos-release.yml");
 
   assert.doesNotMatch(workflow, /spctl --assess .*"\$APP_PATH"/);
+  assert.doesNotMatch(workflow, /\n(?:const|let|process\.)/);
   assert.match(workflow, /xcrun notarytool submit "\$INSTALLER_PATH"[\s\S]*--output-format json/);
   assert.match(workflow, /parse_notary_field status/);
   assert.match(workflow, /xcrun notarytool log "\$NOTARY_SUBMISSION_ID"/);

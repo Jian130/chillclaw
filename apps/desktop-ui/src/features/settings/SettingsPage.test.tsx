@@ -28,6 +28,28 @@ vi.mock("../../app/providers/OverviewProvider.js", () => ({
       appService: {
         running: true,
         summary: "ChillClaw launches as a local background service."
+      },
+      runtimeManager: {
+        checkedAt: "2026-04-04T11:00:00.000Z",
+        summary: "Runtime updates are ready to apply.",
+        detail: "ChillClaw manages pinned runtimes through a curated manifest.",
+        resources: [
+          {
+            id: "openclaw-runtime",
+            kind: "engine",
+            label: "OpenClaw runtime",
+            status: "ready",
+            sourcePolicy: ["bundled", "download"],
+            updatePolicy: "stage-silently-apply-safely",
+            installedVersion: "2026.3.11",
+            desiredVersion: "2026.3.11",
+            latestApprovedVersion: "2026.4.13",
+            updateAvailable: true,
+            blockingResourceIds: ["node-npm-runtime"],
+            summary: "OpenClaw runtime has an approved update.",
+            detail: "ChillClaw can update its managed local OpenClaw runtime."
+          }
+        ]
       }
     },
     refresh: async () => undefined
@@ -66,6 +88,11 @@ describe("SettingsPage", () => {
     expect(html).toContain("Manage this in the native macOS app");
     expect(html).toContain("App Updates");
     expect(html).toContain("OpenClaw Runtime");
+    expect(html).toContain("ChillClaw updates its managed OpenClaw runtime inside the app boundary");
+    expect(html).toContain("OpenClaw runtime has an approved update.");
+    expect(html).toContain("2026.3.11");
+    expect(html).toContain("2026.4.13");
+    expect(html).toContain("Update OpenClaw");
     expect(html).toContain("Local AI on This Mac");
     expect(html).toContain("Download 0.1.4");
   });

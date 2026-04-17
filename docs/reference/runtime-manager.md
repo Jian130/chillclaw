@@ -62,7 +62,9 @@ The daemon resolves manifest paths with:
 - `CHILLCLAW_RUNTIME_MANIFEST_PATH`
 - optional `CHILLCLAW_RUNTIME_UPDATE_FEED_URL`
 
-The packaged manifest is the safe baseline. The optional feed is a ChillClaw-curated update source, not an upstream "latest" lookup.
+The packaged manifest is the safe baseline. The optional feed is a ChillClaw-curated update source, not an upstream "latest" lookup. Stable macOS release packaging generates `runtime-update.json` and publishes it as a GitHub Release asset; packaged apps use `https://github.com/Jian130/chillclaw/releases/latest/download/runtime-update.json` unless an operator overrides the environment.
+
+OpenClaw runtime update-feed entries may use an `npm-package` artifact format. Those entries must name a concrete `openclaw` package version, such as `openclaw@2026.4.18`; normal user updates must not point at `latest`. Runtime Manager installs that package with ChillClaw-managed Node/npm into ChillClaw's managed runtime path, then `OpenClawAdapter` verifies the gateway baseline and reachability.
 
 Each manifest resource may define:
 
@@ -72,6 +74,7 @@ Each manifest resource may define:
 - dependencies
 - platform constraints
 - artifact URLs, relative packaged paths, sha256 digests, and archive type
+- optional ChillClaw app compatibility gates for update-feed entries
 - provider-specific verification metadata
 
 Relative artifact paths resolve under the manifest directory. In packaged app builds this means under `Contents/Resources/app/runtime-artifacts`.
@@ -198,7 +201,7 @@ The LaunchAgent installer writes runtime environment entries for:
 - `CHILLCLAW_RUNTIME_MANIFEST_PATH`
 - `CHILLCLAW_RUNTIME_UPDATE_FEED_URL`
 
-Stable release packaging runs `npm run prepare:runtime-artifacts` before staging the app, then requires the packaged Node.js directory, pinned OpenClaw runtime directory, and Ollama CLI binary to be present. Local smoke builds may still run without prefilled artifacts when testing only installer structure.
+Stable release packaging runs `npm run prepare:runtime-artifacts` before staging the app, then requires the packaged Node.js directory, pinned OpenClaw runtime directory, and Ollama CLI binary to be present. It also runs `npm run build:runtime-update-feed` so GitHub Releases publish a `runtime-update.json` asset alongside the DMG. Local smoke builds may still run without prefilled artifacts when testing only installer structure.
 
 Runtime preparation and provider verification should log the probed command, exit code, signal, and stdout/stderr snippets when packaged Node.js or npm fails. A silent `node` or `npm` failure after copying a bundled runtime is a release-blocking packaging/signing signal, not a reason to fall back to user PATH state.
 

@@ -452,7 +452,7 @@ The sections below keep the original repo-specific reference intact. These are t
 
 ChillClaw-managed installs go through the daemon Runtime Manager. Runtime Manager updates come from ChillClaw-curated manifests, not upstream `latest` discovery.
 
-OpenClaw runtime install and update are not npm/package-manager flows in the product. The daemon prepares `openclaw-runtime` from the bundled Runtime Manager artifact, copies it into ChillClaw app data, verifies the managed CLI, normalizes the gateway baseline, and only then marks the runtime ready.
+OpenClaw runtime installs use the packaged Runtime Manager baseline artifact. Runtime updates may either use a newer bundled/curated artifact or a curated `npm-package` artifact that pins a concrete `openclaw@version`. In both cases, ChillClaw installs into the managed `openclaw-runtime` path, verifies the managed CLI, normalizes the gateway baseline, and only then marks the runtime ready.
 
 External OpenClaw installs may still be detected for migration/debugging, but ChillClaw does not install or update them.
 

@@ -9,7 +9,7 @@ import type {
 } from "@chillclaw/contracts";
 
 export type RuntimeManifestKind = RuntimeResourceKind | "other";
-export type RuntimeArtifactFormat = "file" | "directory" | "tgz" | "zip" | "json";
+export type RuntimeArtifactFormat = "file" | "directory" | "tgz" | "zip" | "json" | "npm-package";
 
 export interface RuntimePlatformConstraint {
   os?: NodeJS.Platform | "*" | "macos";
@@ -22,6 +22,8 @@ export interface RuntimeArtifactManifest {
   format: RuntimeArtifactFormat;
   path?: string;
   url?: string;
+  package?: string;
+  version?: string;
   sha256?: string;
   sizeBytes?: number;
 }
@@ -31,6 +33,11 @@ export interface RuntimeResourceManifest {
   kind: RuntimeManifestKind;
   label: string;
   version: string;
+  minimumChillClawVersion?: string;
+  maximumChillClawVersion?: string;
+  channel?: "stable" | "preview" | string;
+  releaseNotesUrl?: string;
+  requiresAppUpdate?: boolean;
   platforms: RuntimePlatformConstraint[];
   sourcePolicy: RuntimeSourcePolicy[];
   updatePolicy: RuntimeUpdatePolicy;

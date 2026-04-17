@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-04-17
+
+### 2026-04-17 18:38 CST
+
+- added a GitHub Release-backed managed runtime update feed, generated from ChillClaw's pinned runtime manifest and published as `runtime-update.json` so packaged apps can discover approved OpenClaw runtime updates without leaving the ChillClaw runtime boundary
+- wired macOS release packaging to bake the latest-release runtime feed URL into the packaged LaunchAgent environment while preserving local override support for development and QA builds
+- added settings UI coverage for the OpenClaw runtime update card, plus daemon/runtime-manager coverage for approved feed compatibility gates, npm-package runtime artifacts, staged apply, rollback, and gateway verification paths
+- bumped ChillClaw package metadata and internal workspace dependency pins to 0.2.0 for the next tagged release
+
 ### 2026-04-17 17:43 CST
 
 - switched ChillClaw's OpenClaw install, update, rollback, repair, diagnostics, dev-runtime, and compatibility paths to the managed bundled runtime only, removing the legacy bootstrap script, npm OpenClaw install fallback, system target updates, and upstream `openclaw update` flow

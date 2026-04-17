@@ -38,7 +38,7 @@ The Runtime Manager owns:
 
 The packaged baseline is `runtime-manifest.lock.json`.
 
-Optional update metadata comes from a curated feed configured by `CHILLCLAW_RUNTIME_UPDATE_FEED_URL`. The feed lists only ChillClaw-approved versions, artifact URLs, sha256 digests, platform constraints, dependencies, and update policy.
+Optional update metadata comes from a curated feed configured by `CHILLCLAW_RUNTIME_UPDATE_FEED_URL`. The feed lists only ChillClaw-approved versions, artifact URLs or concrete npm package artifacts, sha256 digests when applicable, platform constraints, dependencies, app compatibility gates, and update policy. Stable macOS releases publish this feed as `runtime-update.json` on GitHub Releases, and packaged apps default to the latest-release download URL.
 
 Stable macOS release packaging prepares runnable CLI artifacts before staging the app: an extracted Node.js distribution directory and a standalone `ollama` binary. Runtime artifact packaging rejects GUI apps and installer images such as `Ollama.app`, `Ollama.dmg`, and `.pkg` payloads.
 

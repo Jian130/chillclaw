@@ -42,6 +42,11 @@ const INSTALLER_ICON_RESOURCE = resolve(BUILD_DIR, "installer-icon.rsrc");
 const LAUNCH_AGENT_LABEL = "ai.chillclaw.daemon";
 const SCRIPT_LABEL = "ChillClaw installer";
 const PACKAGED_APP_BUILD_WORKSPACES = ["@chillclaw/contracts", "@chillclaw/daemon", "@chillclaw/desktop-ui"];
+const DEFAULT_RUNTIME_UPDATE_FEED_URL = shellDoubleQuotedValue(process.env.CHILLCLAW_RUNTIME_UPDATE_FEED_URL?.trim() ?? "");
+
+function shellDoubleQuotedValue(value) {
+  return value.replace(/["\\$`]/g, "\\$&");
+}
 
 async function readProductVersion() {
   const packageJson = JSON.parse(await readFile(resolve(ROOT, "package.json"), "utf8"));
@@ -226,7 +231,7 @@ DAEMON_BIN="$APP_ROOT/runtime/chillclaw-daemon"
 STATIC_DIR="$APP_ROOT/app/ui"
 RUNTIME_BUNDLE_DIR="$APP_ROOT/app/runtime-artifacts"
 RUNTIME_MANIFEST_PATH="$RUNTIME_BUNDLE_DIR/runtime-manifest.lock.json"
-RUNTIME_UPDATE_FEED_URL="\${CHILLCLAW_RUNTIME_UPDATE_FEED_URL:-}"
+RUNTIME_UPDATE_FEED_URL="\${CHILLCLAW_RUNTIME_UPDATE_FEED_URL:-${DEFAULT_RUNTIME_UPDATE_FEED_URL}}"
 
 mkdir -p "$DATA_DIR" "$LOG_DIR" "$LAUNCH_AGENTS_DIR"
 

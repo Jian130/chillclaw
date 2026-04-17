@@ -30,6 +30,7 @@ import {
 import { logDevelopmentCommand, writeInfoLog } from "../services/logger.js";
 import type { EventPublisher } from "../services/event-publisher.js";
 import type { DownloadManager } from "../download-manager/download-manager.js";
+import { getProductVersion } from "../product-version.js";
 import { RuntimeManager } from "./runtime-manager.js";
 import type {
   RuntimeArtifactManifest,
@@ -47,6 +48,7 @@ export function createRuntimeManager(eventPublisher?: EventPublisher, downloadMa
   return new RuntimeManager({
     loadManifest: loadPackagedRuntimeManifest,
     loadUpdateManifest: loadRuntimeUpdateManifest,
+    getAppVersion: getProductVersion,
     readState: readRuntimeManagerState,
     writeState: writeRuntimeManagerState,
     providers: [
@@ -525,6 +527,8 @@ async function installOpenClawFromArtifact(
 ): Promise<void> {
   if (artifact?.path && artifact.format === "directory") {
     await installOpenClawFromDirectory(manifest, artifact.path);
+  } else if (artifact?.format === "npm-package") {
+    await installOpenClawFromNpmPackage(manifest, artifact);
   } else {
     throw new Error(`${manifest.label} requires a bundled OpenClaw runtime artifact.`);
   }
@@ -563,6 +567,89 @@ async function installOpenClawFromDirectory(manifest: RuntimeResourceManifest, s
       installDir: getManagedOpenClawDir()
     }, {
       scope: "runtimeManager.openclaw.installBundle"
+    });
+  } catch (error) {
+    if (backedUpCurrentRuntime) {
+      await rm(getManagedOpenClawDir(), { recursive: true, force: true });
+      await rename(backupDir, getManagedOpenClawDir()).catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+function openClawNpmPackageSpec(
+  manifest: RuntimeResourceManifest,
+  artifact: RuntimeArtifactManifest
+): { packageSpec: string; expectedVersion: string } {
+  const packageName = artifact.package?.trim() || "openclaw";
+  const expectedVersion = artifact.version?.trim() || manifest.version?.trim();
+
+  if (packageName !== "openclaw") {
+    throw new Error(`${manifest.label} npm-package artifacts must install the openclaw package.`);
+  }
+
+  if (!expectedVersion || expectedVersion === "latest") {
+    throw new Error(`${manifest.label} npm-package artifacts must pin a concrete OpenClaw version.`);
+  }
+
+  return {
+    packageSpec: `${packageName}@${expectedVersion}`,
+    expectedVersion
+  };
+}
+
+async function installOpenClawFromNpmPackage(
+  manifest: RuntimeResourceManifest,
+  artifact: RuntimeArtifactManifest
+): Promise<void> {
+  const { packageSpec, expectedVersion } = openClawNpmPackageSpec(manifest, artifact);
+  const invocation = await ensureManagedNodeNpmInvocation();
+  const workspace = await mkdtemp(resolve(tmpdir(), "chillclaw-openclaw-runtime-"));
+  const nextDir = resolve(workspace, "openclaw-runtime");
+  const nextBin = resolve(nextDir, "node_modules", ".bin", "openclaw");
+  const backupDir = resolve(workspace, "previous-openclaw-runtime");
+  let backedUpCurrentRuntime = false;
+
+  try {
+    await mkdir(nextDir, { recursive: true });
+    await writeInfoLog("Installing OpenClaw runtime from approved npm package artifact.", {
+      packageSpec,
+      installDir: getManagedOpenClawDir()
+    }, {
+      scope: "runtimeManager.openclaw.installNpmPackage"
+    });
+    const npmArgs = [...invocation.argsPrefix, "install", "--prefix", nextDir, packageSpec];
+    const result = await runCommand(invocation.command, npmArgs, {
+      allowFailure: true,
+      env: managedNodeEnv(invocation.command)
+    });
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `${manifest.label} npm install failed.`);
+    }
+
+    await access(nextBin, constants.X_OK);
+    const version = await probeVersion(nextBin, ["--version"], managedNodeEnv(nextBin));
+    if (version !== expectedVersion) {
+      throw new Error(`${manifest.label} installed ${version ?? "an unknown version"}, expected ${expectedVersion}.`);
+    }
+
+    if (await pathExists(getManagedOpenClawDir())) {
+      await rename(getManagedOpenClawDir(), backupDir);
+      backedUpCurrentRuntime = true;
+    }
+    await mkdir(dirname(getManagedOpenClawDir()), { recursive: true });
+    await rename(nextDir, getManagedOpenClawDir());
+    if (!(await probeCommand(getManagedOpenClawBinPath(), ["--version"], { env: managedNodeEnv(getManagedOpenClawBinPath()) }))) {
+      throw new Error(`${manifest.label} installed, but the managed OpenClaw command is not executable.`);
+    }
+    await writeInfoLog("Installed approved OpenClaw npm package runtime.", {
+      packageSpec,
+      installDir: getManagedOpenClawDir()
+    }, {
+      scope: "runtimeManager.openclaw.installNpmPackage"
     });
   } catch (error) {
     if (backedUpCurrentRuntime) {

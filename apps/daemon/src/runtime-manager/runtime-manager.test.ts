@@ -86,6 +86,7 @@ function createHarness(args: {
   manifests: RuntimeResourceManifest[];
   updateManifests?: RuntimeResourceManifest[];
   providers: RuntimeResourceProvider[];
+  appVersion?: string;
   downloadArtifact?: (context: {
     resource: RuntimeResourceManifest;
     artifact: RuntimeArtifactManifest;
@@ -99,6 +100,7 @@ function createHarness(args: {
   const manager = new RuntimeManager({
     loadManifest: async () => ({ resources: args.manifests }),
     loadUpdateManifest: async () => ({ resources: args.updateManifests ?? [] }),
+    getAppVersion: args.appVersion ? () => args.appVersion! : undefined,
     readState: async () => state,
     writeState: async (nextState) => {
       state = nextState;
@@ -222,6 +224,38 @@ test("overview reports a packaged desired-version update for installed managed r
   assert.equal(runtime?.updateAvailable, true);
 });
 
+test("overview hides runtime updates that require a newer ChillClaw app", async () => {
+  const { manager } = createHarness({
+    appVersion: "0.1.9",
+    manifests: [manifest("openclaw-runtime", "2026.3.11")],
+    updateManifests: [
+      manifest("openclaw-runtime", "2026.4.13", {
+        minimumChillClawVersion: "0.2.0"
+      })
+    ],
+    providers: [
+      createProvider("openclaw-runtime", [], {
+        async inspect() {
+          return {
+            installed: true,
+            ready: true,
+            version: "2026.3.11",
+            summary: "OpenClaw runtime ready.",
+            detail: "OpenClaw 2026.3.11 verified."
+          };
+        }
+      })
+    ]
+  });
+
+  const overview = await manager.getOverview();
+  const runtime = overview.resources.find((resource) => resource.id === "openclaw-runtime");
+
+  assert.equal(runtime?.installedVersion, "2026.3.11");
+  assert.equal(runtime?.latestApprovedVersion, undefined);
+  assert.equal(runtime?.updateAvailable, false);
+});
+
 test("prepare delegates downloadable runtime artifacts before invoking the provider", async () => {
   const log: string[] = [];
   const runtime = manifest("node-npm-runtime", "22.22.2", {
@@ -279,6 +313,54 @@ test("stage update records the staged version without changing the active instal
   assert.equal(getState()?.resources["ollama-runtime"]?.installedVersion, "0.20.5");
   assert.equal(getState()?.resources["ollama-runtime"]?.stagedVersion, "0.20.6");
   assert.deepEqual(staged, ["ollama-runtime:0.20.6"]);
+});
+
+test("stage update passes approved npm-package artifacts to the provider", async () => {
+  const log: string[] = [];
+  const npmPackageArtifact = {
+    source: "download" as const,
+    format: "npm-package" as const,
+    package: "openclaw",
+    version: "2026.4.13"
+  };
+  const provider = createProvider("openclaw-runtime", log, {
+    async stageUpdate(context) {
+      assert.equal(context.artifact?.format, "npm-package");
+      assert.equal(context.artifact?.package, "openclaw");
+      assert.equal(context.artifact?.version, "2026.4.13");
+      log.push(`stage:${context.manifest.id}:${context.source}:${context.artifact?.format}`);
+      return {
+        version: context.staged.version,
+        changed: true,
+        summary: "OpenClaw update staged.",
+        detail: "OpenClaw npm package update staged."
+      };
+    }
+  });
+  const { manager, getState } = createHarness({
+    manifests: [
+      manifest("openclaw-runtime", "2026.3.11", {
+        sourcePolicy: ["bundled"]
+      })
+    ],
+    updateManifests: [
+      manifest("openclaw-runtime", "2026.4.13", {
+        sourcePolicy: ["download"],
+        artifacts: [npmPackageArtifact]
+      })
+    ],
+    providers: [provider]
+  });
+
+  await manager.prepare("openclaw-runtime");
+  const result = await manager.stageUpdate("openclaw-runtime");
+
+  assert.equal(result.status, "completed");
+  assert.equal(getState()?.resources["openclaw-runtime"]?.stagedVersion, "2026.4.13");
+  assert.deepEqual(log, [
+    "prepare:openclaw-runtime:bundled",
+    "stage:openclaw-runtime:download:npm-package"
+  ]);
 });
 
 test("background staging only stages approved updates for installed resources", async () => {

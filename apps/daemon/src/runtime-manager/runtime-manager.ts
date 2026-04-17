@@ -36,6 +36,7 @@ export type {
 interface RuntimeManagerOptions {
   loadManifest: () => Promise<RuntimeManifestDocument>;
   loadUpdateManifest?: () => Promise<RuntimeManifestDocument>;
+  getAppVersion?: () => string | undefined;
   readState: () => Promise<RuntimeManagerState | undefined>;
   writeState: (state: RuntimeManagerState) => Promise<void>;
   providers: RuntimeResourceProvider[];
@@ -67,7 +68,7 @@ export class RuntimeManager {
   async getOverview(): Promise<RuntimeManagerOverview> {
     const [manifest, updateManifest, state] = await Promise.all([
       this.options.loadManifest(),
-      this.loadUpdateManifest(),
+      this.loadApplicableUpdateManifest(),
       this.readState()
     ]);
     const checkedAt = new Date().toISOString();
@@ -189,7 +190,7 @@ export class RuntimeManager {
   async stageApprovedUpdates(): Promise<RuntimeActionResponse[]> {
     const [manifest, updateManifest, state] = await Promise.all([
       this.options.loadManifest(),
-      this.loadUpdateManifest(),
+      this.loadApplicableUpdateManifest(),
       this.readState()
     ]);
     const resources = new Map(manifest.resources.map((resource) => [resource.id, resource]));
@@ -540,7 +541,7 @@ export class RuntimeManager {
     resource: RuntimeResourceManifest;
     update?: RuntimeResourceManifest;
   }> {
-    const [manifest, updateManifest] = await Promise.all([this.options.loadManifest(), this.loadUpdateManifest()]);
+    const [manifest, updateManifest] = await Promise.all([this.options.loadManifest(), this.loadApplicableUpdateManifest()]);
     const resource = manifest.resources.find((candidate) => candidate.id === id);
     if (!resource) {
       throw new Error(`Unknown runtime resource ${id}.`);
@@ -645,6 +646,15 @@ export class RuntimeManager {
         };
   }
 
+  private async loadApplicableUpdateManifest(): Promise<RuntimeManifestDocument> {
+    const manifest = await this.loadUpdateManifest();
+    const appVersion = this.options.getAppVersion?.()?.trim();
+    return {
+      ...manifest,
+      resources: manifest.resources.filter((resource) => runtimeUpdateSupportsAppVersion(resource, appVersion))
+    };
+  }
+
   private async publishProgress(
     id: string,
     action: RuntimeAction,
@@ -720,7 +730,78 @@ function inspectionMatchesDesiredVersion(
   return (inspectionVersion ?? state.installedVersion) === resource.version;
 }
 
+function runtimeUpdateSupportsAppVersion(
+  resource: RuntimeResourceManifest,
+  appVersion: string | undefined
+): boolean {
+  if (resource.requiresAppUpdate) {
+    return false;
+  }
+
+  const minimum = resource.minimumChillClawVersion?.trim();
+  const maximum = resource.maximumChillClawVersion?.trim();
+  if (!minimum && !maximum) {
+    return true;
+  }
+
+  const current = appVersion?.trim();
+  if (!current) {
+    return false;
+  }
+
+  if (minimum) {
+    const comparison = compareVersionStrings(current, minimum);
+    if (comparison === undefined || comparison < 0) {
+      return false;
+    }
+  }
+
+  if (maximum) {
+    const comparison = compareVersionStrings(current, maximum);
+    if (comparison === undefined || comparison > 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function compareVersionStrings(left: string, right: string): number | undefined {
+  const leftParts = versionNumberParts(left);
+  const rightParts = versionNumberParts(right);
+  if (leftParts.length === 0 || rightParts.length === 0) {
+    return undefined;
+  }
+
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftValue = leftParts[index] ?? 0;
+    const rightValue = rightParts[index] ?? 0;
+    if (leftValue > rightValue) {
+      return 1;
+    }
+    if (leftValue < rightValue) {
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
+function versionNumberParts(value: string): number[] {
+  return value
+    .replace(/^v/iu, "")
+    .split(/[^\d]+/u)
+    .filter(Boolean)
+    .map((part) => Number(part))
+    .filter((part) => Number.isFinite(part));
+}
+
 async function artifactUsable(artifact: RuntimeArtifactManifest): Promise<boolean> {
+  if (artifact.format === "npm-package") {
+    return Boolean(artifact.package?.trim() && artifact.version?.trim());
+  }
+
   if (artifact.path) {
     try {
       await access(artifact.path);

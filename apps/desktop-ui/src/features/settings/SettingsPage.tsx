@@ -13,7 +13,8 @@ import {
   restartAppService,
   stopChillClawApp,
   uninstallAppService,
-  uninstallChillClawApp
+  uninstallChillClawApp,
+  updateDeploymentTarget
 } from "../../shared/api/client.js";
 import { useOverview } from "../../app/providers/OverviewProvider.js";
 import { useWorkspace } from "../../app/providers/WorkspaceProvider.js";
@@ -40,6 +41,10 @@ export default function SettingsPage() {
   const { state, update } = useWorkspace();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
+  const openClawRuntime = overview?.runtimeManager.resources.find((resource) => resource.id === "openclaw-runtime");
+  const openClawRuntimeUpdateAvailable = Boolean(openClawRuntime?.updateAvailable);
+  const openClawInstalledVersion = openClawRuntime?.installedVersion ?? overview?.engine?.version;
+  const openClawApprovedVersion = openClawRuntime?.latestApprovedVersion ?? openClawRuntime?.stagedVersion;
 
   async function runAction(name: string, action: () => Promise<{ message?: string; path?: string } | void>) {
     setBusy(name);
@@ -195,7 +200,35 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="panel-stack">
                 <p className="card__description">{copy.openClawUpdatesBody}</p>
+                <div className="check-row">
+                  <div className="check-row__meta">
+                    <strong>{openClawRuntime?.summary ?? copy.openClawRuntimeUnknown}</strong>
+                    <p>{openClawRuntime?.detail ?? copy.openClawRuntimeUnknownBody}</p>
+                    {openClawInstalledVersion ? (
+                      <p><strong>{copy.runtimeInstalledVersion}</strong>: {openClawInstalledVersion}</p>
+                    ) : null}
+                    {openClawApprovedVersion && openClawApprovedVersion !== openClawInstalledVersion ? (
+                      <p><strong>{copy.runtimeApprovedVersion}</strong>: {openClawApprovedVersion}</p>
+                    ) : null}
+                  </div>
+                  <StatusBadge tone={openClawRuntimeUpdateAvailable ? "warning" : openClawRuntime?.status === "ready" ? "success" : "neutral"}>
+                    {openClawRuntimeUpdateAvailable ? copy.appUpdateAvailable : copy.appUpdateCurrent}
+                  </StatusBadge>
+                </div>
                 <div className="actions-row">
+                  <Button
+                    disabled={!openClawRuntimeUpdateAvailable}
+                    loading={busy === "openclaw-runtime-update"}
+                    onClick={() =>
+                      void runAction("openclaw-runtime-update", async () => {
+                        const result = await updateDeploymentTarget("managed-local");
+                        return { message: result.message };
+                      })
+                    }
+                  >
+                    <Download size={14} />
+                    {openClawRuntimeUpdateAvailable ? copy.updateOpenClawRuntime : copy.openClawRuntimeUpToDate}
+                  </Button>
                   <Button
                     loading={busy === "engine-updates"}
                     onClick={() => void runAction("engine-updates", checkEngineUpdates)}

@@ -4,6 +4,7 @@ import test from "node:test";
 
 const MACOS_DMG_NAME = "ChillClaw-macOS.dmg";
 const MACOS_DMG_CHECKSUM_NAME = "ChillClaw-macOS.dmg.sha256.txt";
+const RUNTIME_UPDATE_FEED_NAME = "runtime-update.json";
 
 async function readRepoFile(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -21,6 +22,24 @@ test("macOS release workflow publishes the same DMG asset used by website and ap
   assert.doesNotMatch(workflow, /ChillClaw-macOS\.pkg/);
   assert.match(websiteLinks, new RegExp(`/releases/latest/download/${MACOS_DMG_NAME.replaceAll(".", "\\.")}`));
   assert.match(appUpdateService, new RegExp(`MACOS_INSTALLER_NAME = "${MACOS_DMG_NAME.replaceAll(".", "\\.")}"`));
+});
+
+test("macOS release workflow publishes a GitHub-hosted runtime update feed", async () => {
+  const [workflow, packageJson, buildScript] = await Promise.all([
+    readRepoFile(".github/workflows/macos-release.yml"),
+    readRepoFile("package.json"),
+    readRepoFile("scripts/build-macos-installer.mjs")
+  ]);
+
+  assert.match(packageJson, /"build:runtime-update-feed": "node \.\/scripts\/build-runtime-update-feed\.mjs"/);
+  assert.match(workflow, /\[0-9\]\*\.\[0-9\]\*\.\[0-9\]\*/);
+  assert.match(workflow, new RegExp(`RUNTIME_UPDATE_FEED_PATH:\\s*dist/macos/${RUNTIME_UPDATE_FEED_NAME}`));
+  assert.match(workflow, new RegExp(`CHILLCLAW_RUNTIME_UPDATE_FEED_URL:\\s*https://github\\.com/Jian130/chillclaw/releases/latest/download/${RUNTIME_UPDATE_FEED_NAME}`));
+  assert.match(workflow, /npm run build:runtime-update-feed -- --release-notes-url "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\/releases\/tag\/\$\{GITHUB_REF_NAME\}"/);
+  assert.match(workflow, new RegExp(`- \`${RUNTIME_UPDATE_FEED_NAME}\``));
+  assert.match(workflow, /\$RUNTIME_UPDATE_FEED_PATH/);
+  assert.match(buildScript, /DEFAULT_RUNTIME_UPDATE_FEED_URL/);
+  assert.match(buildScript, /CHILLCLAW_RUNTIME_UPDATE_FEED_URL:-\$\{DEFAULT_RUNTIME_UPDATE_FEED_URL\}/);
 });
 
 test("macOS release workflow signs the staged app before building and notarizing the DMG", async () => {

@@ -32,20 +32,27 @@ exit 7
 });
 
 test("runCommand waits for stdio to close before returning captured output", async () => {
+  const tempDir = await mkdtemp(resolve(tmpdir(), "chillclaw-cli-runner-stdio-test-"));
+  const scriptPath = join(tempDir, "write-output.mjs");
   const stdoutText = "x".repeat(256 * 1024);
   const stderrText = "y".repeat(128 * 1024);
-  const result = await runCommand(
-    process.execPath,
-    [
-      "-e",
-      `process.stdout.write(${JSON.stringify(stdoutText)}); process.stderr.write(${JSON.stringify(stderrText)});`
-    ],
-    { allowFailure: true, env: process.env }
+
+  await writeFile(
+    scriptPath,
+    `process.stdout.write("x".repeat(256 * 1024));
+process.stderr.write("y".repeat(128 * 1024));
+`
   );
 
-  assert.equal(result.code, 0);
-  assert.equal(result.stdout, stdoutText);
-  assert.equal(result.stderr, stderrText);
+  try {
+    const result = await runCommand(process.execPath, [scriptPath], { allowFailure: true, env: process.env });
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, stdoutText);
+    assert.equal(result.stderr, stderrText);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("runCommand reports a signal when a command is terminated by macOS", async () => {

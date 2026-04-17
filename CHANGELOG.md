@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-04-17 14:37 CST
+
+- added ChillClaw version labels to the React and native macOS sidebar brand areas, using daemon overview metadata with a native bundle-version fallback and matching UI contract coverage
+
 ### 2026-04-17 11:13 CST
 
 - fixed the macOS installer smoke workflow by preparing bundled runtime artifacts before packaging the app on fresh GitHub Actions checkouts

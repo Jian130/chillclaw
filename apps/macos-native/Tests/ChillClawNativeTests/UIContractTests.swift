@@ -127,6 +127,23 @@ struct UIContractTests {
     }
 
     @Test
+    func nativeSidebarShowsAppVersionBelowBrandSubtitle() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let shellSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/ChillClawNativeApp.swift"),
+            encoding: .utf8
+        )
+
+        let subtitleIndex = try #require(shellSource.range(of: "Text(copy.brandSubtitle)")?.lowerBound)
+        let versionIndex = try #require(shellSource.range(of: "Text(nativeShellAppVersionLabel(appState.overview))")?.lowerBound)
+
+        #expect(subtitleIndex < versionIndex)
+    }
+
+    @Test
     func nativeBrandImageResourcesResolveFromBundle() throws {
         #expect(Bundle.module.url(forResource: "ChillClawBrandLogo", withExtension: "png") != nil)
         #expect(Bundle.module.url(forResource: "ChillClawAppIcon", withExtension: "png") != nil)

@@ -55,6 +55,12 @@
   font-size: 0.75rem;
 }
 
+.brand__version {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .sidebar-nav {
   display: flex;
   flex: 1;

@@ -10,6 +10,23 @@ func nativeShellSidebarWidth(isCollapsed: Bool) -> CGFloat {
     isCollapsed ? 0 : nativeShellExpandedSidebarWidth
 }
 
+func nativeShellAppVersionLabel(_ overview: ProductOverview?) -> String {
+    let overviewVersion = overview?.appVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+    let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    let version =
+        if let overviewVersion, !overviewVersion.isEmpty {
+            overviewVersion
+        } else {
+            bundleVersion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+
+    guard !version.isEmpty else {
+        return "Version unavailable"
+    }
+
+    return version.hasPrefix("v") ? version : "v\(version)"
+}
+
 @main
 struct ChillClawNativeApp: App {
     @NSApplicationDelegateAdaptor(NativeAppDelegate.self) private var appDelegate
@@ -261,6 +278,9 @@ private struct NativeSidebar: View {
                 Text(copy.brandSubtitle)
                     .font(.system(size: 15))
                     .foregroundStyle(nativeOnboardingTextSecondary)
+                Text(nativeShellAppVersionLabel(appState.overview))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(nativeOnboardingTextSecondary.opacity(0.72))
             }
         }
         .padding(.horizontal, 24)

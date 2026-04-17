@@ -20,11 +20,22 @@ function FeedbackWidget() {
   );
 }
 
+function appVersionLabel(version: string | undefined): string | undefined {
+  const trimmed = version?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.startsWith("v") ? trimmed : `v${trimmed}`;
+}
+
 export function AppShell(props: PropsWithChildren<{ loading?: boolean }>) {
   const { locale } = useLocale();
   const { overview } = useOverview();
   const copy = t(locale);
   const viewportMode = useViewportMode();
+  const versionLabel = appVersionLabel(overview?.appVersion);
 
   const statusLabel = !overview
     ? copy.common.loading
@@ -44,6 +55,7 @@ export function AppShell(props: PropsWithChildren<{ loading?: boolean }>) {
           <div>
             <h1>ChillClaw</h1>
             <p>OpenClaw Made Easy</p>
+            {versionLabel ? <p className="brand__version">{versionLabel}</p> : null}
           </div>
         </NavLink>
         <SidebarNav />

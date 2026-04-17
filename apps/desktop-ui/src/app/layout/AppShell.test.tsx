@@ -16,6 +16,7 @@ vi.mock("../providers/LocaleProvider.js", () => ({
 vi.mock("../providers/OverviewProvider.js", () => ({
   useOverview: () => ({
     overview: {
+      appVersion: "0.1.9",
       engine: {
         running: true,
         installed: true,
@@ -44,5 +45,18 @@ describe("AppShell", () => {
     expect(html).toContain("sidebar-utilities");
     expect((html.match(/sidebar-utility-card/g) ?? []).length).toBe(2);
     expect(html.indexOf("sidebar-status")).toBeLessThan(html.indexOf("sidebar-language"));
+  });
+
+  it("shows the product version from the daemon overview in the brand area", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <AppShell>
+          <div>Body</div>
+        </AppShell>
+      </MemoryRouter>
+    );
+
+    expect(html).toContain("v0.1.9");
+    expect(html.indexOf("OpenClaw Made Easy")).toBeLessThan(html.indexOf("v0.1.9"));
   });
 });

@@ -42,7 +42,7 @@ export async function runCommand(
       reject(error);
     });
 
-    child.on("exit", (code, signal) => {
+    child.on("close", (code, signal) => {
       const result: CommandResult = {
         code: code ?? 1,
         signal: signal ?? undefined,
@@ -78,7 +78,7 @@ export async function resolveCommandFromPath(
       stdout += chunk.toString();
     });
 
-    child.on("exit", (code) => {
+    child.on("close", (code) => {
       const resolved = stdout.trim();
       resolve(code === 0 && resolved.startsWith("/") ? resolved : undefined);
     });

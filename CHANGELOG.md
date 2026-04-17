@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-04-17 10:59 CST
+
+- fixed Ubuntu daemon CI flakes by waiting for spawned command stdio to close before reading OpenClaw CLI output, so version/status probes no longer miss fast child-process output on GitHub Actions
+
 ## 0.1.9 - 2026-04-16
 
 ### 2026-04-16 22:31 CST

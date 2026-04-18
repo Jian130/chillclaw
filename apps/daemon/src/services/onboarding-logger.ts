@@ -277,7 +277,15 @@ export function summarizeStepTransition(fromStep: OnboardingStep | undefined, to
   };
 }
 
+export function shouldLogOnboardingInfo(): boolean {
+  return process.env.CHILLCLAW_ONBOARDING_VERBOSE_LOGS === "1" || process.env.CHILLCLAW_VERBOSE_LOGS === "1";
+}
+
 export function logOnboardingEvent(scope: string, message: string, details?: unknown): void {
+  if (!shouldLogOnboardingInfo()) {
+    return;
+  }
+
   void writeInfoLog(message, sanitizeOnboardingLogDetails(details), { scope });
 }
 
@@ -288,18 +296,22 @@ export function traceOnboardingOperation<T>(
   summarizeResult: (result: T) => unknown = summarizeOnboardingOperationResult
 ): Promise<T> {
   const startedAt = performance.now();
-  void writeInfoLog("Onboarding operation started.", sanitizeOnboardingLogDetails(details), { scope });
+  if (shouldLogOnboardingInfo()) {
+    void writeInfoLog("Onboarding operation started.", sanitizeOnboardingLogDetails(details), { scope });
+  }
 
   return operation()
     .then((result) => {
-      void writeInfoLog(
-        "Onboarding operation completed.",
-        sanitizeOnboardingLogDetails({
-          durationMs: Number((performance.now() - startedAt).toFixed(1)),
-          result: summarizeResult(result)
-        }),
-        { scope }
-      );
+      if (shouldLogOnboardingInfo()) {
+        void writeInfoLog(
+          "Onboarding operation completed.",
+          sanitizeOnboardingLogDetails({
+            durationMs: Number((performance.now() - startedAt).toFixed(1)),
+            result: summarizeResult(result)
+          }),
+          { scope }
+        );
+      }
       return result;
     })
     .catch((error: unknown) => {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ChatMessage } from "@chillclaw/contracts";
+import { WebSocket as NodeWebSocket } from "ws";
 
 import type { EngineChatLiveEvent } from "../engine/adapter.js";
 import { getProductVersion } from "../product-version.js";
@@ -123,6 +124,14 @@ export function normalizeGatewaySocketUrl(url: string): string {
   }
 
   return url;
+}
+
+export function resolveGatewaySocketConstructor(
+  explicit?: GatewaySocketConstructor
+): GatewaySocketConstructor | undefined {
+  return explicit ??
+    (globalThis as typeof globalThis & { WebSocket?: GatewaySocketConstructor }).WebSocket ??
+    (NodeWebSocket as unknown as GatewaySocketConstructor | undefined);
 }
 
 interface GatewayCodeRegion {
@@ -501,9 +510,7 @@ export class OpenClawGatewaySocketAdapter {
 
     this.state.connectPromise = (async () => {
       const connection = await this.options.readConnectionInfo();
-      const GatewaySocket =
-        this.options.websocketFactory ??
-        ((globalThis as typeof globalThis & { WebSocket?: GatewaySocketConstructor }).WebSocket);
+      const GatewaySocket = resolveGatewaySocketConstructor(this.options.websocketFactory);
 
       if (!GatewaySocket) {
         throw new Error("This ChillClaw runtime does not provide WebSocket support.");

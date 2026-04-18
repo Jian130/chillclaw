@@ -2314,6 +2314,58 @@ test("install accepts OpenClaw --version output with label and build metadata", 
   );
 });
 
+test("install normalizes managed OpenClaw config with ChillClaw's minimum agent timeout", async () => {
+  await withFakeOpenClaw(async ({ adapter, configPath }) => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        agents: {
+          defaults: {
+            workspace: "/tmp/openclaw-workspace",
+            timeoutSeconds: 30
+          }
+        }
+      })
+    );
+
+    await adapter.install(false, { forceLocal: true });
+
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      agents?: { defaults?: { timeoutSeconds?: number; workspace?: string } };
+    };
+
+    assert.equal(config.agents?.defaults?.timeoutSeconds, 300);
+    assert.equal(config.agents?.defaults?.workspace, "/tmp/openclaw-workspace");
+  }, {
+    managedOpenClawVersion: "2026.3.11"
+  });
+});
+
+test("install preserves user OpenClaw agent timeouts above ChillClaw's minimum", async () => {
+  await withFakeOpenClaw(async ({ adapter, configPath }) => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        agents: {
+          defaults: {
+            timeoutSeconds: 600
+          }
+        }
+      })
+    );
+
+    await adapter.install(false, { forceLocal: true });
+
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      agents?: { defaults?: { timeoutSeconds?: number } };
+    };
+
+    assert.equal(config.agents?.defaults?.timeoutSeconds, 600);
+  }, {
+    managedOpenClawVersion: "2026.3.11"
+  });
+});
+
 test("environment runtime preference ignores a managed OpenClaw command", async () => {
   const originalPreference = process.env.CHILLCLAW_OPENCLAW_RUNTIME_PREFERENCE;
   process.env.CHILLCLAW_OPENCLAW_RUNTIME_PREFERENCE = "environment";
@@ -2688,7 +2740,7 @@ test("sendChatMessage does not block on --expect-final", async () => {
     assert.equal(
       countCommands(
         commands,
-        'gateway call chat.send --json --params {"sessionKey":"agent:existing-agent:chillclaw-chat:thread-1","message":"Hello","idempotencyKey":"client-1"} --timeout 30000'
+        'gateway call chat.send --json --params {"sessionKey":"agent:existing-agent:chillclaw-chat:thread-1","message":"Hello","idempotencyKey":"client-1"} --timeout 120000'
       ),
       1
     );

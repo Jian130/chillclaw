@@ -1947,7 +1947,8 @@ struct NativeOnboardingView: View {
                     systemImage: "arrow.right",
                     variant: .outline,
                     isBusy: viewModel.completionBusy == destination,
-                    isDisabled: viewModel.completionBusy != nil && viewModel.completionBusy != destination,
+                    isDisabled: viewModel.isCompletionDestinationDisabled(destination) ||
+                        (viewModel.completionBusy != nil && viewModel.completionBusy != destination),
                     fullWidth: true
                 ) {
                     Task { await viewModel.complete(destination: destination) }

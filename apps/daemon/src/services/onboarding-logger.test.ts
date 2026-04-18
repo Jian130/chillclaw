@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   sanitizeOnboardingLogDetails,
+  shouldLogOnboardingInfo,
   summarizeOnboardingDraft,
   summarizeOnboardingOperationResult
 } from "./onboarding-logger.js";
@@ -157,4 +158,34 @@ test("onboarding operation result summaries include route-relevant state", () =>
       }
     }
   });
+});
+
+test("onboarding info logs stay quiet unless verbose onboarding logging is enabled", () => {
+  const originalOnboardingVerbose = process.env.CHILLCLAW_ONBOARDING_VERBOSE_LOGS;
+  const originalGlobalVerbose = process.env.CHILLCLAW_VERBOSE_LOGS;
+
+  try {
+    delete process.env.CHILLCLAW_ONBOARDING_VERBOSE_LOGS;
+    delete process.env.CHILLCLAW_VERBOSE_LOGS;
+    assert.equal(shouldLogOnboardingInfo(), false);
+
+    process.env.CHILLCLAW_ONBOARDING_VERBOSE_LOGS = "1";
+    assert.equal(shouldLogOnboardingInfo(), true);
+
+    delete process.env.CHILLCLAW_ONBOARDING_VERBOSE_LOGS;
+    process.env.CHILLCLAW_VERBOSE_LOGS = "1";
+    assert.equal(shouldLogOnboardingInfo(), true);
+  } finally {
+    if (originalOnboardingVerbose === undefined) {
+      delete process.env.CHILLCLAW_ONBOARDING_VERBOSE_LOGS;
+    } else {
+      process.env.CHILLCLAW_ONBOARDING_VERBOSE_LOGS = originalOnboardingVerbose;
+    }
+
+    if (originalGlobalVerbose === undefined) {
+      delete process.env.CHILLCLAW_VERBOSE_LOGS;
+    } else {
+      process.env.CHILLCLAW_VERBOSE_LOGS = originalGlobalVerbose;
+    }
+  }
 });

@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   OpenClawGatewaySocketAdapter,
   buildGatewaySocketConnectParams,
-  readGatewayChatText
+  readGatewayChatText,
+  resolveGatewaySocketConstructor
 } from "./openclaw-gateway-socket-adapter.js";
 import {
   buildOpenClawGatewayDeviceAuthPayload,
@@ -79,6 +80,24 @@ test("buildGatewaySocketConnectParams matches the expected ChillClaw connect sha
     role: "operator",
     scopes: ["operator.read", "operator.write"]
   });
+});
+
+test("gateway socket adapter resolves a bundled backend WebSocket when no global constructor exists", () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+  Object.defineProperty(globalThis, "WebSocket", {
+    configurable: true,
+    value: undefined
+  });
+
+  try {
+    assert.ok(resolveGatewaySocketConstructor());
+  } finally {
+    if (originalDescriptor) {
+      Object.defineProperty(globalThis, "WebSocket", originalDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "WebSocket");
+    }
+  }
 });
 
 test("buildGatewaySocketConnectParams signs the shared OpenClaw device identity when one is available", () => {

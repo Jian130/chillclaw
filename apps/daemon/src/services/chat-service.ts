@@ -55,6 +55,9 @@ interface HistoryProgressState {
   completed: boolean;
 }
 
+const CHAT_SETUP_APPLY_PENDING_MESSAGE =
+  "ChillClaw is still applying setup changes. Try again when workspace setup is ready.";
+
 function normalizePreview(text: string | undefined, fallback = "New chat"): string {
   const trimmed = text?.replace(/\s+/g, " ").trim();
 
@@ -124,7 +127,7 @@ async function wait(ms: number): Promise<void> {
 
 function gatewayNotReadyError(status: Awaited<ReturnType<EngineAdapter["instances"]["status"]>>): Error | undefined {
   if (status.pendingGatewayApply) {
-    return new Error(status.pendingGatewayApplySummary ?? "OpenClaw setup is saved but the gateway is not running yet.");
+    return new Error(CHAT_SETUP_APPLY_PENDING_MESSAGE);
   }
 
   if (!status.running) {

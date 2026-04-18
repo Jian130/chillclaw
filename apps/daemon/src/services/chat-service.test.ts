@@ -225,7 +225,7 @@ test("chat service rejects sends immediately when the gateway is not ready", asy
         ...current,
         running: false,
         pendingGatewayApply: true,
-        pendingGatewayApplySummary: "OpenClaw setup is saved but the gateway is not running yet.",
+        pendingGatewayApplySummary: "ChillClaw has a staged engine change that still needs to be applied through Gateway Manager.",
         summary: "OpenClaw gateway is not reachable yet."
       };
     }
@@ -260,7 +260,12 @@ test("chat service rejects sends immediately when the gateway is not ready", asy
 
   await assert.rejects(
     () => guardedChatService.sendMessage(guardedThread.id, { message: "Hello", clientMessageId: "client-pending" }),
-    /gateway is not running yet|not reachable yet|ready to apply/i
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /still applying setup changes/i);
+      assert.doesNotMatch(error.message, /Gateway Manager/i);
+      return true;
+    }
   );
 });
 

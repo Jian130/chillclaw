@@ -4,6 +4,13 @@
 
 ## 0.2.0 - 2026-04-17
 
+### 2026-04-18 19:49 CST
+
+- fixed clean macOS first-run chat handoff by keeping native chat unavailable until onboarding warmup finishes, replacing internal gateway readiness wording with plain setup guidance, and rejecting post-complete onboarding mutations unless onboarding is reset
+- restored packaged chat streaming by falling back to ChillClaw's bundled `ws` WebSocket implementation when the runtime has no global WebSocket constructor
+- raised managed OpenClaw agent response timeouts to a ChillClaw minimum of 300 seconds, preserved longer user values, widened fallback `chat.send` request timeout to 120 seconds, and quieted high-volume onboarding INFO logs unless verbose logging is enabled
+- made expired onboarding channel sessions recover as failed session responses where possible, reducing repeated error log noise while preserving user-facing recovery state
+
 ### 2026-04-18 16:20 CST
 
 - made the macOS release notarization step retry transient Apple notary network failures before failing the release, so a temporary `NSURLErrorDomain` offline/no-route response does not discard an otherwise valid signed DMG build

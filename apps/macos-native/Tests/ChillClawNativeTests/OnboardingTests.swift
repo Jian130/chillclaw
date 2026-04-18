@@ -62,6 +62,28 @@ struct OnboardingTests {
     }
 
     @Test
+    func completeStepDefersChatDestinationWhileWarmupRuns() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let viewSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingView.swift"),
+            encoding: .utf8
+        )
+        let viewModelSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(viewSource.contains("viewModel.isCompletionDestinationDisabled(destination)"))
+        #expect(viewModelSource.contains("func isCompletionDestinationDisabled(_ destination: OnboardingDestination) -> Bool"))
+        #expect(viewModelSource.contains("completionWarmupTaskID != nil"))
+        #expect(viewModelSource.contains("completionWarmupStatus != .completed"))
+        #expect(viewModelSource.contains("ChillClaw is still applying setup changes. Try again when workspace setup is ready."))
+    }
+
+    @Test
     func onboardingHeaderSkipRoutesToDashboard() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

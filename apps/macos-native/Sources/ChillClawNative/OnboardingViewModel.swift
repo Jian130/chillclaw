@@ -224,6 +224,15 @@ final class NativeOnboardingViewModel {
     var isChannelTutorialPresented = false
     var channelTutorialURLString: String?
 
+    var completionWarmupBlocksChat: Bool {
+        guard completionWarmupTaskID != nil else { return false }
+        return completionWarmupStatus != .completed
+    }
+
+    func isCompletionDestinationDisabled(_ destination: OnboardingDestination) -> Bool {
+        destination == .chat && completionWarmupBlocksChat
+    }
+
     var selectedChannelId: SupportedChannelId?
     var channelValues: [String: String] = [
         "domain": "feishu",
@@ -1097,6 +1106,13 @@ final class NativeOnboardingViewModel {
     }
 
     func complete(destination: OnboardingDestination) async {
+        if isCompletionDestinationDisabled(destination) {
+            pageError = completionWarmupStatus == .failed
+                ? "Repair workspace setup before starting chat."
+                : "ChillClaw is still applying setup changes. Try again when workspace setup is ready."
+            return
+        }
+
         completionBusy = destination
         pageError = nil
         defer { completionBusy = nil }

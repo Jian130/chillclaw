@@ -1510,8 +1510,8 @@ test("onboarding completion binds the selected channel to the created AI employe
   assert.equal(member?.bindings.some((binding) => binding.target === "telegram:default"), true);
 });
 
-test("onboarding completion accepts the final employee payload inline and returns before warmup settles", async () => {
-  const { bus, presetSkillService, service } = createService("onboarding-service-fast-handoff", { withEvents: true });
+test("onboarding completion persists a running warmup so clients can gate chat", async () => {
+  const { bus, presetSkillService, service, store } = createService("onboarding-service-fast-handoff", { withEvents: true });
   const events: Array<{ taskId: string; status: string; message: string }> = [];
   bus?.subscribe((event) => {
     if (event.type === "task.progress") {
@@ -1582,7 +1582,68 @@ test("onboarding completion accepts the final employee payload inline and return
   assert.equal(events.some((event) => event.message === "Creating your AI employee"), true);
   assert.equal(events.some((event) => event.taskId === result.response.warmupTaskId), true);
 
+  await waitForCondition(async () => {
+    const warmup = (await store.read()).onboardingWarmups?.[result.response.warmupTaskId!];
+    return warmup?.status === "running" && warmup.lastMessage === "Verifying preset skills";
+  });
+
   releaseWarmup();
+});
+
+test("completed onboarding rejects draft mutations until first-run reset is requested", async () => {
+  const { service } = createService("onboarding-service-completed-mutation-guard");
+
+  await service.updateState({
+    currentStep: "employee",
+    install: {
+      installed: true,
+      version: "2026.3.13",
+      disposition: "reused-existing"
+    },
+    permissions: {
+      confirmed: true,
+      confirmedAt: "2026-03-24T00:01:00.000Z"
+    },
+    model: {
+      providerId: "openai",
+      modelKey: "openai/gpt-4o-mini",
+      entryId: "mock-openai-gpt-4o-mini"
+    },
+    channel: {
+      channelId: "telegram",
+      entryId: "telegram:default"
+    },
+    channelProgress: {
+      status: "staged",
+      requiresGatewayApply: true
+    }
+  });
+
+  await service.complete({
+    destination: "dashboard",
+    employee: {
+      name: "Ryo-AI",
+      jobTitle: "Research Analyst",
+      avatarPresetId: "onboarding-analyst",
+      presetId: "research-analyst",
+      presetSkillIds: [],
+      knowledgePackIds: [],
+      workStyles: ["Analytical"],
+      memoryEnabled: true
+    }
+  });
+
+  await assert.rejects(
+    () => service.navigateStep({ step: "install" }),
+    /Onboarding is already complete/i
+  );
+  await assert.rejects(
+    () => service.updateState({ currentStep: "model" }),
+    /Onboarding is already complete/i
+  );
+
+  await service.reset();
+  await service.updateState({ currentStep: "install" });
 });
 
 test("onboarding warmup failures keep onboarding completed and mark the created member for repair", async () => {
@@ -1858,7 +1919,12 @@ test("missing onboarding channel sessions clear the stale session id before surf
     activeChannelSessionId: "wechat:default:login"
   });
 
-  await assert.rejects(() => service.getChannelSession("wechat:default:login"), /start the login again/i);
+  const response = await service.getChannelSession("wechat:default:login");
+  assert.equal(response.session.status, "failed");
+  assert.match(response.session.message, /start the login again/i);
+  assert.equal(response.onboarding?.draft.activeChannelSessionId, undefined);
+  assert.equal(response.onboarding?.draft.channel?.channelId, "wechat");
+  assert.equal(response.onboarding?.draft.channelProgress?.status, "idle");
 
   const persisted = await store.read();
   assert.equal(persisted.onboarding?.draft.activeChannelSessionId, undefined);
@@ -1931,7 +1997,11 @@ test("missing personal WeChat sessions keep the saved channel staged and advance
     activeChannelSessionId: "wechat:default:login"
   });
 
-  await assert.rejects(() => service.getChannelSession("wechat:default:login"), /start the login again/i);
+  const response = await service.getChannelSession("wechat:default:login");
+  assert.equal(response.session.status, "failed");
+  assert.match(response.session.message, /start the login again/i);
+  assert.equal(response.onboarding?.draft.currentStep, "employee");
+  assert.equal(response.onboarding?.draft.channelProgress?.status, "staged");
 
   const recovered = await service.getState();
   assert.equal(recovered.draft.currentStep, "employee");

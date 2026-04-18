@@ -291,6 +291,16 @@ export class OnboardingService {
     return traceOnboardingOperation(`onboarding.${operation}`, details, action, summarizeOnboardingOperationResult);
   }
 
+  private ensureOnboardingMutable(current: Awaited<ReturnType<StateStore["read"]>>): void {
+    if (current.setupCompletedAt) {
+      throw new Error("Onboarding is already complete. Reset onboarding before changing first-run setup.");
+    }
+  }
+
+  private async assertOnboardingMutable(): Promise<void> {
+    this.ensureOnboardingMutable(await this.store.read());
+  }
+
   private async setOperation(
     slot: OnboardingOperationSlot,
     patch: {
@@ -387,8 +397,10 @@ export class OnboardingService {
       request: summarizeOnboardingDraft(request),
       responseSummaryMode: options?.responseSummaryMode
     }, async () => {
+      await this.assertOnboardingMutable();
       let reuseDraftSummary = false;
       const nextState = await this.store.update((current) => {
+        this.ensureOnboardingMutable(current);
         const existingDraft = current.onboarding?.draft ?? defaultOnboardingDraftState();
         const nextDraft = {
           ...existingDraft,
@@ -451,6 +463,7 @@ export class OnboardingService {
 
   async navigateStep(request: OnboardingStepNavigationRequest): Promise<OnboardingStateResponse> {
     return this.traceOperation("navigateStep", { requestedStep: request.step }, async () => {
+      await this.assertOnboardingMutable();
       const { draft } = await this.readResolvedDraftState();
       const targetStep = normalizeOnboardingStep(request.step);
       logOnboardingEvent("onboarding.navigateStep", "Onboarding navigation target resolved.", {
@@ -492,6 +505,7 @@ export class OnboardingService {
 
   async detectRuntime(): Promise<OnboardingStateResponse> {
     return this.traceOperation("detectRuntime", {}, async () => {
+      await this.assertOnboardingMutable();
       const install = await this.detectInstallState((await this.store.read()).onboarding?.draft.install);
       return this.updateState({
         currentStep: "install",
@@ -502,6 +516,7 @@ export class OnboardingService {
 
   async installRuntime(options?: { forceLocal?: boolean }) {
     return this.traceOperation("installRuntime", { forceLocal: options?.forceLocal ?? true }, async () => {
+      await this.assertOnboardingMutable();
       const action = "onboarding-runtime-install";
       await this.startOperation("install", action, "installing", "Installing OpenClaw locally.");
       try {
@@ -528,6 +543,7 @@ export class OnboardingService {
 
   async updateRuntime() {
     return this.traceOperation("updateRuntime", {}, async () => {
+      await this.assertOnboardingMutable();
       const targets = await this.adapter.instances.getDeploymentTargets();
       const target = targets.targets.find((entry) => entry.active) ?? targets.targets.find((entry) => entry.installed);
       logOnboardingEvent("onboarding.updateRuntime", "Onboarding runtime update target selected.", {
@@ -564,6 +580,7 @@ export class OnboardingService {
 
   async confirmPermissions(): Promise<OnboardingStateResponse> {
     return this.traceOperation("confirmPermissions", {}, async () => {
+      await this.assertOnboardingMutable();
       const { draft } = await this.readResolvedDraftState();
       if (!isCompletedInstall(draft)) {
         throw new Error("Install OpenClaw before confirming permissions.");
@@ -581,6 +598,7 @@ export class OnboardingService {
 
   async reuseDetectedRuntime(): Promise<OnboardingStateResponse> {
     return this.traceOperation("reuseDetectedRuntime", {}, async () => {
+      await this.assertOnboardingMutable();
       const install = await this.detectInstallState((await this.store.read()).onboarding?.draft.install);
       if (!install.installed) {
         throw new Error("OpenClaw is not installed yet.");
@@ -605,6 +623,7 @@ export class OnboardingService {
       useAsFallback: request.useAsFallback,
       valueKeys: Object.keys(request.values ?? {})
     }, async () => {
+      await this.assertOnboardingMutable();
       const { draft } = await this.readResolvedDraftState();
       if (!isCompletedInstall(draft)) {
         throw new Error("Install OpenClaw before configuring the first model.");
@@ -642,6 +661,7 @@ export class OnboardingService {
     return this.traceOperation("adoptActiveLocalRuntimeModel", {
       suppliedLocalRuntime: summarizeLocalRuntime(localRuntime)
     }, async () => {
+      await this.assertOnboardingMutable();
       const { draft } = await this.readResolvedDraftState();
       if (normalizeOnboardingStep(draft.currentStep) !== "model") {
         logOnboardingEvent("onboarding.adoptActiveLocalRuntimeModel", "Skipped local runtime adoption outside model step.", {
@@ -680,6 +700,7 @@ export class OnboardingService {
 
   async getModelAuthSession(sessionId: string): Promise<ModelAuthSessionResponse> {
     return this.traceOperation("getModelAuthSession", { sessionId }, async () => {
+      await this.assertOnboardingMutable();
       let response: ModelAuthSessionResponse;
       try {
         response = await this.clearOnboardingFallbacksFromSession(await this.adapter.config.getModelAuthSession(sessionId));
@@ -703,6 +724,7 @@ export class OnboardingService {
       sessionId,
       hasValue: Boolean(request.value?.trim())
     }, async () => {
+      await this.assertOnboardingMutable();
       let response: ModelAuthSessionResponse;
       try {
         response = await this.clearOnboardingFallbacksFromSession(
@@ -726,6 +748,7 @@ export class OnboardingService {
       channelId: request.channelId,
       valueKeys: Object.keys(request.values ?? {})
     }, async () => {
+      await this.assertOnboardingMutable();
       const action = "onboarding-channel-save";
       await this.startOperation("channel", action, "saving-channel", "Saving the first channel.");
       try {
@@ -761,11 +784,16 @@ export class OnboardingService {
 
   async getChannelSession(sessionId: string): Promise<ChannelSessionResponse> {
     return this.traceOperation("getChannelSession", { sessionId }, async () => {
+      await this.assertOnboardingMutable();
       let response: ChannelSessionResponse;
       try {
         response = await this.channelSetupService.getSession(sessionId);
       } catch (error) {
-        throw await this.recoverMissingChannelSession(sessionId, error);
+        const recovered = await this.recoverMissingChannelSessionResponse(sessionId, error);
+        if (recovered) {
+          return recovered;
+        }
+        throw error instanceof Error ? error : new Error(String(error));
       }
       if (response.session.status === "completed") {
         await this.completeOperation("channel", "onboarding-channel-save", "completed", response.session.message);
@@ -796,11 +824,16 @@ export class OnboardingService {
       sessionId,
       hasValue: Boolean(request.value?.trim())
     }, async () => {
+      await this.assertOnboardingMutable();
       let response: ChannelSessionResponse;
       try {
         response = await this.channelSetupService.submitSessionInput(sessionId, request);
       } catch (error) {
-        throw await this.recoverMissingChannelSession(sessionId, error);
+        const recovered = await this.recoverMissingChannelSessionResponse(sessionId, error);
+        if (recovered) {
+          return recovered;
+        }
+        throw error instanceof Error ? error : new Error(String(error));
       }
       if (response.session.status === "completed") {
         await this.completeOperation("channel", "onboarding-channel-save", "completed", response.session.message);
@@ -827,6 +860,7 @@ export class OnboardingService {
     return this.traceOperation("saveEmployeeDraft", {
       employee: summarizeOnboardingDraft({ currentStep: "employee", employee })?.employee
     }, async () => {
+      await this.assertOnboardingMutable();
       const { draft } = await this.readResolvedDraftState();
       let resolvedChannel = draft.channel;
       let canTreatDeferredWechatChannelAsStaged =
@@ -875,6 +909,7 @@ export class OnboardingService {
 
   async resetModelDraft(): Promise<OnboardingStateResponse> {
     return this.traceOperation("resetModelDraft", {}, async () => {
+      await this.assertOnboardingMutable();
       return this.updateState({
         currentStep: "model",
         model: undefined,
@@ -885,6 +920,7 @@ export class OnboardingService {
 
   async resetChannelDraft(): Promise<OnboardingStateResponse> {
     return this.traceOperation("resetChannelDraft", {}, async () => {
+      await this.assertOnboardingMutable();
       return this.updateState({
         currentStep: "channel",
         channel: undefined,
@@ -1693,9 +1729,12 @@ export class OnboardingService {
     return new Error("The provider sign-in session ended. Start sign-in again.");
   }
 
-  private async recoverMissingChannelSession(sessionId: string, error: unknown): Promise<Error> {
+  private async recoverMissingChannelSessionResponse(
+    sessionId: string,
+    error: unknown
+  ): Promise<ChannelSessionResponse | undefined> {
     if (!(error instanceof Error) || !/channel session not found/i.test(error.message)) {
-      return error instanceof Error ? error : new Error(String(error));
+      return undefined;
     }
 
     logOnboardingEvent("onboarding.recoverMissingChannelSession", "Recovering missing onboarding channel session.", {
@@ -1703,10 +1742,16 @@ export class OnboardingService {
     });
     const state = await this.store.read();
     const draft = state.onboarding?.draft ?? defaultOnboardingDraftState();
+    const message = "The channel login session ended. Start the login again.";
+    let onboarding: OnboardingStateResponse | undefined;
+
     if (draft.activeChannelSessionId === sessionId) {
-      const deferredWechatEntry = await this.resolveDeferredWechatStageEntry(draft);
+      const deferredWechatEntry = await this.resolveDeferredWechatStageEntry({
+        ...draft,
+        activeChannelSessionId: ""
+      });
       if (deferredWechatEntry) {
-        await this.updateState({
+        onboarding = await this.updateState({
           currentStep: "employee",
           channel: {
             channelId: "wechat",
@@ -1719,19 +1764,34 @@ export class OnboardingService {
           activeChannelSessionId: ""
         });
       } else {
-        await this.updateState({
+        onboarding = await this.updateState({
           currentStep: "channel",
           channel: draft.channel,
           channelProgress: {
             status: "idle",
-            message: "The channel login session ended. Start the login again."
+            message
           },
           activeChannelSessionId: ""
         });
       }
     }
 
-    return new Error("The channel login session ended. Start the login again.");
+    if (!onboarding) {
+      return undefined;
+    }
+
+    return {
+      session: {
+        id: sessionId,
+        channelId: draft.channel?.channelId ?? "wechat",
+        entryId: draft.channel?.entryId,
+        status: "failed",
+        message,
+        logs: []
+      },
+      channelConfig: await this.channelSetupService.getConfigOverview(),
+      onboarding
+    };
   }
 
   private async resolveDeferredWechatStageEntry(

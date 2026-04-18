@@ -357,6 +357,7 @@ interface OpenClawConfigFileJson {
       model?: string | { primary?: string; fallbacks?: string[] };
       models?: Record<string, unknown>;
       workspace?: string;
+      timeoutSeconds?: number;
     };
     list?: Array<{
       id: string;
@@ -417,6 +418,8 @@ const OPENCLAW_MAC_DOCS_URL = "https://docs.openclaw.ai/mac/bun";
 const CHILLCLAW_OPENCLAW_GATEWAY_MODE = "local";
 const CHILLCLAW_OPENCLAW_GATEWAY_BIND = "loopback";
 const CHILLCLAW_OPENCLAW_GATEWAY_AUTH_MODE = "token";
+const CHILLCLAW_OPENCLAW_AGENT_TIMEOUT_SECONDS = 300;
+const GATEWAY_CHAT_SEND_REQUEST_TIMEOUT_MS = 120_000;
 const STANDARD_OPENCLAW_REQUIREMENTS = [
   "macOS",
   "Node.js 22 or newer",
@@ -573,7 +576,7 @@ async function runGatewayCliRequest<T>(method: string, params: Record<string, un
   const args = ["gateway", "call", method, "--json", "--params", JSON.stringify(params)];
 
   if (method === "chat.send") {
-    args.push("--timeout", "30000");
+    args.push("--timeout", String(GATEWAY_CHAT_SEND_REQUEST_TIMEOUT_MS));
   }
 
   const result = await runOpenClaw(args, { allowFailure: true });
@@ -2123,6 +2126,15 @@ function normalizeOpenClawGatewayConfigForChillClaw(config: OpenClawConfigFileJs
 } {
   const currentGateway = config.gateway ?? {};
   const currentAuth = currentGateway.auth ?? {};
+  const currentAgents = config.agents ?? {};
+  const currentAgentDefaults = currentAgents.defaults ?? {};
+  const existingTimeout = currentAgentDefaults.timeoutSeconds;
+  const nextTimeout =
+    typeof existingTimeout === "number" &&
+    Number.isFinite(existingTimeout) &&
+    existingTimeout >= CHILLCLAW_OPENCLAW_AGENT_TIMEOUT_SECONDS
+      ? existingTimeout
+      : CHILLCLAW_OPENCLAW_AGENT_TIMEOUT_SECONDS;
   const trimmedToken = currentAuth.token?.trim();
   const nextAuth: NonNullable<OpenClawConfigFileJson["gateway"]>["auth"] = {
     ...currentAuth,
@@ -2145,19 +2157,29 @@ function normalizeOpenClawGatewayConfigForChillClaw(config: OpenClawConfigFileJs
     delete nextGateway.remote;
   }
 
+  const nextAgents: NonNullable<OpenClawConfigFileJson["agents"]> = {
+    ...currentAgents,
+    defaults: {
+      ...currentAgentDefaults,
+      timeoutSeconds: nextTimeout
+    }
+  };
+
   const changed =
     currentGateway.mode !== CHILLCLAW_OPENCLAW_GATEWAY_MODE ||
     currentGateway.bind !== CHILLCLAW_OPENCLAW_GATEWAY_BIND ||
     currentAuth.mode !== CHILLCLAW_OPENCLAW_GATEWAY_AUTH_MODE ||
     currentAuth.token !== nextAuth.token ||
     Boolean(currentAuth.password) ||
-    currentGateway.remote !== undefined;
+    currentGateway.remote !== undefined ||
+    existingTimeout !== nextTimeout;
 
   return {
     changed,
     config: {
       ...config,
-      gateway: nextGateway
+      gateway: nextGateway,
+      agents: nextAgents
     }
   };
 }
@@ -3649,11 +3671,12 @@ export class OpenClawAdapter implements EngineAdapter {
 
     await writeOpenClawConfigFile(configPath, normalized.config);
     invalidateReadCache("models:", "engine:");
-    await writeInfoLog("Normalized OpenClaw gateway config to ChillClaw's local baseline.", {
+    await writeInfoLog("Normalized OpenClaw config to ChillClaw's local baseline.", {
       configPath,
       gatewayMode: CHILLCLAW_OPENCLAW_GATEWAY_MODE,
       gatewayBind: CHILLCLAW_OPENCLAW_GATEWAY_BIND,
-      gatewayAuthMode: CHILLCLAW_OPENCLAW_GATEWAY_AUTH_MODE
+      gatewayAuthMode: CHILLCLAW_OPENCLAW_GATEWAY_AUTH_MODE,
+      agentTimeoutSeconds: CHILLCLAW_OPENCLAW_AGENT_TIMEOUT_SECONDS
     }, {
       scope: "OpenClawAdapter.ensureChillClawGatewayConfigBaseline"
     });

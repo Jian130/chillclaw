@@ -96,6 +96,7 @@ type RuntimeModelAuthSessionLike = ModelAuthSession & {
   setDefaultModel?: string;
   agentDir?: string;
   pendingEntry?: PendingSavedModelEntryOperationLike;
+  modelConfig?: ModelConfigOverview;
 };
 
 type OpenClawAuthProfileStoreLike = {
@@ -203,7 +204,7 @@ function resolveDefaultModelFromConfigSnapshot(snapshot: OpenClawConfigSnapshotL
 }
 
 type ModelsConfigAccess = {
-  readModelSnapshot: () => Promise<ModelSnapshotLike>;
+  readModelSnapshot: (options?: { fresh?: boolean }) => Promise<ModelSnapshotLike>;
   resolveCatalogModelKey: (
     models: ModelCatalogEntry[],
     raw: string | null | undefined,
@@ -535,8 +536,8 @@ export class ModelsConfigCoordinator {
     return this.access.hasReusableAuthForSavedModelEntry(entry, entry.providerId, method);
   }
 
-  async getModelConfig(): Promise<ModelConfigOverview> {
-    const snapshot = await this.access.readModelSnapshot();
+  async getModelConfig(options?: { fresh?: boolean }): Promise<ModelConfigOverview> {
+    const snapshot = await this.access.readModelSnapshot(options);
 
     if (this.access.isCleanModelRuntime(snapshot)) {
       const adapterState = this.access.normalizeStateFlags(await this.access.readAdapterState());
@@ -656,6 +657,7 @@ export class ModelsConfigCoordinator {
               const result = await this.finalizeSavedModelEntryOperation(session.pendingEntry);
               session.status = "completed";
               session.message = result.message;
+              session.modelConfig = result.modelConfig;
             } else {
               if (session.setDefaultModel) {
                 await this.access.runOpenClaw(["models", "set", session.setDefaultModel], { allowFailure: false }).catch(async (error) => {
@@ -675,6 +677,7 @@ export class ModelsConfigCoordinator {
               }
 
               await this.access.markGatewayApplyPending();
+              session.modelConfig = await this.getModelConfig({ fresh: true });
               session.status = "completed";
               session.message = appendGatewayApplyMessage(`${provider.label} authentication completed.`);
             }
@@ -724,7 +727,7 @@ export class ModelsConfigCoordinator {
 
     return {
       session: toModelAuthSessionResponse(session),
-      modelConfig: await this.getModelConfig()
+      modelConfig: session.modelConfig ?? await this.getModelConfig()
     };
   }
 
@@ -803,7 +806,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage(`${nextEntry.label} is ready.`),
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: true
     };
   }
@@ -857,7 +860,7 @@ export class ModelsConfigCoordinator {
         ...this.access.mutationSyncMeta(),
         status: "completed",
         message: appendGatewayApplyMessage(`${entry.label} was removed.`),
-        modelConfig: await this.getModelConfig(),
+        modelConfig: await this.getModelConfig({ fresh: true }),
         requiresGatewayApply: true
       };
     }
@@ -867,7 +870,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: `${entry.label} was removed from ChillClaw.`,
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: false
     };
   }
@@ -891,7 +894,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage("Default AI model updated."),
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: true
     };
   }
@@ -910,7 +913,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage("Fallback AI models updated."),
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: true
     };
   }
@@ -1042,7 +1045,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message,
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: true
     };
   }
@@ -1073,7 +1076,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage(`Default model set to ${modelKey}.`),
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: true
     };
   }
@@ -1273,7 +1276,7 @@ export class ModelsConfigCoordinator {
         ...this.access.mutationSyncMeta(),
         status: "completed",
         message: appendGatewayApplyMessage(`${nextEntry.label} was updated.`),
-        modelConfig: await this.getModelConfig(),
+        modelConfig: await this.getModelConfig({ fresh: true }),
         requiresGatewayApply: true
       };
     }
@@ -1283,7 +1286,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: `${nextEntry.label} was added to ChillClaw. OpenClaw will only configure it when you set it as default or fallback.`,
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: false
     };
   }
@@ -1345,7 +1348,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage(`${nextEntry.label} is ready.`),
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: true
     };
   }
@@ -1680,7 +1683,7 @@ export class ModelsConfigCoordinator {
       ...this.access.mutationSyncMeta(),
       status: "completed",
       message: appendGatewayApplyMessage(`${entry.label} was removed from OpenClaw.`),
-      modelConfig: await this.getModelConfig(),
+      modelConfig: await this.getModelConfig({ fresh: true }),
       requiresGatewayApply: true
     };
   }

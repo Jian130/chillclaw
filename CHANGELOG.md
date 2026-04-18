@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.3 - 2026-04-18
+
+### 2026-04-18 23:34 CST
+
+- fixed the macOS release daemon test failure by making completed model auth sessions return the finalized model overview and forcing fresh model snapshots after model mutations, so overlapping auth-session polling cannot lose a newly saved OAuth model entry
+- bumped ChillClaw package metadata and internal workspace dependency pins to 0.2.3 for the follow-up release tag
+
 ## 0.2.2 - 2026-04-18
 
 ### 2026-04-18 23:09 CST

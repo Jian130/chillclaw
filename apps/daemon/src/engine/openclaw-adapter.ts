@@ -455,6 +455,7 @@ interface RuntimeModelAuthSession extends ModelAuthSession {
   browserOpened: boolean;
   agentDir?: string;
   pendingEntry?: PendingSavedModelEntryOperation;
+  modelConfig?: ModelConfigOverview;
 }
 
 interface SavedModelEntryState extends SavedModelEntry {
@@ -656,11 +657,11 @@ async function readThroughCache<T>(
   const now = Date.now();
   const existing = readCache.get(key);
 
-  if (existing) {
+  if (existing && !options?.fresh) {
     if (!existing.settled) {
       return existing.promise as Promise<T>;
     }
-    if (!options?.fresh && existing.expiresAt > now) {
+    if (existing.expiresAt > now) {
       return existing.promise as Promise<T>;
     }
   }
@@ -3110,8 +3111,8 @@ export class OpenClawAdapter implements EngineAdapter {
     private readonly runtimeManager?: RuntimeManager
   ) {
     const modelsConfigCoordinator = new ModelsConfigCoordinator({
-      readModelSnapshot: async () => {
-        const snapshot = await readModelSnapshot();
+      readModelSnapshot: async (options) => {
+        const snapshot = await readModelSnapshot(options);
         return {
           ...snapshot,
           supplemental: {

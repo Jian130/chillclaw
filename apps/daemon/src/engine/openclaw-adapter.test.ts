@@ -1173,12 +1173,25 @@ test("creating a normal OAuth saved model entry authenticates through models aut
     assert.equal(created.status, "interactive");
     assert.ok(created.authSession?.id);
 
+    adapter.invalidateReadCaches(["models"]);
+    const staleAuthSessionRead = adapter.config.getModelAuthSession(created.authSession.id);
+    await waitForTestValue(
+      () => readCommands(logPath),
+      (commands) =>
+        countCommands(commands, "models list --json") >= 2 &&
+        countCommands(commands, "models list --all --json") >= 2 &&
+        countCommands(commands, "models status --json") >= 2,
+      (commands) => `Timed out waiting for overlapping model reads:\n${commands?.join("\n") ?? "(none)"}`,
+      { intervalMs: 25 }
+    );
+
     const session = await waitForTestValue(
       () => adapter.config.getModelAuthSession(created.authSession!.id),
       (authSession) => authSession.session.status !== "running",
       (authSession) => `Timed out waiting for model auth session to complete:\n${JSON.stringify(authSession?.session ?? null, null, 2)}`,
       { intervalMs: 150 }
     );
+    await staleAuthSessionRead;
     const commands = await readCommands(logPath);
 
     assert.equal(session.session.status, "completed");
@@ -1193,6 +1206,8 @@ test("creating a normal OAuth saved model entry authenticates through models aut
 
     const status = await adapter.status();
     assert.equal(status.pendingGatewayApply, true);
+  }, {
+    slowModelReads: true
   });
 });
 

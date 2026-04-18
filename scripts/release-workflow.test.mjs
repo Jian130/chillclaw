@@ -164,6 +164,7 @@ test("local signed macOS installer script mirrors release signing and notarizati
   assert.match(signScript, /NODE_RUNTIME_ENTITLEMENTS="scripts\/macos-node-runtime-entitlements\.plist"/);
   assert.match(signScript, /find "\$APP_PATH\/Contents\/Resources\/app\/runtime-artifacts" -type f -print0/);
   assert.doesNotMatch(signScript, /runtime-artifacts" -type f -perm -111 -print0/);
+  assert.match(signScript, /codesign --remove-signature "\$RUNTIME_EXECUTABLE" 2>\/dev\/null \|\| true/);
   assert.match(
     signScript,
     /codesign --force --sign "\$APP_IDENTITY" --options runtime --timestamp --entitlements "\$NODE_RUNTIME_ENTITLEMENTS" "\$RUNTIME_EXECUTABLE"/
@@ -211,6 +212,7 @@ test("macOS release workflow signs the packaged Node runtime with V8 entitlement
   assert.match(workflow, /is_node_runtime_executable/);
   assert.match(workflow, /find "\$APP_PATH\/Contents\/Resources\/app\/runtime-artifacts" -type f -print0/);
   assert.doesNotMatch(workflow, /runtime-artifacts" -type f -perm -111 -print0/);
+  assert.match(workflow, /codesign --remove-signature "\$RUNTIME_EXECUTABLE" 2>\/dev\/null \|\| true/);
   assert.match(
     workflow,
     /codesign --force --sign "\$APP_IDENTITY" --options runtime --timestamp --entitlements "\$NODE_RUNTIME_ENTITLEMENTS" "\$RUNTIME_EXECUTABLE"/

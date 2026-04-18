@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 2026-04-19 02:49 CST
+
+- fixed macOS release signing for vendored OpenClaw runtime helpers by stripping stale embedded Mach-O signatures before applying ChillClaw's Developer ID signature, so native plugin binaries no longer abort the release workflow with `invalid or unsupported format for signature`
+
 ## 0.2.4 - 2026-04-19
 
 ### 2026-04-19 01:29 CST

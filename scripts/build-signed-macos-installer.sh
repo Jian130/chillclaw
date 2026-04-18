@@ -227,6 +227,7 @@ SIGNED_RUNTIME_COUNT=0
 while IFS= read -r -d '' RUNTIME_EXECUTABLE; do
   if file "$RUNTIME_EXECUTABLE" | grep -q 'Mach-O'; then
     log "Signing runtime Mach-O file: $RUNTIME_EXECUTABLE ($(file "$RUNTIME_EXECUTABLE"))"
+    codesign --remove-signature "$RUNTIME_EXECUTABLE" 2>/dev/null || true
     if is_node_runtime_executable "$RUNTIME_EXECUTABLE"; then
       codesign --force --sign "$APP_IDENTITY" --options runtime --timestamp --entitlements "$NODE_RUNTIME_ENTITLEMENTS" "$RUNTIME_EXECUTABLE"
     else

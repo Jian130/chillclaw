@@ -120,6 +120,23 @@ test("macOS release workflow waits for notarization before Gatekeeper assessment
   assert.ok(stapleIndex < installerAssessIndex);
 });
 
+test("macOS release workflow retries transient Apple notarization network failures", async () => {
+  const workflow = await readRepoFile(".github/workflows/macos-release.yml");
+  const notarizeStepIndex = workflow.indexOf("name: Notarize and staple disk image");
+  const checksumStepIndex = workflow.indexOf("name: Generate installer checksum");
+  const notarizeStep = workflow.slice(notarizeStepIndex, checksumStepIndex);
+
+  assert.notEqual(notarizeStepIndex, -1);
+  assert.notEqual(checksumStepIndex, -1);
+  assert.match(notarizeStep, /submit_notarization\(\)/);
+  assert.match(notarizeStep, /MAX_NOTARY_ATTEMPTS=3/);
+  assert.match(notarizeStep, /xcrun notarytool submit "\$INSTALLER_PATH"[\s\S]*2>&1/);
+  assert.match(notarizeStep, /NSURLErrorDomain/);
+  assert.match(notarizeStep, /No network route/);
+  assert.match(notarizeStep, /sleep "\$notary_delay"/);
+  assert.match(notarizeStep, /NOTARY_RESULT="\$\(submit_notarization\)"/);
+});
+
 test("local signed macOS installer script mirrors release signing and notarization", async () => {
   const [signScript, packageJson] = await Promise.all([
     readRepoFile("scripts/build-signed-macos-installer.sh"),

@@ -165,16 +165,52 @@ jobs:
           ' "$field"
           }
 
+          is_transient_notary_error() {
+            local output="$1"
+            printf '%s\n' "$output" | grep -Eiq 'HTTPError|NSURLErrorDomain|The Internet connection appears to be offline|No network route|Could not connect|timed out|network connection was lost|connection reset|connection aborted|Service Unavailable|Bad Gateway|Gateway Time-out'
+          }
+
+          submit_notarization() {
+            local attempt=1
+            local notary_delay=30
+            local notary_output=""
+            local notary_status=0
+
+            while true; do
+              set +e
+              notary_output="$(xcrun notarytool submit "$INSTALLER_PATH" \
+                --key "$NOTARY_KEY_PATH" \
+                --key-id "$APPLE_NOTARY_KEY_ID" \
+                --issuer "$APPLE_NOTARY_ISSUER_ID" \
+                --team-id "$APPLE_TEAM_ID" \
+                --wait \
+                --output-format json 2>&1)"
+              notary_status=$?
+              set -e
+
+              if [[ "$notary_status" -eq 0 ]]; then
+                printf '%s\n' "$notary_output"
+                return 0
+              fi
+
+              printf '%s\n' "$notary_output" >&2
+              if [[ "$attempt" -ge "$MAX_NOTARY_ATTEMPTS" ]] || ! is_transient_notary_error "$notary_output"; then
+                echo "Apple notarization submit failed after $attempt attempt(s)." >&2
+                return "$notary_status"
+              fi
+
+              echo "Apple notarization submit hit a transient network error; retrying in ${notary_delay}s (attempt $((attempt + 1))/${MAX_NOTARY_ATTEMPTS})." >&2
+              sleep "$notary_delay"
+              attempt=$((attempt + 1))
+              notary_delay=$((notary_delay * 2))
+            done
+          }
+
           NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+          MAX_NOTARY_ATTEMPTS=3
           node -e 'require("node:fs").writeFileSync(process.argv[1], Buffer.from(process.env.APPLE_NOTARY_API_KEY_BASE64, "base64"));' "$NOTARY_KEY_PATH"
 
-          NOTARY_RESULT="$(xcrun notarytool submit "$INSTALLER_PATH" \
-            --key "$NOTARY_KEY_PATH" \
-            --key-id "$APPLE_NOTARY_KEY_ID" \
-            --issuer "$APPLE_NOTARY_ISSUER_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait \
-            --output-format json)"
+          NOTARY_RESULT="$(submit_notarization)"
           printf '%s\n' "$NOTARY_RESULT"
 
           NOTARY_STATUS="$(printf '%s\n' "$NOTARY_RESULT" | parse_notary_field status)"

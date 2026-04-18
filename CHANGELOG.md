@@ -4,6 +4,10 @@
 
 ## 0.2.0 - 2026-04-17
 
+### 2026-04-18 16:20 CST
+
+- made the macOS release notarization step retry transient Apple notary network failures before failing the release, so a temporary `NSURLErrorDomain` offline/no-route response does not discard an otherwise valid signed DMG build
+
 ### 2026-04-18 15:53 CST
 
 - fixed the daemon GitHub Actions suite by making the managed OpenClaw npm-update fixture use the same architecture-specific managed Node.js runtime directory as production, so Linux runners can find the fake managed npm command

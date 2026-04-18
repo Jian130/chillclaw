@@ -1144,7 +1144,7 @@ function ChannelDialog(props: {
               <CardContent className="panel-stack">
                 <strong>Personal WeChat login</strong>
                 <p className="card__description">
-                  ChillClaw starts the QR-first WeChat installer for you. Use Start Login to begin, then keep this dialog
+                  ChillClaw starts the QR-first WeChat login for you. Use Start Login to begin, then keep this dialog
                   open while the session log streams the pairing steps.
                 </p>
               </CardContent>

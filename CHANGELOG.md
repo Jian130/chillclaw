@@ -4,6 +4,11 @@
 
 ## 0.2.1 - 2026-04-18
 
+### 2026-04-18 21:31 CST
+
+- fixed clean macOS personal WeChat setup by replacing the helper CLI install path with daemon-managed `openclaw plugins install @tencent-weixin/openclaw-weixin@latest`, plugin enablement, and `openclaw channels login --channel openclaw-weixin` under ChillClaw's isolated managed OpenClaw home
+- added explicit startup loading and DONE logs for the daemon and local development launcher, including a numbered dev-start checklist and ready URLs to make first-run startup diagnostics easier to follow
+
 ### 2026-04-18 20:20 CST
 
 - fixed personal WeChat onboarding handoff across the React and native macOS clients so a stale ended login session no longer shows an error popup after ChillClaw has already advanced setup to the AI employee step

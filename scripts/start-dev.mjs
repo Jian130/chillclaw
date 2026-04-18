@@ -15,6 +15,7 @@ import {
 } from "./dev-process-control.mjs";
 import { writeScriptLogLine } from "./logging.mjs";
 import { createDevRuntimeConfig, prepareDevRuntime } from "./start-dev-runtime.mjs";
+import { formatStartupDoneMessage, logStartupChecklist } from "./startup-logging.mjs";
 
 const rootDir = process.cwd();
 const daemonPort = Number(process.env.CHILLCLAW_PORT ?? "4545");
@@ -303,7 +304,12 @@ process.on("unhandledRejection", (error) => {
 });
 
 async function main() {
+  const startedAt = Date.now();
+  const daemonUrl = `http://127.0.0.1:${daemonPort}`;
+  const uiUrl = `http://127.0.0.1:${uiPort}`;
+
   logStep("Starting ChillClaw local development environment");
+  logStartupChecklist(logStep);
   let devRuntimeConfig;
   try {
     devRuntimeConfig = createDevRuntimeConfig({ rootDir, env: process.env });
@@ -368,8 +374,13 @@ async function main() {
   await waitForPort("UI", "127.0.0.1", uiPort);
 
   logStep("ChillClaw dev environment is ready.");
-  logStep(`Daemon: http://127.0.0.1:${daemonPort}`);
-  logStep(`UI: http://127.0.0.1:${uiPort}`);
+  logStep(formatStartupDoneMessage({
+    durationMs: Date.now() - startedAt,
+    daemonUrl,
+    uiUrl
+  }));
+  logStep(`Daemon: ${daemonUrl}`);
+  logStep(`UI: ${uiUrl}`);
 }
 
 await main();

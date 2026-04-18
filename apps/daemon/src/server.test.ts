@@ -80,6 +80,33 @@ test("server allows long-running onboarding install requests to outlive Node's d
   }
 });
 
+test("server logs when daemon loading is done and requests can be served", async () => {
+  const previousEngine = process.env.CHILLCLAW_ENGINE;
+  const originalConsoleLog = console.log;
+  const lines: string[] = [];
+  process.env.CHILLCLAW_ENGINE = "mock";
+  console.log = (message?: unknown, ...rest: unknown[]) => {
+    lines.push([message, ...rest].map((part) => String(part)).join(" "));
+  };
+
+  const server = startServer(0);
+  await once(server, "listening");
+
+  try {
+    assert.ok(
+      lines.some((line) =>
+        /\[ChillClaw daemon\]\[server\.startup\.done\] DONE\. ChillClaw daemon loading process done/u.test(line)
+      ),
+      lines.join("\n")
+    );
+  } finally {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    console.log = originalConsoleLog;
+    if (previousEngine === undefined) delete process.env.CHILLCLAW_ENGINE;
+    else process.env.CHILLCLAW_ENGINE = previousEngine;
+  }
+});
+
 test("successful managed-local target uninstall triggers runtime-state reset", () => {
   assert.equal(
     shouldResetStateAfterDeploymentUninstall({

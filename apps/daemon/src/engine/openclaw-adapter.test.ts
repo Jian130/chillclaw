@@ -497,7 +497,7 @@ async function withFakeOpenClaw(
     failPersonalWechatBindingAlias?: boolean;
     bindingsUseMatchShape?: boolean;
     failGatewayRestartWithPluginsAllowWarning?: boolean;
-    longRunningWechatInstaller?: boolean;
+    longRunningWechatLogin?: boolean;
     pluginInstalled?: boolean;
     pluginEnabled?: boolean;
     pluginUpdateAvailable?: boolean;
@@ -556,7 +556,7 @@ async function withFakeOpenClaw(
   const failPersonalWechatBindingAlias = options?.failPersonalWechatBindingAlias === true;
   const bindingsUseMatchShape = options?.bindingsUseMatchShape === true;
   const failGatewayRestartWithPluginsAllowWarning = options?.failGatewayRestartWithPluginsAllowWarning === true;
-  const longRunningWechatInstaller = options?.longRunningWechatInstaller === true;
+  const longRunningWechatLogin = options?.longRunningWechatLogin === true;
   const pluginInstalled = options?.pluginInstalled === true;
   const pluginEnabled = options?.pluginEnabled === true;
   const pluginUpdateAvailable = options?.pluginUpdateAvailable === true;
@@ -640,34 +640,6 @@ async function withFakeOpenClaw(
 echo "$0 $*" >> "$OPENCLAW_TEST_LOG"
 if [ "$1" = "--version" ]; then
   echo '10.9.0'
-  exit 0
-fi
-if [ "$1" = "install" ] && [ "$2" = "--prefix" ] && [ "$4" = "@tencent-weixin/openclaw-weixin-cli@latest" ]; then
-  prefix="$3"
-  mkdir -p "$prefix/node_modules/.bin"
-  mkdir -p "$prefix/node_modules/@tencent-weixin/openclaw-weixin-cli"
-  cat > "$prefix/node_modules/@tencent-weixin/openclaw-weixin-cli/package.json" <<'EOF'
-{"name":"@tencent-weixin/openclaw-weixin-cli","bin":{"weixin-installer":"./cli.mjs"}}
-EOF
-  cat > "$prefix/node_modules/.bin/weixin-installer" <<'EOF'
-#!/bin/sh
-echo "$0 $*" >> "$OPENCLAW_TEST_LOG"
-echo "WEIXIN_HOME=$HOME" >> "$OPENCLAW_TEST_LOG"
-echo "WEIXIN_STATE_DIR=$OPENCLAW_STATE_DIR" >> "$OPENCLAW_TEST_LOG"
-if [ "$1" = "install" ]; then
-  echo 'Installing WeChat runtime helper'
-  echo 'Scan the QR code from WeChat on your phone to continue.'
-  if [ -t 1 ]; then
-    echo 'Interactive QR ready from TTY.'
-  fi
-  if [ "${longRunningWechatInstaller ? "1" : "0"}" = "1" ]; then
-    sleep 2
-  fi
-  exit 0
-fi
-exit 1
-EOF
-  chmod +x "$prefix/node_modules/.bin/weixin-installer"
   exit 0
 fi
 exit 1
@@ -803,6 +775,17 @@ elif [ "$1" = "channels" ] && [ "$2" = "status" ] && [ "$3" = "--json" ] && [ "$
   else
     echo '{"channels":{"telegram":{"configured":true,"running":true,"linked":true}},"channelAccounts":{"telegram":[{"accountId":"default","configured":true,"linked":true,"probe":{"bot":{"username":"support_bot"}}}]}}'
   fi
+elif [ "$1" = "channels" ] && [ "$2" = "login" ] && [ "$3" = "--channel" ] && [ "$4" = "openclaw-weixin" ]; then
+  echo "WEIXIN_LOGIN_HOME=$HOME" >> "$OPENCLAW_TEST_LOG"
+  echo "WEIXIN_LOGIN_STATE_DIR=$OPENCLAW_STATE_DIR" >> "$OPENCLAW_TEST_LOG"
+  echo 'Scan the QR code from WeChat on your phone to continue.'
+  if [ -t 1 ]; then
+    echo 'Interactive QR ready from TTY.'
+  fi
+  if [ "${longRunningWechatLogin ? "1" : "0"}" = "1" ]; then
+    sleep 2
+  fi
+  exit 0
 elif [ "$1" = "plugins" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
   if [ -f "$OPENCLAW_TEST_PLUGIN_INSTALLED_MARKER" ]; then
     plugin_status="ready"
@@ -822,11 +805,15 @@ EOF
 elif [ "$1" = "plugins" ] && [ "$2" = "install" ] && [ "$3" = "@wecom/wecom-openclaw-plugin" ]; then
   touch "$OPENCLAW_TEST_PLUGIN_INSTALLED_MARKER"
   echo '{"status":"installed"}'
+elif [ "$1" = "plugins" ] && [ "$2" = "install" ] && [ "$3" = "@tencent-weixin/openclaw-weixin@latest" ]; then
+  echo '{"status":"installed","pluginId":"openclaw-weixin"}'
 elif [ "$1" = "plugins" ] && [ "$2" = "update" ] && [ "$3" = "wecom-openclaw-plugin" ] && [ "$4" = "--yes" ]; then
   rm -f "$OPENCLAW_TEST_PLUGIN_UPDATE_MARKER"
   echo 'Plugin updated'
 elif [ "$1" = "plugins" ] && [ "$2" = "enable" ] && [ "$3" = "wecom-openclaw-plugin" ]; then
   touch "$OPENCLAW_TEST_PLUGIN_ENABLED_MARKER"
+  echo 'Plugin enabled'
+elif [ "$1" = "plugins" ] && [ "$2" = "enable" ] && [ "$3" = "openclaw-weixin" ]; then
   echo 'Plugin enabled'
 elif [ "$1" = "plugins" ] && [ "$2" = "disable" ] && [ "$3" = "wecom-openclaw-plugin" ]; then
   rm -f "$OPENCLAW_TEST_PLUGIN_ENABLED_MARKER"
@@ -969,7 +956,7 @@ fi
   try {
     await fn({ adapter, logPath, configPath, dataDir });
   } finally {
-    await new Promise((resolve) => setTimeout(resolve, options?.longRunningWechatInstaller ? 2200 : 150));
+    await new Promise((resolve) => setTimeout(resolve, options?.longRunningWechatLogin ? 2200 : 150));
     adapter.invalidateReadCaches();
     if (originalPath === undefined) {
       delete process.env.PATH;
@@ -1659,7 +1646,7 @@ test("configureWechatWorkaround removes the legacy channels.wecom-openclaw-plugi
   });
 });
 
-test("personal WeChat runs the installer command and starts a channel session log flow", async () => {
+test("personal WeChat installs the latest plugin and starts a channel session log flow", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath }) => {
     const result = await adapter.config.saveChannelEntry({
       channelId: "wechat",
@@ -1671,34 +1658,35 @@ test("personal WeChat runs the installer command and starts a channel session lo
       () => adapter.gateway.getChannelSession(result.session!.id),
       (channelSession) =>
         channelSession.logs.some((line) => /qr code|scan/i.test(line)) &&
-        channelSession.logs.some((line) => line.includes("npm install") && line.includes("@tencent-weixin/openclaw-weixin-cli@latest")) &&
-        channelSession.logs.some((line) => /weixin-installer .*install/.test(line)),
-      (channelSession) => `Timed out waiting for personal WeChat installer logs:\n${channelSession?.logs.join("\n") ?? "(none)"}`
+        channelSession.logs.some((line) => line.includes("openclaw plugins install") && line.includes("@tencent-weixin/openclaw-weixin@latest")) &&
+        channelSession.logs.some((line) => /channels login --channel openclaw-weixin/.test(line)),
+      (channelSession) => `Timed out waiting for personal WeChat login logs:\n${channelSession?.logs.join("\n") ?? "(none)"}`
     );
 
     const commands = await waitForTestValue(
       () => readCommands(logPath),
       (loggedCommands) =>
-        loggedCommands.some((command) => command.includes("npm install --prefix") && command.includes("@tencent-weixin/openclaw-weixin-cli@latest")) &&
-        loggedCommands.some((command) => /weixin-installer install$/.test(command)),
-      (loggedCommands) => `Timed out waiting for personal WeChat installer commands:\n${loggedCommands?.join("\n") ?? "(none)"}`
+        loggedCommands.some((command) => command === "plugins install @tencent-weixin/openclaw-weixin@latest") &&
+        loggedCommands.some((command) => command === "plugins enable openclaw-weixin") &&
+        loggedCommands.some((command) => command === "channels login --channel openclaw-weixin"),
+      (loggedCommands) => `Timed out waiting for personal WeChat login commands:\n${loggedCommands?.join("\n") ?? "(none)"}`
     );
 
     assert.equal(session.channelId, "wechat");
     assert.match(session.message ?? "", /wechat login|qr/i);
     assert.equal(session.logs.some((line) => /qr code|scan/i.test(line)), true);
-    assert.equal(session.logs.some((line) => line.includes("npm install") && line.includes("@tencent-weixin/openclaw-weixin-cli@latest")), true);
-    assert.equal(session.logs.some((line) => /weixin-installer .*install/.test(line)), true);
+    assert.equal(session.logs.some((line) => line.includes("openclaw plugins install") && line.includes("@tencent-weixin/openclaw-weixin@latest")), true);
+    assert.equal(session.logs.some((line) => /channels login --channel openclaw-weixin/.test(line)), true);
     assert.equal(
-      commands.some((command) => command.includes("npm install --prefix") && command.includes("@tencent-weixin/openclaw-weixin-cli@latest")),
+      commands.some((command) => command === "plugins install @tencent-weixin/openclaw-weixin@latest"),
       true
     );
-    assert.equal(commands.some((command) => /weixin-installer install$/.test(command)), true);
-    assert.equal(commands.some((command) => command.startsWith("plugins install ")), false);
+    assert.equal(commands.some((command) => command === "plugins enable openclaw-weixin"), true);
+    assert.equal(commands.some((command) => command === "channels login --channel openclaw-weixin"), true);
   });
 });
 
-test("personal WeChat installer uses ChillClaw's managed OpenClaw home", async () => {
+test("personal WeChat login uses ChillClaw's managed OpenClaw home", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath, dataDir }) => {
     const result = await adapter.config.saveChannelEntry({
       channelId: "wechat",
@@ -1709,17 +1697,17 @@ test("personal WeChat installer uses ChillClaw's managed OpenClaw home", async (
 
     const commands = await waitForTestValue(
       () => readCommands(logPath),
-      (loggedCommands) => loggedCommands.some((command) => /weixin-installer install$/.test(command)),
-      (loggedCommands) => `Timed out waiting for personal WeChat installer command:\n${loggedCommands?.join("\n") ?? "(none)"}`
+      (loggedCommands) => loggedCommands.some((command) => command === "channels login --channel openclaw-weixin"),
+      (loggedCommands) => `Timed out waiting for personal WeChat login command:\n${loggedCommands?.join("\n") ?? "(none)"}`
     );
     const managedHome = join(dataDir, "openclaw-home");
 
-    assert.equal(commands.includes(`WEIXIN_HOME=${managedHome}`), true, commands.join("\n"));
-    assert.equal(commands.includes(`WEIXIN_STATE_DIR=${join(managedHome, ".openclaw")}`), true, commands.join("\n"));
+    assert.equal(commands.includes(`WEIXIN_LOGIN_HOME=${managedHome}`), true, commands.join("\n"));
+    assert.equal(commands.includes(`WEIXIN_LOGIN_STATE_DIR=${join(managedHome, ".openclaw")}`), true, commands.join("\n"));
   });
 });
 
-test("personal WeChat captures installer output that only appears on an interactive TTY", async () => {
+test("personal WeChat captures login output that only appears on an interactive TTY", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
     const result = await adapter.config.saveChannelEntry({
       channelId: "wechat",
@@ -1730,7 +1718,7 @@ test("personal WeChat captures installer output that only appears on an interact
     const session = await waitForTestValue(
       () => adapter.gateway.getChannelSession(result.session!.id),
       (channelSession) => channelSession.logs.some((line) => /interactive qr ready from tty/i.test(line)),
-      (channelSession) => `Timed out waiting for interactive TTY installer output:\n${channelSession?.logs.join("\n") ?? "(none)"}`
+      (channelSession) => `Timed out waiting for interactive TTY WeChat login output:\n${channelSession?.logs.join("\n") ?? "(none)"}`
     );
 
     assert.equal(
@@ -1741,7 +1729,7 @@ test("personal WeChat captures installer output that only appears on an interact
   });
 });
 
-test("personal WeChat hides completed installer sessions from general config while onboarding can still fetch them", async () => {
+test("personal WeChat hides completed login sessions from general config while onboarding can still fetch them", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
     const result = await adapter.config.saveChannelEntry({
       channelId: "wechat",
@@ -1753,7 +1741,7 @@ test("personal WeChat hides completed installer sessions from general config whi
     const session = await waitForTestValue(
       () => adapter.gateway.getChannelSession(result.session!.id),
       (channelSession) => channelSession.status === "completed",
-      (channelSession) => `Timed out waiting for personal WeChat installer completion:\n${channelSession?.logs.join("\n") ?? "(none)"}`
+      (channelSession) => `Timed out waiting for personal WeChat login completion:\n${channelSession?.logs.join("\n") ?? "(none)"}`
     );
 
     assert.equal(session.status, "completed", session.logs.join("\n"));
@@ -1792,7 +1780,7 @@ test("personal WeChat approves pairing through the runtime plugin channel id", a
   });
 });
 
-test("personal WeChat does not start a second installer while the QR session is still active", async () => {
+test("personal WeChat does not start a second login while the QR session is still active", async () => {
   await withFakeOpenClaw(async ({ adapter }) => {
     const firstPromise = adapter.config.saveChannelEntry({
       channelId: "wechat",
@@ -1802,7 +1790,7 @@ test("personal WeChat does not start a second installer while the QR session is 
     const firstSession = await waitForTestValue(
       () => adapter.gateway.getActiveChannelSession(),
       (channelSession) => channelSession?.channelId === "wechat" && channelSession.status === "running",
-      (channelSession) => `Timed out waiting for active personal WeChat installer session:\n${JSON.stringify(channelSession ?? null, null, 2)}`
+      (channelSession) => `Timed out waiting for active personal WeChat login session:\n${JSON.stringify(channelSession ?? null, null, 2)}`
     );
 
     const second = await adapter.config.saveChannelEntry({
@@ -1818,7 +1806,7 @@ test("personal WeChat does not start a second installer while the QR session is 
     assert.equal(second.message, "WeChat login is already running.");
     assert.equal(second.session?.id, first.session?.id);
   }, {
-    longRunningWechatInstaller: true
+    longRunningWechatLogin: true
   });
 });
 

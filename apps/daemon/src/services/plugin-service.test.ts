@@ -56,8 +56,8 @@ test("plugin service excludes non-plugin-backed managed features from the overvi
           ...overview.entries,
           {
             id: "wechat-personal",
-            label: "WeChat Personal Installer",
-            packageSpec: "npm install @tencent-weixin/openclaw-weixin-cli@latest",
+            label: "WeChat Personal Login",
+            packageSpec: "openclaw channels login --channel openclaw-weixin",
             runtimePluginId: "wechat-personal-installer",
             configKey: "wechat-personal-installer",
             status: "ready" as const,

@@ -1850,7 +1850,7 @@ export class MockAdapter implements EngineAdapter {
       ...this.channels.wechat,
       status: "awaiting-pairing",
       summary: "Mock WeChat login started.",
-      detail: "Pretend the installer printed a QR code, then optionally submit follow-up input through the session."
+      detail: "Pretend the login session printed a QR code, then optionally submit follow-up input through the session."
     };
     this.activeChannelSession = {
       id: "wechat:default:login",
@@ -1859,8 +1859,8 @@ export class MockAdapter implements EngineAdapter {
       status: "running",
       message: "Mock WeChat login started.",
       logs: [
-        "Mock WeChat installer started.",
-        "Scan the QR code from the installer output to continue."
+        "Mock WeChat login started.",
+        "Scan the QR code from the login output to continue."
       ]
     };
     return { message: "Mock WeChat login started.", channel: this.channels.wechat };

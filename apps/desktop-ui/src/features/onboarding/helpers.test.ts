@@ -145,7 +145,7 @@ describe("onboarding helpers", () => {
       status: "running",
       message: "WeChat login is waiting for QR confirmation.",
       logs: [
-        "Starting the personal WeChat installer.",
+        "Starting the personal WeChat login.",
         "https://liteapp.weixin.qq.com/?qrcode=abc"
       ]
     };
@@ -163,7 +163,7 @@ describe("onboarding helpers", () => {
       entryId: "wechat:default",
       status: "running",
       message: "WeChat login is waiting for QR confirmation.",
-      logs: ["Starting the personal WeChat installer."]
+      logs: ["Starting the personal WeChat login."]
     };
     const channelConfig: ChannelConfigOverview = {
       baseOnboardingCompleted: false,
@@ -229,8 +229,8 @@ describe("onboarding helpers", () => {
 
     expect(
       resolveOnboardingChannelSessionLogMode([
-        "Installing WeChat runtime helper",
-        "Running installer",
+        "Preparing WeChat runtime plugin",
+        "Running WeChat login",
         "Waiting for QR confirmation."
       ])
     ).toBe("plain");

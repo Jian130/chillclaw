@@ -2192,8 +2192,8 @@ export default function OnboardingPage() {
                             <strong>{selectedChannelPresentation.label}</strong>
                           </div>
                           <p className="card__description">
-                            ChillClaw will run the personal WeChat installer and keep the QR-first session log here. Start
-                            the login flow, scan the QR code on your phone, and keep this step open until the installer finishes.
+                            ChillClaw will run the personal WeChat login and keep the QR-first session log here. Start
+                            the login flow, scan the QR code on your phone, and keep this step open until the login finishes.
                             Once the channel is saved, ChillClaw will continue to the AI employee step and finish gateway
                             activation after onboarding.
                           </p>
@@ -2341,7 +2341,7 @@ export default function OnboardingPage() {
                                   id="channel-session-input"
                                   value={channelSessionInput}
                                   onChange={(event) => setChannelSessionInput(event.target.value)}
-                                  placeholder="Paste the follow-up input from the installer"
+                                  placeholder="Paste the follow-up input from the login session"
                                 />
                               </div>
                             </div>

@@ -123,7 +123,7 @@ export function createChannelStateFromLoginSession(
       sessionState.logs.at(-1) ??
       (channelId === "whatsapp"
         ? "Scan the QR code or follow the WhatsApp login instructions shown by OpenClaw."
-        : "Scan the QR code or follow the WeChat installer instructions shown in the session log."),
+        : "Scan the QR code or follow the WeChat login instructions shown in the session log."),
     logs: session?.logs.slice(-20) ?? sessionState.logs.slice(-20)
   });
 }

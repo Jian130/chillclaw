@@ -86,8 +86,7 @@ import {
   getManagedOpenClawBinPath,
   getManagedOpenClawDir,
   getManagedOpenClawHomeDir,
-  getManagedOpenClawStateDir,
-  getManagedWechatInstallerDir
+  getManagedOpenClawStateDir
 } from "../runtime-paths.js";
 import { errorToLogDetails, formatConsoleLine, logDevelopmentCommand, writeErrorLog, writeInfoLog } from "../services/logger.js";
 import type { RuntimeManager } from "../runtime-manager/runtime-manager.js";
@@ -409,7 +408,6 @@ function getOpenClawStatePath(): string {
 const OPENCLAW_VERSION_OVERRIDE = process.env.CHILLCLAW_OPENCLAW_VERSION?.trim() || undefined;
 const OPENCLAW_INSTALL_TARGET = OPENCLAW_VERSION_OVERRIDE ?? "2026.3.11";
 const OPENCLAW_RUNTIME_PREFERENCE_ENV = "CHILLCLAW_OPENCLAW_RUNTIME_PREFERENCE";
-const WECHAT_INSTALLER_PACKAGE_SPEC = "@tencent-weixin/openclaw-weixin-cli@latest";
 const PERSONAL_WECHAT_RUNTIME_CHANNEL_KEY = "openclaw-weixin";
 const FEISHU_BUNDLED_SINCE = "2026.3.7";
 const OPENCLAW_MAIN_AGENT_ID = "main";
@@ -1042,30 +1040,6 @@ async function resolveCommand(command: string, extraCandidates: string[] = []): 
   return undefined;
 }
 
-async function readWechatInstallerBinName(packagePath: string): Promise<string | undefined> {
-  try {
-    const raw = await readFile(packagePath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      name?: string;
-      bin?: string | Record<string, string>;
-    };
-
-    if (typeof parsed.bin === "string") {
-      const packageName = parsed.name?.split("/").pop()?.trim();
-      return packageName || undefined;
-    }
-
-    if (parsed.bin && typeof parsed.bin === "object") {
-      const [binName] = Object.keys(parsed.bin);
-      return binName?.trim() || undefined;
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
-}
-
 async function probeCommand(command: string, args: string[] = ["--version"]): Promise<boolean> {
   return probeExternalCommand(command, args, {
     env: buildCommandEnv(command)
@@ -1316,26 +1290,6 @@ async function resolveExpectedNpmGlobalOpenClawCommand(
   }
 
   return commandPath;
-}
-
-async function resolveGitCommand(): Promise<string | undefined> {
-  const gitCommand = await resolveCommand("git", ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"]);
-
-  if (gitCommand && (await probeCommand(gitCommand))) {
-    return gitCommand;
-  }
-
-  return undefined;
-}
-
-async function resolveBrewCommand(): Promise<string | undefined> {
-  const brewCommand = await resolveCommand("brew", ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]);
-
-  if (brewCommand && (await probeCommand(brewCommand, ["--version"]))) {
-    return brewCommand;
-  }
-
-  return undefined;
 }
 
 async function readInstalledOpenClawVersion(): Promise<string | undefined> {
@@ -3314,13 +3268,6 @@ export class OpenClawAdapter implements EngineAdapter {
       buildCommandEnv,
       logExternalCommand,
       spawnInteractiveCommand,
-      managedWechatInstallerDir: getManagedWechatInstallerDir(),
-      wechatInstallerPackageSpec: WECHAT_INSTALLER_PACKAGE_SPEC,
-      resolveNpmInvocation,
-      ensureSystemDependencies: () => this.ensureSystemDependencies(),
-      runCommand,
-      readWechatInstallerBinName,
-      fileExists,
       writeErrorLog,
       errorToLogDetails,
       compareVersionStrings,
@@ -4526,61 +4473,4 @@ export class OpenClawAdapter implements EngineAdapter {
     return defaultAgentId ? ["--agent", defaultAgentId] : [];
   }
 
-  private async ensureSystemDependencies(): Promise<CommandInvocation | undefined> {
-    const [nodeCommand, npmInvocation, gitCommand, brewCommand] = await Promise.all([
-      resolveNodeCommand(),
-      resolveSystemNpmInvocation(),
-      resolveGitCommand(),
-      resolveBrewCommand()
-    ]);
-
-    const packages: string[] = [];
-
-    if (!nodeCommand || !npmInvocation) {
-      packages.push("node");
-    }
-
-    if (!gitCommand) {
-      packages.push("git");
-    }
-
-    if (packages.length === 0) {
-      return npmInvocation;
-    }
-
-    if (!brewCommand) {
-      await writeErrorLog("ChillClaw could not install missing dependencies because Homebrew is unavailable.", {
-        missingPackages: packages
-      }, {
-        scope: "OpenClawAdapter.ensureSystemDependencies.missingHomebrew"
-      });
-      return undefined;
-    }
-
-    const installResult = await runCommand(brewCommand, ["install", ...packages], { allowFailure: true });
-
-    if (installResult.code !== 0) {
-      await writeErrorLog("ChillClaw failed to install missing dependencies with Homebrew.", {
-        command: brewCommand,
-        args: ["install", ...packages],
-        result: installResult
-      }, {
-        scope: "OpenClawAdapter.ensureSystemDependencies.install"
-      });
-      throw new Error(
-        installResult.stderr ||
-          installResult.stdout ||
-          `ChillClaw could not install missing dependencies (${packages.join(", ")}) with Homebrew.`
-      );
-    }
-
-    await writeInfoLog("ChillClaw installed missing system dependencies with Homebrew.", {
-      command: brewCommand,
-      packages
-    }, {
-      scope: "OpenClawAdapter.ensureSystemDependencies"
-    });
-
-    return resolveSystemNpmInvocation();
-  }
 }

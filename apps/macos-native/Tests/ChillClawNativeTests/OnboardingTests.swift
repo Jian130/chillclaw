@@ -2533,7 +2533,7 @@ struct OnboardingTests {
                 entryId: awaitingEntry.id,
                 status: "running",
                 message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat installer."],
+                logs: ["Starting the personal WeChat login."],
                 launchUrl: nil,
                 inputPrompt: nil
             ),
@@ -2579,7 +2579,7 @@ struct OnboardingTests {
                             status: "running",
                             message: "WeChat login is waiting for QR confirmation.",
                             logs: [
-                                "Starting the personal WeChat installer.",
+                                "Starting the personal WeChat login.",
                                 "QR code ready. Scan with WeChat to continue."
                             ],
                             launchUrl: nil,
@@ -2718,7 +2718,7 @@ struct OnboardingTests {
                             status: "running",
                             message: "WeChat login is waiting for QR confirmation.",
                             logs: [
-                                "Starting the personal WeChat installer.",
+                                "Starting the personal WeChat login.",
                                 "QR code ready. Scan with WeChat to continue."
                             ],
                             launchUrl: nil,
@@ -2827,7 +2827,7 @@ struct OnboardingTests {
                 entryId: awaitingEntry.id,
                 status: "running",
                 message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat installer."],
+                logs: ["Starting the personal WeChat login."],
                 launchUrl: nil,
                 inputPrompt: nil
             ),
@@ -2877,7 +2877,7 @@ struct OnboardingTests {
                             status: "running",
                             message: "WeChat login is waiting for QR confirmation.",
                             logs: [
-                                "Starting the personal WeChat installer.",
+                                "Starting the personal WeChat login.",
                                 "QR code ready. Scan with WeChat to continue."
                             ],
                             launchUrl: nil,
@@ -2974,7 +2974,7 @@ struct OnboardingTests {
                 entryId: awaitingEntry.id,
                 status: "running",
                 message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat installer."],
+                logs: ["Starting the personal WeChat login."],
                 launchUrl: nil,
                 inputPrompt: nil
             ),
@@ -3020,7 +3020,7 @@ struct OnboardingTests {
                             status: "completed",
                             message: "WeChat login finished. ChillClaw saved this channel and will finish gateway activation after onboarding.",
                             logs: [
-                                "Starting the personal WeChat installer.",
+                                "Starting the personal WeChat login.",
                                 "QR confirmation complete."
                             ],
                             launchUrl: nil,
@@ -3101,7 +3101,7 @@ struct OnboardingTests {
                 entryId: stagedEntry.id,
                 status: "running",
                 message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat installer."],
+                logs: ["Starting the personal WeChat login."],
                 launchUrl: nil,
                 inputPrompt: nil
             ),
@@ -3245,7 +3245,7 @@ struct OnboardingTests {
                                 entryId: initialEntry.id,
                                 status: "running",
                                 message: "WeChat login is waiting for QR confirmation.",
-                                logs: ["Starting the personal WeChat installer."],
+                                logs: ["Starting the personal WeChat login."],
                                 launchUrl: nil,
                                 inputPrompt: nil
                             ),
@@ -3257,7 +3257,7 @@ struct OnboardingTests {
                             entryId: initialEntry.id,
                             status: "running",
                             message: "WeChat login is waiting for QR confirmation.",
-                            logs: ["Starting the personal WeChat installer."],
+                            logs: ["Starting the personal WeChat login."],
                             launchUrl: nil,
                             inputPrompt: nil
                         ),
@@ -3341,7 +3341,7 @@ struct OnboardingTests {
             entryId: awaitingEntry.id,
             status: "running",
             message: "WeChat login is waiting for QR confirmation.",
-            logs: ["Starting the personal WeChat installer."],
+            logs: ["Starting the personal WeChat login."],
             launchUrl: nil,
             inputPrompt: nil
         )
@@ -3352,7 +3352,7 @@ struct OnboardingTests {
             status: "running",
             message: "WeChat login is waiting for QR confirmation.",
             logs: [
-                "Starting the personal WeChat installer.",
+                "Starting the personal WeChat login.",
                 "QR code ready. Scan with WeChat to continue."
             ],
             launchUrl: nil,

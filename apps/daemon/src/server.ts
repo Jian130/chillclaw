@@ -4,7 +4,7 @@ import { extname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import type { EngineReadCacheResource } from "./engine/adapter.js";
-import { errorToLogDetails, writeErrorLog, writeInfoLog } from "./services/logger.js";
+import { errorToLogDetails, formatConsoleLine, writeErrorLog, writeInfoLog } from "./services/logger.js";
 import { getStaticDir } from "./runtime-paths.js";
 import { findRouteDefinition } from "./routes/index.js";
 import { createServerContext } from "./routes/server-context.js";
@@ -17,6 +17,10 @@ export {
 
 const LONG_RUNNING_REQUEST_TIMEOUT_MS = 0;
 const RUNTIME_UPDATE_CHECK_INTERVAL_MS = Number(process.env.CHILLCLAW_RUNTIME_UPDATE_CHECK_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
+
+function nowMs(): number {
+  return Date.now();
+}
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.writeHead(statusCode, {
@@ -93,7 +97,11 @@ export function shouldPublishSnapshotForRoute(method: string, pathname: string):
 }
 
 export function startServer(port = 4545) {
+  const startupStartedAt = nowMs();
   let server: ReturnType<typeof createServer>;
+  console.log(formatConsoleLine("ChillClaw daemon loading process started.", {
+    scope: "server.startup.start"
+  }));
   const context = createServerContext(() => {
     server.close();
   });
@@ -263,6 +271,22 @@ export function startServer(port = 4545) {
     }
   });
 
+  server.on("listening", () => {
+    const durationMs = nowMs() - startupStartedAt;
+    const address = server.address();
+    const listenPort = typeof address === "object" && address ? address.port : port;
+    const listenUrl = `http://127.0.0.1:${listenPort}`;
+    const message = `DONE. ChillClaw daemon loading process done in ${Math.round(durationMs)}ms. Listening: ${listenUrl}`;
+    console.log(formatConsoleLine(message, {
+      scope: "server.startup.done"
+    }));
+    void writeInfoLog("ChillClaw daemon loading process done.", {
+      durationMs: Math.round(durationMs),
+      listenUrl
+    }, {
+      scope: "server.startup.done"
+    });
+  });
   server.listen(port, "127.0.0.1");
   void writeInfoLog("ChillClaw daemon server started.", {
     port,

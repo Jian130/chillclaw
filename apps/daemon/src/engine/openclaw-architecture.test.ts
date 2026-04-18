@@ -34,6 +34,7 @@ test("OpenClawAdapter no longer owns the extracted provider catalog and channel 
   assert.doesNotMatch(source, /private async submitWechatSessionInput\(/);
   assert.doesNotMatch(source, /private async ensureWechatInstallerCommand\(/);
   assert.doesNotMatch(source, /private async resolveWechatInstallerCommand\(/);
+  assert.doesNotMatch(source, /private async ensurePersonalWechatRuntimePlugin\(/);
   assert.doesNotMatch(source, /async finalizeOnboardingSetup\(/);
   assert.doesNotMatch(source, /async startGatewayAfterChannels\(/);
 });
@@ -123,7 +124,7 @@ test("ModelsConfigCoordinator owns the extracted model overview and auth session
   assert.match(source, /private async cleanupRemovedSavedModelEntry\(/);
 });
 
-test("ChannelsConfigCoordinator owns the extracted channel session and installer workflow", async () => {
+test("ChannelsConfigCoordinator owns the extracted channel session and login workflow", async () => {
   const source = await readFile(resolve(sourceDir, "openclaw-channels-config-coordinator.ts"), "utf8");
 
   assert.match(source, /async getChannelState\(/);
@@ -131,8 +132,7 @@ test("ChannelsConfigCoordinator owns the extracted channel session and installer
   assert.match(source, /async getActiveChannelSession\(/);
   assert.match(source, /async getChannelSession\(/);
   assert.match(source, /private async submitWechatSessionInput\(/);
-  assert.match(source, /private async ensureWechatInstallerCommand\(/);
-  assert.match(source, /private async resolveWechatInstallerCommand\(/);
+  assert.match(source, /private async ensurePersonalWechatRuntimePlugin\(/);
 });
 
 test("AgentsConfigCoordinator owns the extracted AI member auth, profile sync, and binding workflow", async () => {

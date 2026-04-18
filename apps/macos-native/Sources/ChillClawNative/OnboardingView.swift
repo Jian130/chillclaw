@@ -1396,7 +1396,7 @@ struct NativeOnboardingView: View {
                         case .wechatGuided?:
                             nativeChannelCredentialCard(
                                 title: "Personal WeChat login",
-                                body: "ChillClaw will run the QR-first WeChat installer and keep the session log here while you scan and confirm the login. Once the installer saves the channel, ChillClaw will continue to the AI employee step and finish gateway activation after onboarding."
+                                body: "ChillClaw will run the QR-first WeChat login and keep the session log here while you scan and confirm the login. Once the channel is saved, ChillClaw will continue to the AI employee step and finish gateway activation after onboarding."
                             ) {
                                 if let activeSession = viewModel.activeChannelSession {
                                     let sessionLogText = viewModel.displayedChannelSessionQRCodePayload == nil
@@ -1439,7 +1439,7 @@ struct NativeOnboardingView: View {
 
                                         if let prompt = activeSession.inputPrompt {
                                             nativeChannelField(title: prompt) {
-                                                TextField("Paste the follow-up input from the installer", text: Binding(
+                                                TextField("Paste the follow-up input from the login session", text: Binding(
                                                     get: { viewModel.channelSessionInput },
                                                     set: { viewModel.channelSessionInput = $0 }
                                                 ))

@@ -4437,7 +4437,7 @@ private struct ChannelEntrySheet: View {
             SurfaceCard(padding: 20, spacing: 14) {
                 Text("Personal WeChat login")
                     .font(.headline)
-                Text("ChillClaw starts the QR-first WeChat installer for you. Use Start Login to begin, then keep this sheet open while the session log streams the pairing steps.")
+                Text("ChillClaw starts the QR-first WeChat login for you. Use Start Login to begin, then keep this sheet open while the session log streams the pairing steps.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

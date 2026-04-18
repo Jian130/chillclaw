@@ -49,9 +49,9 @@ const managedFeatureDefinitions = [
     prerequisites: [
       {
         type: "external-installer",
-        installerId: "@tencent-weixin/openclaw-weixin-cli",
-        displayName: "Personal WeChat installer",
-        command: ["npm", "install", "@tencent-weixin/openclaw-weixin-cli@latest"]
+        installerId: "openclaw-weixin",
+        displayName: "Personal WeChat login",
+        command: ["openclaw", "channels", "login", "--channel", "openclaw-weixin"]
       }
     ]
   }

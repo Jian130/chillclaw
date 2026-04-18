@@ -30,6 +30,20 @@ function channelSession(channelId: SupportedChannelId, overrides: Partial<Channe
   };
 }
 
+function compareVersionStrings(left: string, right: string): number {
+  const leftParts = left.split(".").map((part) => Number(part));
+  const rightParts = right.split(".").map((part) => Number(part));
+
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (delta !== 0) {
+      return delta;
+    }
+  }
+
+  return 0;
+}
+
 function createCoordinator(overrides: Partial<ConstructorParameters<typeof ChannelsConfigCoordinator>[0]> = {}) {
   return new ChannelsConfigCoordinator({
     readChannelSnapshot: async () => ({ list: undefined, status: undefined }),
@@ -54,16 +68,9 @@ function createCoordinator(overrides: Partial<ConstructorParameters<typeof Chann
     spawnInteractiveCommand: () => {
       throw new Error("not used in this test");
     },
-    managedWechatInstallerDir: process.cwd(),
-    wechatInstallerPackageSpec: "@tencent-weixin/openclaw-weixin-cli@latest",
-    resolveNpmInvocation: async () => undefined,
-    ensureSystemDependencies: async () => undefined,
-    runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
-    readWechatInstallerBinName: async () => "weixin-installer",
-    fileExists: async () => true,
     writeErrorLog: async () => undefined,
     errorToLogDetails: (error) => error,
-    compareVersionStrings: () => 1,
+    compareVersionStrings,
     personalWechatRuntimeChannelKey: "openclaw-weixin",
     feishuBundledSince: "2026.3.7",
     ...overrides
@@ -167,11 +174,6 @@ test("personal WeChat marks the session completed after QR output and saved runt
 
   const coordinator = createCoordinator({
     wechatRuntimeDetectionIntervalMs: 10,
-    resolveNpmInvocation: async () => ({
-      command: "npm",
-      argsPrefix: [],
-      display: "npm"
-    }),
     readChannelSnapshot: async () => {
       snapshotReads += 1;
       return { list: undefined, status: undefined };
@@ -232,11 +234,6 @@ test("personal WeChat login does not complete from a stale saved runtime after Q
 
   const coordinator = createCoordinator({
     wechatRuntimeDetectionIntervalMs: 10,
-    resolveNpmInvocation: async () => ({
-      command: "npm",
-      argsPrefix: [],
-      display: "npm"
-    }),
     buildLiveChannelEntries: () => [
       {
         id: "wechat:default",
@@ -271,4 +268,44 @@ test("personal WeChat login does not complete from a stale saved runtime after Q
   assert.equal(session.status, "running");
   assert.equal(session.logs.some((line) => /Saved from a previous login/i.test(line)), false);
   child.emit("close", 1);
+});
+
+test("personal WeChat prepares the latest plugin directly before login", async () => {
+  const calls: string[] = [];
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+
+  const coordinator = createCoordinator({
+    readInstalledOpenClawVersion: async () => "2026.3.11",
+    resolveOpenClawCommand: async () => "openclaw",
+    runOpenClaw: async (args) => {
+      calls.push(`openclaw ${args.join(" ")}`);
+      return { code: 0, stdout: "", stderr: "" };
+    },
+    spawnInteractiveCommand: (command, args) => {
+      calls.push(`spawn ${command} ${args.join(" ")}`);
+      setTimeout(() => {
+        child.stdout.emit("data", Buffer.from("QR code generated. Scan with WeChat.\n"));
+        child.emit("close", 0);
+      }, 0);
+      return child as unknown as ReturnType<typeof import("node:child_process").spawn>;
+    }
+  });
+
+  const result = await coordinator.saveChannelEntry({
+    channelId: "wechat",
+    action: "save",
+    values: {}
+  });
+
+  assert.ok(result.session);
+  assert.deepEqual(calls, [
+    "openclaw plugins install @tencent-weixin/openclaw-weixin@latest",
+    "openclaw plugins enable openclaw-weixin",
+    "spawn openclaw channels login --channel openclaw-weixin"
+  ]);
 });

@@ -2643,6 +2643,42 @@ test("restartGateway issues one gateway restart and reports success when the gat
   });
 });
 
+test("restartGateway replaces unusable placeholder gateway tokens before verifying reachability", async () => {
+  await withFakeOpenClaw(async ({ adapter, configPath }) => {
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          gateway: {
+            mode: "local",
+            bind: "loopback",
+            auth: {
+              mode: "token",
+              token: "__OPENCLAW_GATEWAY_TOKEN__"
+            }
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    const result = await adapter.gateway.restartGateway();
+    const normalized = JSON.parse(await readFile(configPath, "utf8")) as {
+      gateway?: {
+        auth?: {
+          token?: string;
+        };
+      };
+    };
+
+    assert.equal(result.status, "completed");
+    assert.ok(normalized.gateway?.auth?.token);
+    assert.notEqual(normalized.gateway?.auth?.token, "__OPENCLAW_GATEWAY_TOKEN__");
+    assert.doesNotMatch(normalized.gateway?.auth?.token ?? "", /^__OPENCLAW_/);
+  });
+});
+
 test("finalizeOnboardingSetup is a no-op when the gateway is already installed and reachable", async () => {
   await withFakeOpenClaw(async ({ adapter, logPath, dataDir }) => {
     const statePath = resolve(dataDir, "openclaw-state.json");

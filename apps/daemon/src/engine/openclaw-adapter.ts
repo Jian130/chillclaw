@@ -547,7 +547,7 @@ const gatewaySocketBridge = new OpenClawGatewaySocketAdapter({
     const config = (await readOpenClawConfigFile(defaultOpenClawConfigPath())) ?? {};
     const token = config.gateway?.auth?.token?.trim();
 
-    if (!token || token.startsWith("__OPENCLAW_")) {
+    if (!isUsableGatewayAuthToken(token)) {
       return undefined;
     }
 
@@ -1815,6 +1815,11 @@ function summarizeGateway(gatewayStatus?: OpenClawGatewayStatusJson): string | u
   return undefined;
 }
 
+function isUsableGatewayAuthToken(token: string | undefined): token is string {
+  const trimmed = token?.trim();
+  return Boolean(trimmed && !trimmed.startsWith("__OPENCLAW_"));
+}
+
 function isGatewayReachable(snapshot: EngineReadSnapshot): boolean {
   return Boolean(snapshot.gatewayJson?.rpc?.ok || snapshot.statusJson?.gateway?.reachable);
 }
@@ -2097,7 +2102,7 @@ function normalizeOpenClawGatewayConfigForChillClaw(config: OpenClawConfigFileJs
   const nextAuth: NonNullable<OpenClawConfigFileJson["gateway"]>["auth"] = {
     ...currentAuth,
     mode: CHILLCLAW_OPENCLAW_GATEWAY_AUTH_MODE,
-    token: trimmedToken || generateChillClawGatewayToken()
+    token: isUsableGatewayAuthToken(trimmedToken) ? trimmedToken : generateChillClawGatewayToken()
   };
 
   if ("password" in nextAuth) {
@@ -4292,6 +4297,11 @@ export class OpenClawAdapter implements EngineAdapter {
   }
 
   private async restartGatewayAndRequireHealthy(reason: string): Promise<EngineStatus> {
+    const command = await resolveOpenClawCommand();
+    if (command) {
+      await this.ensureChillClawGatewayConfigBaseline(command);
+    }
+
     const restart = await runOpenClaw(["gateway", "restart"], { allowFailure: true });
 
     if (this.gatewayServiceNotLoaded(restart.stdout, restart.stderr)) {

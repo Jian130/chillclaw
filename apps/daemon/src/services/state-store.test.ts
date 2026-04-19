@@ -21,6 +21,20 @@ class SlowFilesystemStateAdapter extends FilesystemStateAdapter {
   }
 }
 
+class CountingFilesystemStateAdapter extends FilesystemStateAdapter {
+  private state: AppState = { tasks: [] };
+  writeCount = 0;
+
+  override async readJson<T>(_path: string, fallback: T): Promise<T> {
+    return structuredClone((this.state ?? fallback) as T);
+  }
+
+  override async writeJson(_path: string, value: unknown): Promise<void> {
+    this.writeCount += 1;
+    this.state = structuredClone(value as AppState);
+  }
+}
+
 test("state store normalizes legacy wechat channel onboarding state to wechat-work", async () => {
   const filePath = resolve(process.cwd(), `apps/daemon/.data/state-store-wechat-migration-${randomUUID()}.json`);
   const store = new StateStore(filePath);
@@ -269,6 +283,55 @@ test("state store serializes concurrent updates so later writes do not drop earl
   const persisted = await store.read();
   assert.equal(persisted.introCompletedAt, "2026-04-05T00:00:00.000Z");
   assert.equal(persisted.setupCompletedAt, "2026-04-05T00:01:00.000Z");
+});
+
+test("state store skips filesystem writes when an update leaves state unchanged", async () => {
+  const filePath = resolve(process.cwd(), `apps/daemon/.data/state-store-noop-update-${randomUUID()}.json`);
+  const filesystem = new CountingFilesystemStateAdapter();
+  const store = new StateStore(filePath, filesystem);
+
+  await store.write({
+    tasks: [],
+    onboarding: {
+      draft: {
+        currentStep: "channel",
+        channel: {
+          channelId: "wechat",
+          entryId: "wechat:default"
+        },
+        channelProgress: {
+          status: "capturing",
+          sessionId: "wechat:default:login",
+          message: "Waiting for QR confirmation."
+        },
+        activeChannelSessionId: "wechat:default:login"
+      }
+    }
+  });
+  filesystem.writeCount = 0;
+
+  const next = await store.update((current) => ({
+    ...current,
+    onboarding: {
+      draft: {
+        ...(current.onboarding?.draft ?? { currentStep: "welcome" }),
+        currentStep: "channel",
+        channel: {
+          channelId: "wechat",
+          entryId: "wechat:default"
+        },
+        channelProgress: {
+          status: "capturing",
+          sessionId: "wechat:default:login",
+          message: "Waiting for QR confirmation."
+        },
+        activeChannelSessionId: "wechat:default:login"
+      }
+    }
+  }));
+
+  assert.equal(next.onboarding?.draft.activeChannelSessionId, "wechat:default:login");
+  assert.equal(filesystem.writeCount, 0);
 });
 
 test("state store normalizes oversized persisted local runtime text on read", async () => {

@@ -204,6 +204,10 @@ function normalizeAppState(state: AppState): AppState {
   };
 }
 
+function appStatesEqual(left: AppState, right: AppState): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function summarizeStateForLog(state: AppState): string {
   const draft = state.onboarding?.draft;
   const draftParts = draft
@@ -462,6 +466,9 @@ export class StateStore {
     return this.enqueueMutation(async () => {
       const current = await this.readPersisted();
       const next = normalizeAppState(updater(current));
+      if (appStatesEqual(current, next)) {
+        return current;
+      }
       console.log(formatConsoleLine(`write ${this.filePath} ${summarizeStateForLog(next)}`, { scope: "stateStore" }));
       await this.filesystem.writeJson(this.filePath, next);
       return next;

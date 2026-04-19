@@ -90,8 +90,15 @@ describe("OnboardingPage CTA styling", () => {
   it("hydrates step 4 from onboarding state instead of fetching overview and model config together", () => {
     const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
 
-    expect(source).toContain("const nextState = await fetchOnboardingState({ fresh: true });");
-    expect(source).not.toContain("Promise.all([readFreshOverview(), readFreshModelConfig()])");
+    expect(source).toContain("const nextState = await fetchOnboardingState();");
+    expect(source).not.toContain("Promise.all([readOverviewSnapshot(), readModelConfigSnapshot()])");
+  });
+
+  it("does not force fresh daemon reads during onboarding", () => {
+    const source = readFileSync(fileURLToPath(new URL("./OnboardingPage.tsx", import.meta.url)), "utf8");
+
+    expect(source).not.toContain("fresh: true");
+    expect(source).not.toContain("fresh=1");
   });
 
   it("does not retry onboarding state forever when the provider catalog is empty", () => {

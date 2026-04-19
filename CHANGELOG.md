@@ -4,6 +4,10 @@
 
 ## 0.2.5 - 2026-04-19
 
+### 2026-04-19 21:00 CST
+
+- changed React and native macOS onboarding reads to use daemon snapshot endpoints instead of forcing `fresh=1`, reducing repeated cache invalidation during setup while preserving targeted refresh behavior through updated API client and onboarding tests
+
 ### 2026-04-19 19:35 CST
 
 - fixed the macOS installer size regression by installing the pinned OpenClaw package from its npm tarball into the package-local runtime tree instead of creating wrapper-level duplicate dependencies

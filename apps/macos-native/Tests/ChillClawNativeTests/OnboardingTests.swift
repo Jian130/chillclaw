@@ -1128,7 +1128,7 @@ struct OnboardingTests {
 
         let urls = await recorder.recordedURLs()
         #expect(!urls.contains("http://127.0.0.1:4545/api/models/local-runtime/install"))
-        #expect(!urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
+        #expect(!urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/navigate"))
         #expect(viewModel.currentStep == .channel)
         #expect(viewModel.pageError == nil)
@@ -1850,7 +1850,7 @@ struct OnboardingTests {
     }
 
     @Test
-    func nativeOnboardingLocalRuntimePrefersFreshOnboardingStateOnModelStep() {
+    func nativeOnboardingLocalRuntimePrefersOnboardingStateSnapshotOnModelStep() {
         let staleModelConfigRuntime = makeLocalRuntime(recommendation: "cloud", status: "unchecked", supported: false)
         let onboardingRuntime = makeLocalRuntime(recommendation: "local", status: "idle", supported: true)
 
@@ -2123,7 +2123,7 @@ struct OnboardingTests {
         viewModel.selectProvider(viewModel.modelPickerProviders[1])
 
         let recordedPaths = await recorder.recordedURLs()
-        #expect(recordedPaths == ["http://127.0.0.1:4545/api/onboarding/state?fresh=1"])
+        #expect(recordedPaths == ["http://127.0.0.1:4545/api/onboarding/state"])
         #expect(viewModel.providerId == "modelstudio")
         #expect(viewModel.methodId == "modelstudio-standard-api-key-cn")
         #expect(viewModel.modelKey == "modelstudio/qwen3.5-plus")
@@ -2150,8 +2150,8 @@ struct OnboardingTests {
         #expect(viewModelSource.contains("installLocalModelRuntime()"))
         #expect(viewModelSource.contains("repairLocalModelRuntime()"))
         #expect(viewModelSource.contains("nativeOnboardingModelCloudHandoffDelayNanoseconds"))
-        #expect(viewModelSource.contains("readFreshOverview()"))
-        #expect(viewModelSource.contains("readFreshModelConfig()"))
+        #expect(viewModelSource.contains("readOverviewSnapshot()"))
+        #expect(viewModelSource.contains("readModelConfigSnapshot()"))
     }
 
     @Test
@@ -2166,6 +2166,21 @@ struct OnboardingTests {
         )
 
         #expect(!viewModelSource.contains("if currentStep == .model && modelPickerProviders.isEmpty"))
+    }
+
+    @Test
+    func nativeOnboardingSourceDoesNotForceFreshDaemonReads() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let viewModelSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/OnboardingViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(!viewModelSource.contains("fresh: true"))
+        #expect(!viewModelSource.contains("fetchOnboardingState(fresh:"))
     }
 
     @Test
@@ -2632,7 +2647,7 @@ struct OnboardingTests {
 
         let urls = await recorder.recordedURLs()
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/entries"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)"))
         #expect(viewModel.currentStep == .employee)
         #expect(viewModel.currentDraft.channel?.entryId == completedEntry.id)
         #expect(viewModel.currentDraft.activeChannelSessionId == nil)
@@ -2771,8 +2786,8 @@ struct OnboardingTests {
 
         let urls = await recorder.recordedURLs()
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/entries"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)"))
         #expect(viewModel.currentStep == .employee)
         #expect(viewModel.currentDraft.channel?.entryId == completedEntry.id)
         #expect(viewModel.pageError == nil)
@@ -2940,7 +2955,7 @@ struct OnboardingTests {
 
         let urls = await recorder.recordedURLs()
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/channel/entries"))
-        #expect(urls.filter { $0 == "http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)?fresh=1" }.count >= 2)
+        #expect(urls.filter { $0 == "http://127.0.0.1:4545/api/onboarding/channel/session/\(sessionId)" }.count >= 2)
         #expect(viewModel.currentStep == .employee)
         #expect(viewModel.currentDraft.channel?.entryId == completedEntry.id)
         #expect(viewModel.currentDraft.activeChannelSessionId == nil)
@@ -3320,7 +3335,7 @@ struct OnboardingTests {
     }
 
     @Test
-    func savingPersonalWechatChannelUsesFreshSessionPayloadWhenConfigSessionLags() async throws {
+    func savingPersonalWechatChannelUsesLatestSessionPayloadWhenConfigSessionLags() async throws {
         let recorder = NativeRequestRecorder()
         let sessionId = "wechat:default:login"
         let awaitingEntry = ConfiguredChannelEntry(
@@ -3708,7 +3723,7 @@ struct OnboardingTests {
         await viewModel.bootstrap()
 
         #expect(viewModel.pageError == nil)
-        #expect(await recorder.recordedURLs() == ["http://127.0.0.1:4545/api/onboarding/state?fresh=1"])
+        #expect(await recorder.recordedURLs() == ["http://127.0.0.1:4545/api/onboarding/state"])
     }
 
     @Test
@@ -3786,8 +3801,8 @@ struct OnboardingTests {
         await viewModel.bootstrap()
 
         let urls = await recorder.recordedURLs()
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets"))
         #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.id == "standard")
     }
 
@@ -3848,8 +3863,7 @@ struct OnboardingTests {
                 let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .install))
                 return (jsonResponse(url: url), body)
             case ("GET", "/api/deploy/targets"):
-                let query = url.query ?? ""
-                let body = try JSONEncoder.chillClaw.encode(query.contains("fresh=1") ? refreshedTargets : initialTargets)
+                let body = try JSONEncoder.chillClaw.encode(refreshedTargets)
                 return (jsonResponse(url: url), body)
             case ("POST", "/api/onboarding/runtime/update"):
                 var nextState = makeOnboardingStateResponse(step: .model)
@@ -3924,7 +3938,7 @@ struct OnboardingTests {
 
         let urls = await recorder.recordedURLs()
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/update"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.updateAvailable == false)
         #expect(viewModel.currentStep == .model)
@@ -4028,9 +4042,9 @@ struct OnboardingTests {
 
         let urls = await recorder.recordedURLs()
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/install"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/overview?fresh=1"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/overview"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/deploy/targets"))
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(appState.deploymentTargets?.targets.first?.installed == true)
         #expect(viewModel.onboardingState?.draft.install?.installed == true)
@@ -4284,7 +4298,7 @@ struct OnboardingTests {
 
         #expect(
             await recorder.recordedURLs() == [
-                "http://127.0.0.1:4545/api/onboarding/state?fresh=1"
+                "http://127.0.0.1:4545/api/onboarding/state"
             ]
         )
     }
@@ -4352,8 +4366,8 @@ struct OnboardingTests {
         await waitForRecordedURLCount(recorder, expectedCount: 2)
 
         let urls = await recorder.recordedURLs()
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/channels/config?fresh=1"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/channels/config"))
         #expect(urls.filter { $0.contains("/api/channels/config") }.count == 1)
         #expect(urls.filter { $0.contains("/api/models/config") }.isEmpty)
         #expect(urls.filter { $0.contains("/api/ai-team/overview") }.isEmpty)
@@ -4439,9 +4453,9 @@ struct OnboardingTests {
         #expect(viewModel.pageError == nil)
         #expect(viewModel.modelSession == nil)
         #expect(viewModel.onboardingState?.draft.activeModelAuthSessionId == nil)
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state?fresh=1"))
-        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/model/auth/session/auth-session-1?fresh=1"))
-        #expect(urls.filter { $0 == "http://127.0.0.1:4545/api/onboarding/state?fresh=1" }.count == 2)
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/model/auth/session/auth-session-1"))
+        #expect(urls.filter { $0 == "http://127.0.0.1:4545/api/onboarding/state" }.count == 2)
     }
 
     @Test

@@ -61,8 +61,8 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         return true
     }
 
-    public func fetchOnboardingState(fresh: Bool = true) async throws -> OnboardingStateResponse {
-        try await get(fresh ? "/api/onboarding/state?fresh=1" : "/api/onboarding/state")
+    public func fetchOnboardingState() async throws -> OnboardingStateResponse {
+        try await get("/api/onboarding/state")
     }
 
     public func navigateOnboarding(to step: OnboardingStep) async throws -> OnboardingStateResponse {
@@ -113,25 +113,25 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/app/update/check", body: EmptyBody())
     }
 
-    public func fetchOverview() async throws -> ProductOverview { try await get("/api/overview?fresh=1") }
+    public func fetchOverview(fresh: Bool = true) async throws -> ProductOverview { try await get(fresh ? "/api/overview?fresh=1" : "/api/overview") }
     public func fetchDownloads() async throws -> DownloadManagerOverview { try await get("/api/downloads") }
     public func fetchDownloadJob(jobId: String) async throws -> DownloadJob { try await get("/api/downloads/\(Self.pathComponent(jobId))") }
     public func fetchRuntimeResources() async throws -> RuntimeManagerOverview { try await get("/api/runtime/resources") }
-    public func fetchDeploymentTargets() async throws -> DeploymentTargetsResponse { try await get("/api/deploy/targets?fresh=1") }
-    public func fetchModelConfig() async throws -> ModelConfigOverview { try await get("/api/models/config?fresh=1") }
-    public func fetchChannelConfig() async throws -> ChannelConfigOverview { try await get("/api/channels/config?fresh=1") }
+    public func fetchDeploymentTargets(fresh: Bool = true) async throws -> DeploymentTargetsResponse { try await get(fresh ? "/api/deploy/targets?fresh=1" : "/api/deploy/targets") }
+    public func fetchModelConfig(fresh: Bool = true) async throws -> ModelConfigOverview { try await get(fresh ? "/api/models/config?fresh=1" : "/api/models/config") }
+    public func fetchChannelConfig(fresh: Bool = true) async throws -> ChannelConfigOverview { try await get(fresh ? "/api/channels/config?fresh=1" : "/api/channels/config") }
     public func fetchPluginConfig() async throws -> PluginConfigOverview { try await get("/api/plugins/config?fresh=1") }
     public func fetchSkillsConfig() async throws -> SkillCatalogOverview { try await get("/api/skills/config?fresh=1") }
-    public func fetchAITeamOverview() async throws -> AITeamOverview { try await get("/api/ai-team/overview?fresh=1") }
+    public func fetchAITeamOverview(fresh: Bool = true) async throws -> AITeamOverview { try await get(fresh ? "/api/ai-team/overview?fresh=1" : "/api/ai-team/overview") }
     public func fetchChatOverview() async throws -> ChatOverview { try await get("/api/chat/overview?fresh=1") }
     public func fetchChatThread(threadId: String) async throws -> ChatThreadDetail { try await get("/api/chat/threads/\(threadId)?fresh=1") }
     public func fetchInstalledSkillDetail(skillId: String) async throws -> InstalledSkillDetail { try await get("/api/skills/\(skillId)?fresh=1") }
     public func fetchOnboardingModelAuthSession(sessionId: String) async throws -> ModelAuthSessionResponse {
-        try await get("/api/onboarding/model/auth/session/\(sessionId)?fresh=1")
+        try await get("/api/onboarding/model/auth/session/\(sessionId)")
     }
 
     public func fetchOnboardingChannelSession(sessionId: String) async throws -> ChannelSessionResponse {
-        try await get("/api/onboarding/channel/session/\(sessionId)?fresh=1")
+        try await get("/api/onboarding/channel/session/\(sessionId)")
     }
 
     public func fetchModelAuthSession(sessionId: String) async throws -> ModelAuthSessionResponse { try await get("/api/models/auth/session/\(sessionId)?fresh=1") }

@@ -34,7 +34,7 @@ struct OnboardingClientTests {
     }
 
     @Test
-    func fetchOnboardingStateUsesFreshEndpoint() async throws {
+    func fetchOnboardingStateUsesSnapshotEndpointByDefault() async throws {
         let recorder = RequestRecorder()
         let session = await recorder.session(
             statusCode: 200,
@@ -303,7 +303,7 @@ struct OnboardingClientTests {
         #expect(response.localRuntime?.status == "idle")
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "GET")
-        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/state?fresh=1")
+        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/state")
     }
 
     @Test
@@ -338,6 +338,103 @@ struct OnboardingClientTests {
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "GET")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/downloads")
+    }
+
+    @Test
+    func fetchOnboardingModelAuthSessionUsesSnapshotEndpoint() async throws {
+        let recorder = RequestRecorder()
+        let session = await recorder.session(
+            statusCode: 200,
+            body: """
+            {
+              "session": {
+                "id": "model-session-1",
+                "providerId": "modelstudio",
+                "methodId": "modelstudio-standard-api-key-cn",
+                "status": "running",
+                "message": "Waiting for sign-in.",
+                "logs": [],
+                "entryId": null,
+                "launchUrl": null,
+                "inputPrompt": null
+              },
+              "modelConfig": {
+                "baseOnboardingCompleted": false,
+                "providers": [],
+                "models": [],
+                "defaultModel": null,
+                "configuredModelKeys": [],
+                "savedEntries": [],
+                "defaultEntryId": null,
+                "fallbackEntryIds": [],
+                "localRuntime": null
+              },
+              "onboarding": null
+            }
+            """
+        )
+        let client = ChillClawAPIClient(
+            session: session,
+            configurationProvider: {
+                .init(
+                    daemonURL: URL(string: "http://127.0.0.1:4545")!,
+                    fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+                )
+            }
+        )
+
+        let response = try await client.fetchOnboardingModelAuthSession(sessionId: "model-session-1")
+
+        #expect(response.session.id == "model-session-1")
+        let request = try #require(await recorder.lastRequest())
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/model/auth/session/model-session-1")
+    }
+
+    @Test
+    func fetchOnboardingChannelSessionUsesSnapshotEndpoint() async throws {
+        let recorder = RequestRecorder()
+        let session = await recorder.session(
+            statusCode: 200,
+            body: """
+            {
+              "session": {
+                "id": "channel-session-1",
+                "channelId": "wechat",
+                "entryId": null,
+                "status": "running",
+                "message": "Waiting for QR scan.",
+                "logs": [],
+                "launchUrl": null,
+                "inputPrompt": null
+              },
+              "channelConfig": {
+                "baseOnboardingCompleted": false,
+                "capabilities": [],
+                "entries": [],
+                "activeSession": null,
+                "gatewaySummary": "No channels are configured."
+              },
+              "onboarding": null
+            }
+            """
+        )
+        let client = ChillClawAPIClient(
+            session: session,
+            configurationProvider: {
+                .init(
+                    daemonURL: URL(string: "http://127.0.0.1:4545")!,
+                    fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+                )
+            }
+        )
+
+        let response = try await client.fetchOnboardingChannelSession(sessionId: "channel-session-1")
+
+        #expect(response.session.id == "channel-session-1")
+        let request = try #require(await recorder.lastRequest())
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/channel/session/channel-session-1")
     }
 
     @Test

@@ -477,34 +477,34 @@ export default function OnboardingPage() {
     selectedEmployeePreset?.avatarPresetId || currentDraft.employee?.avatarPresetId
   );
 
-  async function readFreshOverview() {
-    const next = await refresh({ fresh: true });
+  async function readOverviewSnapshot() {
+    const next = await refresh();
     if (!next) {
       throw new Error("ChillClaw could not refresh the latest overview.");
     }
     return next;
   }
 
-  async function readFreshModelConfig() {
-    const next = await fetchModelConfig({ fresh: true });
+  async function readModelConfigSnapshot() {
+    const next = await fetchModelConfig();
     setModelConfig(next);
     return next;
   }
 
-  async function readFreshChannelConfig() {
-    const next = await fetchChannelConfig({ fresh: true });
+  async function readChannelConfigSnapshot() {
+    const next = await fetchChannelConfig();
     setChannelConfig(next);
     return next;
   }
 
-  async function readFreshAITeamOverview() {
-    const next = await fetchAITeamOverview({ fresh: true });
+  async function readAITeamOverviewSnapshot() {
+    const next = await fetchAITeamOverview();
     setTeamOverview(next);
     return next;
   }
 
   async function refreshOnboardingState() {
-    const next = await fetchOnboardingState({ fresh: true });
+    const next = await fetchOnboardingState();
     setOnboardingState(next);
     return next;
   }
@@ -534,11 +534,11 @@ export default function OnboardingPage() {
     }
 
     if (operationSlot === "localRuntime") {
-      void readFreshModelConfig().catch(() => undefined);
+      void readModelConfigSnapshot().catch(() => undefined);
     }
 
     if (operationSlot === "channel") {
-      void readFreshChannelConfig().catch(() => undefined);
+      void readChannelConfigSnapshot().catch(() => undefined);
     }
 
     return true;
@@ -609,7 +609,7 @@ export default function OnboardingPage() {
       setPageLoading(true);
       setPageError(undefined);
       try {
-        const [nextState] = await Promise.all([fetchOnboardingState({ fresh: true }), refresh({ fresh: true })]);
+        const [nextState] = await Promise.all([fetchOnboardingState(), refresh()]);
         if (cancelled) {
           return;
         }
@@ -645,15 +645,15 @@ export default function OnboardingPage() {
     }
 
     if (Boolean(currentDraft.activeModelAuthSessionId) || Boolean(currentDraft.model?.entryId)) {
-      void readFreshModelConfig().catch(() => undefined);
+      void readModelConfigSnapshot().catch(() => undefined);
     }
 
     if (shouldRefreshOnboardingChannelConfig(currentStep, currentDraft.channel, currentDraft.activeChannelSessionId)) {
-      void readFreshChannelConfig().catch(() => undefined);
+      void readChannelConfigSnapshot().catch(() => undefined);
     }
 
     if (isCurrentOrLaterStep(currentStep, "employee") || Boolean(currentDraft.employee)) {
-      void readFreshAITeamOverview().catch(() => undefined);
+      void readAITeamOverviewSnapshot().catch(() => undefined);
     }
   }, [
     currentDraft.activeChannelSessionId,
@@ -749,19 +749,19 @@ export default function OnboardingPage() {
         try {
           switch (resource) {
             case "overview":
-              await readFreshOverview();
+              await readOverviewSnapshot();
               break;
             case "onboarding":
               await refreshOnboardingState();
               break;
             case "model":
-              await readFreshModelConfig();
+              await readModelConfigSnapshot();
               break;
             case "channel":
-              await readFreshChannelConfig();
+              await readChannelConfigSnapshot();
               break;
             case "team":
-              await readFreshAITeamOverview();
+              await readAITeamOverviewSnapshot();
               break;
           }
         } catch {
@@ -814,7 +814,7 @@ export default function OnboardingPage() {
 
     void (async () => {
       try {
-        const nextState = await fetchOnboardingState({ fresh: true });
+        const nextState = await fetchOnboardingState();
         if (cancelled) {
           return;
         }
@@ -1009,7 +1009,7 @@ export default function OnboardingPage() {
         }
       } catch (sessionError) {
         try {
-          const nextChannelConfig = await readFreshChannelConfig();
+          const nextChannelConfig = await readChannelConfigSnapshot();
           if (cancelled) {
             return;
           }

@@ -607,7 +607,7 @@ final class NativeOnboardingViewModel {
         if refreshAll {
             await appState.refreshAll()
         } else if (destination == .team || destination == .chat), appState.aiTeamOverview == nil {
-            _ = try? await readFreshAITeamOverview()
+            _ = try? await readAITeamOverviewSnapshot()
         }
         if destination == .chat {
             appState.refreshSelectedMemberForChat()
@@ -656,10 +656,6 @@ final class NativeOnboardingViewModel {
         clearCompletionWarmupState()
 
         do {
-            if appState.overview == nil {
-                await appState.refreshAll()
-            }
-
             let state = try await appState.client.fetchOnboardingState()
             applyOnboardingState(state)
 
@@ -668,19 +664,19 @@ final class NativeOnboardingViewModel {
                 overview: appState.overview,
                 install: state.draft.install
             ) {
-                _ = try await readFreshDeploymentTargets()
+                _ = try await readDeploymentTargetsSnapshot()
             }
 
             if !(state.draft.activeModelAuthSessionId ?? "").isEmpty || state.draft.model?.entryId != nil {
-                _ = try await readFreshModelConfig()
+                _ = try await readModelConfigSnapshot()
             }
 
             if onboardingIsCurrentOrLater(state.draft.currentStep, target: .channel) || state.draft.channel != nil {
-                _ = try await readFreshChannelConfig()
+                _ = try await readChannelConfigSnapshot()
             }
 
             if onboardingIsCurrentOrLater(state.draft.currentStep, target: .employee) || state.draft.employee != nil {
-                _ = try await readFreshAITeamOverview()
+                _ = try await readAITeamOverviewSnapshot()
             }
 
             if let sessionId = state.draft.activeModelAuthSessionId, !sessionId.isEmpty {
@@ -702,7 +698,7 @@ final class NativeOnboardingViewModel {
             }
 
             if currentStep == .channel && curatedChannels.isEmpty {
-                applyOnboardingState(try await appState.client.fetchOnboardingState(fresh: true))
+                applyOnboardingState(try await appState.client.fetchOnboardingState())
             }
 
             if currentStep == .channel {
@@ -769,7 +765,7 @@ final class NativeOnboardingViewModel {
             if let onboarding = result.onboarding {
                 applyOnboardingState(onboarding)
             }
-            _ = try await readFreshDeploymentTargets()
+            _ = try await readDeploymentTargetsSnapshot()
 
             guard result.status == "completed" else {
                 throw NativeClientError.runtime(result.message)
@@ -814,8 +810,8 @@ final class NativeOnboardingViewModel {
                     applyState: { [self] state in
                         applyOnboardingState(state)
                     },
-                    readFresh: { [self] in
-                        try await appState.client.fetchOnboardingState(fresh: true)
+                    readSnapshot: { [self] in
+                        try await appState.client.fetchOnboardingState()
                     },
                     isSettled: { state, _ in
                         state.draft.model?.entryId != nil ||
@@ -876,7 +872,7 @@ final class NativeOnboardingViewModel {
         do {
             let result = try await appState.client.installOnboardingRuntime()
             appState.applyOverviewSnapshot(result.overview)
-            _ = try await readFreshDeploymentTargets()
+            _ = try await readDeploymentTargetsSnapshot()
             if let onboarding = result.onboarding {
                 applyOnboardingState(onboarding)
             }
@@ -996,7 +992,7 @@ final class NativeOnboardingViewModel {
             channelSessionTask = nil
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                _ = try? await self.readFreshChannelConfig()
+                _ = try? await self.readChannelConfigSnapshot()
             }
         } catch {
             if await recoverOnboardingChannelSaveAfterTimeout(
@@ -1265,7 +1261,7 @@ final class NativeOnboardingViewModel {
         }
 
         channelSessionInput = ""
-        let next = try await appState.client.fetchOnboardingState(fresh: true)
+        let next = try await appState.client.fetchOnboardingState()
         applyOnboardingState(next)
         return next.draft.currentStep == .employee
     }
@@ -1350,7 +1346,7 @@ final class NativeOnboardingViewModel {
                         self.pageError = nil
                     } else {
                         do {
-                            _ = try await self.readFreshChannelConfig()
+                            _ = try await self.readChannelConfigSnapshot()
                             if try await self.maybeAdvanceCompletedChannelSetupIfNeeded(
                                 channelId: channelId,
                                 preferredEntryId: preferredEntryId
@@ -1624,7 +1620,7 @@ final class NativeOnboardingViewModel {
         }
 
         channelMessage = message
-        if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+        if let next = try? await appState.client.fetchOnboardingState() {
             applyOnboardingState(next)
         }
         return true
@@ -1640,45 +1636,45 @@ final class NativeOnboardingViewModel {
 
         clearModelAuthSessionState()
         pageError = nil
-        _ = try? await readFreshModelConfig()
-        if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+        _ = try? await readModelConfigSnapshot()
+        if let next = try? await appState.client.fetchOnboardingState() {
             applyOnboardingState(next)
         }
         return true
     }
 
-    private func readFreshOverview() async throws -> ProductOverview {
-        let overview = try await appState.client.fetchOverview()
+    private func readOverviewSnapshot() async throws -> ProductOverview {
+        let overview = try await appState.client.fetchOverview(fresh: false)
         appState.applyOverviewSnapshot(overview)
         return overview
     }
 
-    private func readFreshDeploymentTargets() async throws -> DeploymentTargetsResponse {
-        let deploymentTargets = try await appState.client.fetchDeploymentTargets()
+    private func readDeploymentTargetsSnapshot() async throws -> DeploymentTargetsResponse {
+        let deploymentTargets = try await appState.client.fetchDeploymentTargets(fresh: false)
         appState.deploymentTargets = deploymentTargets
         return deploymentTargets
     }
 
-    private func readFreshModelConfig() async throws -> ModelConfigOverview {
-        let modelConfig = try await appState.client.fetchModelConfig()
+    private func readModelConfigSnapshot() async throws -> ModelConfigOverview {
+        let modelConfig = try await appState.client.fetchModelConfig(fresh: false)
         appState.modelConfig = modelConfig
         return modelConfig
     }
 
     private func refreshOnboardingState() async throws -> OnboardingStateResponse {
-        let state = try await appState.client.fetchOnboardingState(fresh: true)
+        let state = try await appState.client.fetchOnboardingState()
         applyOnboardingState(state)
         return state
     }
 
-    private func readFreshChannelConfig() async throws -> ChannelConfigOverview {
-        let channelConfig = try await appState.client.fetchChannelConfig()
+    private func readChannelConfigSnapshot() async throws -> ChannelConfigOverview {
+        let channelConfig = try await appState.client.fetchChannelConfig(fresh: false)
         appState.channelConfig = channelConfig
         return channelConfig
     }
 
-    private func readFreshAITeamOverview() async throws -> AITeamOverview {
-        let overview = try await appState.client.fetchAITeamOverview()
+    private func readAITeamOverviewSnapshot() async throws -> AITeamOverview {
+        let overview = try await appState.client.fetchAITeamOverview(fresh: false)
         appState.aiTeamOverview = overview
         return overview
     }
@@ -1732,7 +1728,7 @@ final class NativeOnboardingViewModel {
 
                 do {
                     let minimumStep = self.currentStep
-                    let nextState = try await self.appState.client.fetchOnboardingState(fresh: true)
+                    let nextState = try await self.appState.client.fetchOnboardingState()
                     guard onboardingIsCurrentOrLater(nextState.draft.currentStep, target: minimumStep) else {
                         return
                     }
@@ -1881,7 +1877,7 @@ final class NativeOnboardingViewModel {
         }
 
         for attempt in 0..<6 {
-            if let modelConfig = try? await readFreshModelConfig(),
+            if let modelConfig = try? await readModelConfigSnapshot(),
                let refreshedLocalRuntime = modelConfig.localRuntime,
                localRuntimeStatusShowsActiveOrCompletedSetup(refreshedLocalRuntime.status)
             {
@@ -1893,7 +1889,7 @@ final class NativeOnboardingViewModel {
                 return true
             }
 
-            if let overview = try? await readFreshOverview(),
+            if let overview = try? await readOverviewSnapshot(),
                let refreshedLocalRuntime = overview.localRuntime,
                localRuntimeStatusShowsActiveOrCompletedSetup(refreshedLocalRuntime.status)
             {
@@ -1925,22 +1921,22 @@ final class NativeOnboardingViewModel {
                 return true
             }
 
-            if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+            if let next = try? await appState.client.fetchOnboardingState() {
                 applyOnboardingState(next)
                 if next.draft.currentStep != .install, next.draft.install?.installed == true || next.summary.install?.installed == true {
                     pageError = nil
-                    _ = try? await readFreshOverview()
-                    _ = try? await readFreshDeploymentTargets()
+                    _ = try? await readOverviewSnapshot()
+                    _ = try? await readDeploymentTargetsSnapshot()
                     return true
                 }
             }
 
-            if let overview = try? await readFreshOverview(), overview.engine.installed,
+            if let overview = try? await readOverviewSnapshot(), overview.engine.installed,
                let staged = try? await appState.client.reuseOnboardingRuntime()
             {
                 applyOnboardingState(staged)
                 pageError = nil
-                _ = try? await readFreshDeploymentTargets()
+                _ = try? await readDeploymentTargetsSnapshot()
                 return true
             }
 
@@ -1965,7 +1961,7 @@ final class NativeOnboardingViewModel {
             var resolvedChannelId = channelId
             var resolvedEntryId = preferredEntryId
 
-            if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+            if let next = try? await appState.client.fetchOnboardingState() {
                 applyOnboardingState(next)
 
                 resolvedChannelId = next.draft.channel?.channelId ?? resolvedChannelId
@@ -1990,7 +1986,7 @@ final class NativeOnboardingViewModel {
                 }
             }
 
-            if let channelConfig = try? await readFreshChannelConfig(),
+            if let channelConfig = try? await readChannelConfigSnapshot(),
                let activeSession = channelConfig.activeSession,
                activeSession.channelId == resolvedChannelId
             {
@@ -2035,7 +2031,7 @@ final class NativeOnboardingViewModel {
         }
 
         for attempt in 0..<12 {
-            if let overview = try? await readFreshOverview(), overview.firstRun.setupCompleted {
+            if let overview = try? await readOverviewSnapshot(), overview.firstRun.setupCompleted {
                 pageError = nil
                 let recovered = CompleteOnboardingResponse(
                     status: "completed",
@@ -2054,7 +2050,7 @@ final class NativeOnboardingViewModel {
                 return true
             }
 
-            if let next = try? await appState.client.fetchOnboardingState(fresh: true) {
+            if let next = try? await appState.client.fetchOnboardingState() {
                 applyOnboardingState(next)
             }
 
@@ -2185,20 +2181,20 @@ final class NativeOnboardingViewModel {
         do {
             switch resource {
             case .installContext:
-                async let overview = readFreshOverview()
-                async let deploymentTargets = readFreshDeploymentTargets()
+                async let overview = readOverviewSnapshot()
+                async let deploymentTargets = readDeploymentTargetsSnapshot()
                 _ = try await overview
                 _ = try await deploymentTargets
             case .overview:
-                _ = try await readFreshOverview()
+                _ = try await readOverviewSnapshot()
             case .model:
-                _ = try await readFreshModelConfig()
+                _ = try await readModelConfigSnapshot()
             case .channel:
-                _ = try await readFreshChannelConfig()
+                _ = try await readChannelConfigSnapshot()
             case .team:
-                _ = try await readFreshAITeamOverview()
+                _ = try await readAITeamOverviewSnapshot()
             case .onboarding:
-                onboardingState = try await appState.client.fetchOnboardingState(fresh: true)
+                onboardingState = try await appState.client.fetchOnboardingState()
                 if let onboardingState {
                     applyDraft(onboardingState.draft)
                 }
@@ -2295,7 +2291,7 @@ final class NativeOnboardingViewModel {
         mutate: () async throws -> Mutation,
         getProvisionalState: ((Mutation) -> State)? = nil,
         applyState: @escaping (State) -> Void,
-        readFresh: @escaping () async throws -> State,
+        readSnapshot: @escaping () async throws -> State,
         isSettled: @escaping (State, Mutation) -> Bool,
         attempts: Int = 8,
         delayNanoseconds: UInt64 = 700_000_000
@@ -2309,7 +2305,7 @@ final class NativeOnboardingViewModel {
         var latestState: State?
 
         for attempt in 0..<retries {
-            let state = try await readFresh()
+            let state = try await readSnapshot()
             latestState = state
             applyState(state)
 

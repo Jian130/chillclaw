@@ -374,8 +374,8 @@ export function markFirstRunIntroComplete(): Promise<ProductOverview> {
   });
 }
 
-export function fetchOnboardingState(options?: { fresh?: boolean }): Promise<OnboardingStateResponse> {
-  return readJson<OnboardingStateResponse>("/onboarding/state", options);
+export function fetchOnboardingState(): Promise<OnboardingStateResponse> {
+  return readJson<OnboardingStateResponse>("/onboarding/state");
 }
 
 export function navigateOnboardingStep(request: OnboardingStepNavigationRequest): Promise<OnboardingStateResponse> {

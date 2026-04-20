@@ -252,16 +252,16 @@ struct OnboardingClientTests {
                 ],
                 "employeePresets": [
                   {
-                    "id": "research-analyst",
-                    "label": "Research Analyst",
-                    "description": "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
-                    "theme": "analyst",
-                    "avatarPresetId": "onboarding-analyst",
+                    "id": "general-assistant",
+                    "label": "General Assistant",
+                    "description": "Start with a dependable default setup for everyday requests, summaries, and follow-ups.",
+                    "theme": "operator",
+                    "avatarPresetId": "onboarding-builder",
                     "starterSkillLabels": ["Research Brief", "Status Writer"],
-                    "toolLabels": ["Company handbook", "Delivery playbook"],
+                    "toolLabels": ["Web", "Files", "Memory"],
                     "presetSkillIds": ["research-brief", "status-writer"],
                     "knowledgePackIds": ["company-handbook", "delivery-playbook"],
-                    "workStyles": [],
+                    "workStyles": ["Methodical", "Structured"],
                     "defaultMemoryEnabled": true
                   }
                 ]
@@ -298,7 +298,7 @@ struct OnboardingClientTests {
         #expect(response.config.modelProviders.map(\.id) == ["minimax", "modelstudio", "openai"])
         #expect(response.config.channels.map(\.id) == [.wechatWork, .wechat, .feishu, .telegram])
         #expect(response.config.channels.map(\.setupKind) == [.wechatWorkGuided, .wechatGuided, .feishuGuided, .telegramGuided])
-        #expect(response.config.employeePresets.first?.avatarPresetId == "onboarding-analyst")
+        #expect(response.config.employeePresets.first?.avatarPresetId == "onboarding-builder")
         #expect(response.localRuntime?.recommendation == "local")
         #expect(response.localRuntime?.status == "idle")
         let request = try #require(await recorder.lastRequest())
@@ -718,16 +718,16 @@ struct OnboardingClientTests {
                 ],
                 "employeePresets": [
                   {
-                    "id": "research-analyst",
-                    "label": "Research Analyst",
-                    "description": "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
-                    "theme": "analyst",
-                    "avatarPresetId": "onboarding-analyst",
+                    "id": "general-assistant",
+                    "label": "General Assistant",
+                    "description": "Start with a dependable default setup for everyday requests, summaries, and follow-ups.",
+                    "theme": "operator",
+                    "avatarPresetId": "onboarding-builder",
                     "starterSkillLabels": ["Research Brief", "Status Writer"],
-                    "toolLabels": ["Company handbook", "Delivery playbook"],
+                    "toolLabels": ["Web", "Files", "Memory"],
                     "presetSkillIds": ["research-brief", "status-writer"],
                     "knowledgePackIds": ["company-handbook", "delivery-playbook"],
-                    "workStyles": [],
+                    "workStyles": ["Methodical", "Structured"],
                     "defaultMemoryEnabled": true
                   }
                 ]

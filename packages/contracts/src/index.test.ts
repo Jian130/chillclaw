@@ -1070,7 +1070,7 @@ test("onboarding response serializes optional capability readiness", () => {
       checkedAt: "2026-04-20T00:00:00.000Z",
       employeePresets: [
         {
-          presetId: "research-analyst",
+          presetId: "general-assistant",
           status: "blocked",
           summary: "1 requirement needs attention.",
           requirements: [
@@ -1107,16 +1107,16 @@ test("onboarding employee preset presentation carries daemon-owned avatar preset
       channels: [],
       employeePresets: [
         {
-          id: "research-analyst",
-          label: "Research Analyst",
-          description: "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
-          theme: "analyst",
-          avatarPresetId: "onboarding-analyst",
+          id: "general-assistant",
+          label: "General Assistant",
+          description: "Start with a dependable default setup for everyday requests, summaries, and follow-ups.",
+          theme: "operator",
+          avatarPresetId: "onboarding-builder",
           starterSkillLabels: ["Research Brief", "Status Writer"],
-          toolLabels: ["Company handbook", "Delivery playbook"],
+          toolLabels: ["Web", "Files", "Memory"],
           presetSkillIds: ["research-brief", "status-writer"],
           knowledgePackIds: ["company-handbook", "delivery-playbook"],
-          workStyles: ["Analytical", "Concise"],
+          workStyles: ["Methodical", "Structured"],
           defaultMemoryEnabled: true
         }
       ]
@@ -1125,7 +1125,7 @@ test("onboarding employee preset presentation carries daemon-owned avatar preset
   };
 
   const parsed = JSON.parse(JSON.stringify(response)) as OnboardingStateResponse;
-  assert.equal(parsed.config.employeePresets[0]?.avatarPresetId, "onboarding-analyst");
+  assert.equal(parsed.config.employeePresets[0]?.avatarPresetId, "onboarding-builder");
 });
 
 test("mutation sync metadata serializes on action responses", () => {

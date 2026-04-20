@@ -668,17 +668,17 @@ test("capability, tool, and onboarding overview routes expose one read-only read
     assert.equal(tools.engine, "openclaw");
     assert.ok(tools.allow.includes("group:web"));
 
-    const researchPreset = onboarding.capabilityReadiness?.employeePresets.find((entry) => entry.presetId === "research-analyst");
-    const researchCapability = capabilities.entries.find((entry) => entry.kind === "preset" && entry.id === "research-analyst");
+    const defaultPreset = onboarding.capabilityReadiness?.employeePresets.find((entry) => entry.presetId === "general-assistant");
+    const defaultCapability = capabilities.entries.find((entry) => entry.kind === "preset" && entry.id === "general-assistant");
     const webTool = tools.entries.find((entry) => entry.id === "group:web");
     const webCapability = capabilities.entries.find((entry) => entry.kind === "tool-group" && entry.id === "group:web");
 
-    assert.ok(researchPreset);
-    assert.ok(researchCapability);
+    assert.ok(defaultPreset);
+    assert.ok(defaultCapability);
     assert.ok(webTool);
     assert.ok(webCapability);
-    assert.equal(researchPreset.status, researchCapability.status);
-    assert.deepEqual(researchPreset.requirements, researchCapability.requirements);
+    assert.equal(defaultPreset.status, defaultCapability.status);
+    assert.deepEqual(defaultPreset.requirements, defaultCapability.requirements);
     assert.equal(webCapability.status, webTool.status);
 
     const onboardingAfterReadOnlyRoutesResponse = await fetch(`http://127.0.0.1:${port}/api/onboarding/state`);

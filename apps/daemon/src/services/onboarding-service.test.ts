@@ -2795,15 +2795,15 @@ test("onboarding state exposes the curated model providers for step 3", async ()
   );
   assert.deepEqual(
     state.config?.employeePresets?.map((preset) => preset.id),
-    ["research-analyst", "support-captain", "delivery-operator"]
+    ["general-assistant"]
   );
   assert.deepEqual(
     state.config?.employeePresets?.map((preset) => preset.avatarPresetId),
-    ["onboarding-analyst", "onboarding-guide", "onboarding-builder"]
+    ["onboarding-builder"]
   );
   assert.deepEqual(state.config?.employeePresets?.[0]?.presetSkillIds, ["research-brief", "status-writer"]);
-  assert.deepEqual(state.config?.employeePresets?.[1]?.knowledgePackIds, ["customer-voice"]);
-  assert.equal(state.config?.employeePresets?.[2]?.theme, "operator");
+  assert.deepEqual(state.config?.employeePresets?.[0]?.knowledgePackIds, ["company-handbook", "delivery-playbook"]);
+  assert.equal(state.config?.employeePresets?.[0]?.theme, "operator");
 });
 
 test("onboarding state includes read-only capability readiness for employee presets", async () => {
@@ -2812,10 +2812,10 @@ test("onboarding state includes read-only capability readiness for employee pres
     checkedAt: "2026-04-20T00:00:00.000Z",
     entries: [
       {
-        id: "research-analyst",
+        id: "general-assistant",
         kind: "preset",
         engine: "openclaw",
-        label: "Research Analyst",
+        label: "General Assistant",
         status: "blocked",
         summary: "1 requirement needs attention.",
         requirements: [
@@ -2827,18 +2827,9 @@ test("onboarding state includes read-only capability readiness for employee pres
             summary: "Skill is blocked by the current OpenClaw allowlist."
           }
         ]
-      },
-      {
-        id: "support-captain",
-        kind: "preset",
-        engine: "openclaw",
-        label: "Support Captain",
-        status: "ready",
-        summary: "All requirements are ready.",
-        requirements: []
       }
     ],
-    summary: "1 ready · 1 needs attention"
+    summary: "0 ready · 1 needs attention"
   };
   const capabilityService = {
     getOverview: async () => capabilityOverview
@@ -2850,15 +2841,13 @@ test("onboarding state includes read-only capability readiness for employee pres
 
   assert.equal(state.capabilityReadiness?.engine, "openclaw");
   assert.equal(state.capabilityReadiness?.checkedAt, "2026-04-20T00:00:00.000Z");
-  assert.equal(byPreset.get("research-analyst")?.status, "blocked");
-  assert.equal(byPreset.get("research-analyst")?.requirements[0]?.id, "status-writer");
-  assert.equal(byPreset.get("support-captain")?.status, "ready");
-  assert.equal(byPreset.get("delivery-operator")?.status, "missing");
-  assert.equal(state.capabilityReadiness?.summary, "1 ready · 2 need attention.");
+  assert.equal(byPreset.get("general-assistant")?.status, "blocked");
+  assert.equal(byPreset.get("general-assistant")?.requirements[0]?.id, "status-writer");
+  assert.equal(state.capabilityReadiness?.summary, "0 ready · 1 needs attention.");
 
   const updated = await service.updateState({ currentStep: "employee" }, { responseSummaryMode: "draft" });
-  assert.equal(updated.capabilityReadiness?.employeePresets.length, 3);
-  assert.equal(updated.capabilityReadiness?.summary, "1 ready · 2 need attention.");
+  assert.equal(updated.capabilityReadiness?.employeePresets.length, 1);
+  assert.equal(updated.capabilityReadiness?.summary, "0 ready · 1 needs attention.");
 });
 
 test("onboarding service fails fast when onboarding config references a missing employee preset id", async () => {
@@ -2867,7 +2856,7 @@ test("onboarding service fails fast when onboarding config references a missing 
     () =>
       onboardingConfigModule.buildOnboardingUiConfig({
         ...onboardingConfigModule.onboardingUiConfigSelection,
-        employeePresetIds: ["research-analyst", "missing-preset-id"]
+        employeePresetIds: ["general-assistant", "missing-preset-id"]
       }),
     /Unknown onboarding employee preset: missing-preset-id/i
   );

@@ -607,52 +607,26 @@ describe("onboarding helpers", () => {
         channels: [],
         employeePresets: [
           {
-            id: "research-analyst",
-            label: "Research Analyst",
-            description: "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
-            theme: "analyst",
-            avatarPresetId: "onboarding-analyst",
-            starterSkillLabels: ["Research Brief", "Status Writer"],
-            toolLabels: ["Company handbook", "Delivery playbook"],
-            presetSkillIds: ["research-brief", "status-writer"],
-            knowledgePackIds: ["company-handbook", "delivery-playbook"],
-            workStyles: ["Analytical", "Concise"],
-            defaultMemoryEnabled: true
-          },
-          {
-            id: "support-captain",
-            label: "Support Captain",
-            description: "Handle customer-facing requests with calm tone, clear follow-ups, and fast status updates.",
-            theme: "support",
-            avatarPresetId: "onboarding-guide",
-            starterSkillLabels: ["Status Writer"],
-            toolLabels: ["Customer voice", "Memory"],
-            presetSkillIds: ["status-writer"],
-            knowledgePackIds: ["customer-voice"],
-            workStyles: ["Calm", "Supportive"],
-            defaultMemoryEnabled: true
-          },
-          {
-            id: "delivery-operator",
-            label: "Delivery Operator",
-            description: "Turn briefs into checklists, track milestones, and keep execution moving without extra setup.",
+            id: "general-assistant",
+            label: "General Assistant",
+            description: "Start with a dependable default setup for everyday requests, summaries, and follow-ups.",
             theme: "operator",
             avatarPresetId: "onboarding-builder",
-            starterSkillLabels: ["Research Brief"],
-            toolLabels: ["Delivery playbook", "Company handbook"],
-            presetSkillIds: ["research-brief"],
-            knowledgePackIds: ["delivery-playbook", "company-handbook"],
-            workStyles: ["Methodical", "Action-oriented"],
+            starterSkillLabels: ["Research Brief", "Status Writer"],
+            toolLabels: ["Web", "Files", "Memory"],
+            presetSkillIds: ["research-brief", "status-writer"],
+            knowledgePackIds: ["company-handbook", "delivery-playbook"],
+            workStyles: ["Methodical", "Structured"],
             defaultMemoryEnabled: true
           }
         ]
       }
     } as never);
 
-    expect(presets.map((preset) => preset.id)).toEqual(["research-analyst", "support-captain", "delivery-operator"]);
+    expect(presets.map((preset) => preset.id)).toEqual(["general-assistant"]);
     expect(presets[0]?.starterSkillLabels).toEqual(["Research Brief", "Status Writer"]);
-    expect(presets[1]?.toolLabels).toEqual(["Customer voice", "Memory"]);
-    expect(presets[2]?.knowledgePackIds).toEqual(["delivery-playbook", "company-handbook"]);
+    expect(presets[0]?.toolLabels).toEqual(["Web", "Files", "Memory"]);
+    expect(presets[0]?.knowledgePackIds).toEqual(["company-handbook", "delivery-playbook"]);
   });
 
   it("uses preset skill ids only for curated onboarding presets", () => {

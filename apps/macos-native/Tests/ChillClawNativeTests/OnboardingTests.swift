@@ -3587,10 +3587,10 @@ struct OnboardingTests {
     func resolvesCuratedEmployeePresetsFromOnboardingState() {
         let presets = resolveOnboardingEmployeePresets(onboardingState: makeOnboardingStateResponse(step: .employee))
 
-        #expect(presets.map(\.id) == ["research-analyst", "support-captain", "delivery-operator"])
+        #expect(presets.map(\.id) == ["general-assistant"])
         #expect(presets[0].starterSkillLabels == ["Research Brief", "Status Writer"])
-        #expect(presets[1].toolLabels == ["Customer voice", "Memory"])
-        #expect(presets[2].knowledgePackIds == ["delivery-playbook", "company-handbook"])
+        #expect(presets[0].toolLabels == ["Web", "Files", "Memory"])
+        #expect(presets[0].knowledgePackIds == ["company-handbook", "delivery-playbook"])
     }
 
     @Test
@@ -3665,7 +3665,7 @@ struct OnboardingTests {
                 checkedAt: "2026-03-27T00:00:00.000Z",
                 employeePresets: [
                     .init(
-                        presetId: "research-analyst",
+                        presetId: "general-assistant",
                         status: "blocked",
                         summary: "Status Writer is blocked by the active runtime policy.",
                         requirements: [
@@ -5234,42 +5234,16 @@ private func makeOnboardingStateResponse(
             ],
             employeePresets: [
                 .init(
-                    id: "research-analyst",
-                    label: "Research Analyst",
-                    description: "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
-                    theme: "analyst",
-                    avatarPresetId: "onboarding-analyst",
-                    starterSkillLabels: ["Research Brief", "Status Writer"],
-                    toolLabels: ["Company handbook", "Delivery playbook"],
-                    presetSkillIds: ["research-brief", "status-writer"],
-                    knowledgePackIds: ["company-handbook", "delivery-playbook"],
-                    workStyles: ["Analytical", "Concise"],
-                    defaultMemoryEnabled: true
-                ),
-                .init(
-                    id: "support-captain",
-                    label: "Support Captain",
-                    description: "Handle customer-facing requests with calm tone, clear follow-ups, and fast status updates.",
-                    theme: "support",
-                    avatarPresetId: "onboarding-guide",
-                    starterSkillLabels: ["Status Writer"],
-                    toolLabels: ["Customer voice", "Memory"],
-                    presetSkillIds: ["status-writer"],
-                    knowledgePackIds: ["customer-voice"],
-                    workStyles: ["Calm", "Supportive"],
-                    defaultMemoryEnabled: true
-                ),
-                .init(
-                    id: "delivery-operator",
-                    label: "Delivery Operator",
-                    description: "Turn briefs into checklists, track milestones, and keep execution moving without extra setup.",
+                    id: "general-assistant",
+                    label: "General Assistant",
+                    description: "Start with a dependable default setup for everyday requests, summaries, and follow-ups.",
                     theme: "operator",
                     avatarPresetId: "onboarding-builder",
-                    starterSkillLabels: ["Research Brief"],
-                    toolLabels: ["Delivery playbook", "Company handbook"],
-                    presetSkillIds: ["research-brief"],
-                    knowledgePackIds: ["delivery-playbook", "company-handbook"],
-                    workStyles: ["Methodical", "Action-oriented"],
+                    starterSkillLabels: ["Research Brief", "Status Writer"],
+                    toolLabels: ["Web", "Files", "Memory"],
+                    presetSkillIds: ["research-brief", "status-writer"],
+                    knowledgePackIds: ["company-handbook", "delivery-playbook"],
+                    workStyles: ["Methodical", "Structured"],
                     defaultMemoryEnabled: true
                 )
             ]

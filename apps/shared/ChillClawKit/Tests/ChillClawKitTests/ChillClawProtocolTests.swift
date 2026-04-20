@@ -589,16 +589,16 @@ struct ChillClawProtocolTests {
             ],
             "employeePresets": [
               {
-                "id": "research-analyst",
-                "label": "Research Analyst",
-                "description": "Research quickly, write crisp summaries, and keep answers grounded in the right context.",
-                "theme": "analyst",
-                "avatarPresetId": "onboarding-analyst",
+                "id": "general-assistant",
+                "label": "General Assistant",
+                "description": "Start with a dependable default setup for everyday requests, summaries, and follow-ups.",
+                "theme": "operator",
+                "avatarPresetId": "onboarding-builder",
                 "starterSkillLabels": ["Research Brief", "Status Writer"],
-                "toolLabels": ["Company handbook", "Delivery playbook"],
+                "toolLabels": ["Web", "Files", "Memory"],
                 "presetSkillIds": ["research-brief", "status-writer"],
                 "knowledgePackIds": ["company-handbook", "delivery-playbook"],
-                "workStyles": [],
+                "workStyles": ["Methodical", "Structured"],
                 "defaultMemoryEnabled": true
               }
             ]
@@ -623,7 +623,7 @@ struct ChillClawProtocolTests {
             "checkedAt": "2026-04-20T00:00:00.000Z",
             "employeePresets": [
               {
-                "presetId": "research-analyst",
+                "presetId": "general-assistant",
                 "status": "blocked",
                 "summary": "1 requirement needs attention.",
                 "requirements": [
@@ -698,7 +698,7 @@ struct ChillClawProtocolTests {
         #expect(response.config.channels.map(\.id) == [.wechatWork, .wechat, .feishu, .telegram])
         #expect(response.config.channels.map(\.setupKind) == [.wechatWorkGuided, .wechatGuided, .feishuGuided, .telegramGuided])
         #expect(response.config.channels[2].platformUrl == "https://open.feishu.cn/app")
-        #expect(response.config.employeePresets.first?.avatarPresetId == "onboarding-analyst")
+        #expect(response.config.employeePresets.first?.avatarPresetId == "onboarding-builder")
         #expect(response.config.employeePresets.first?.presetSkillIds == ["research-brief", "status-writer"])
         #expect(response.draft.install?.disposition == "reused-existing")
         #expect(response.draft.activeModelAuthSessionId == "session-1")

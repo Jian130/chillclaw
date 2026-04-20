@@ -63,7 +63,7 @@ Preferred sizes:
 
 The current implementation follows the same guided setup shape in both web and native clients, then shows a completion summary after finalization. The visible web step order is currently `welcome -> install -> model -> channel -> employee`; the shared daemon contract still includes `permissions`, and the web client normalizes that state into the model step.
 
-Several parts of the target contract are already implemented: curated onboarding model/channel metadata, curated employee preset presentation, and managed preset-skill ownership all come from daemon-owned config so web and native no longer carry separate onboarding catalogs.
+Several parts of the target contract are already implemented: curated onboarding model/channel metadata, the single OpenClaw-default employee preset presentation, and managed preset-skill ownership all come from daemon-owned config so web and native no longer carry separate onboarding catalogs.
 
 For the exact final-step call chain and simplification review, see `docs/reference/onboarding-finalization-flow.md`.
 
@@ -682,7 +682,7 @@ sequenceDiagram
 
 - Keep the `UI -> daemon -> RuntimeManager / EngineAdapter -> OpenClaw` boundary intact for every onboarding step. The Runtime Manager supplies prerequisites; the adapter still owns OpenClaw behavior.
 - Keep curated model and channel metadata daemon-owned so web and native clients render the same choices.
-- Keep curated onboarding employee preset presentation daemon-owned too, including avatar preset ids, starter skill labels, and tool labels.
+- Keep the onboarding employee preset presentation daemon-owned too. Onboarding currently exposes only the OpenClaw-default `general-assistant` preset, including avatar preset id, starter skill labels, and tool labels.
 - Keep staged config distinct from live applied state in both backend contracts and UI copy.
 - Do not start the gateway, run health checks, or trigger extra finalization work during steps 4 and 5.
 - Do not create the first real AI employee before the final step is submitted.

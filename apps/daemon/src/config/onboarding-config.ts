@@ -67,7 +67,7 @@ const onboardingChannels: OnboardingChannelPresentation[] = [
 export const onboardingUiConfigSelection: OnboardingUiConfigSelection = {
   modelProviders: onboardingModelProviders,
   channels: onboardingChannels,
-  employeePresetIds: ["research-analyst", "support-captain", "delivery-operator"]
+  employeePresetIds: ["general-assistant"]
 };
 
 export function resolveOnboardingEmployeePresets(presetIds: string[]): OnboardingEmployeePresetPresentation[] {

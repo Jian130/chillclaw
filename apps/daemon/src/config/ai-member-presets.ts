@@ -50,7 +50,13 @@ const aiMemberPresetCatalog: ManagedAIMemberPresetDefinition[] = [
     presetSkillIds: presetSkillDefinitions.map((definition) => definition.id),
     skillIds: ["research-brief", "status-writer"],
     knowledgePackIds: ["company-handbook", "delivery-playbook"],
-    defaultMemoryEnabled: true
+    defaultMemoryEnabled: true,
+    onboardingPresentation: {
+      theme: "operator",
+      avatarPresetId: "onboarding-builder",
+      starterSkillLabels: ["Research Brief", "Status Writer"],
+      toolLabels: ["Web", "Files", "Memory"]
+    }
   },
   {
     id: "research-analyst",
@@ -64,13 +70,7 @@ const aiMemberPresetCatalog: ManagedAIMemberPresetDefinition[] = [
     presetSkillIds: ["research-brief", "status-writer"],
     skillIds: ["research-brief", "status-writer"],
     knowledgePackIds: ["company-handbook", "delivery-playbook"],
-    defaultMemoryEnabled: true,
-    onboardingPresentation: {
-      theme: "analyst",
-      avatarPresetId: "onboarding-analyst",
-      starterSkillLabels: ["Research Brief", "Status Writer"],
-      toolLabels: ["Company handbook", "Delivery playbook"]
-    }
+    defaultMemoryEnabled: true
   },
   {
     id: "ops-coordinator",
@@ -99,13 +99,7 @@ const aiMemberPresetCatalog: ManagedAIMemberPresetDefinition[] = [
     skillIds: ["status-writer"],
     knowledgePackIds: ["customer-voice"],
     defaultMemoryEnabled: true,
-    memberBuilderVisible: false,
-    onboardingPresentation: {
-      theme: "support",
-      avatarPresetId: "onboarding-guide",
-      starterSkillLabels: ["Status Writer"],
-      toolLabels: ["Customer voice", "Memory"]
-    }
+    memberBuilderVisible: false
   },
   {
     id: "delivery-operator",
@@ -120,13 +114,7 @@ const aiMemberPresetCatalog: ManagedAIMemberPresetDefinition[] = [
     skillIds: ["research-brief"],
     knowledgePackIds: ["delivery-playbook", "company-handbook"],
     defaultMemoryEnabled: true,
-    memberBuilderVisible: false,
-    onboardingPresentation: {
-      theme: "operator",
-      avatarPresetId: "onboarding-builder",
-      starterSkillLabels: ["Research Brief"],
-      toolLabels: ["Delivery playbook", "Company handbook"]
-    }
+    memberBuilderVisible: false
   }
 ];
 

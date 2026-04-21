@@ -840,69 +840,38 @@ struct OnboardingClientTests {
     }
 
     @Test
-    func completeOnboardingPostsDestination() async throws {
+    func completeOnboardingPostsDestinationAsQuickOperationCommand() async throws {
         let recorder = RequestRecorder()
         let session = await recorder.session(
             statusCode: 200,
             body: """
             {
-              "status": "completed",
+              "accepted": true,
               "destination": "chat",
-              "warmupTaskId": "onboarding-warmup-task-1",
-              "summary": {},
-              "overview": {
-                "appName": "ChillClaw",
-                "appVersion": "0.1.2",
-                "platformTarget": "macOS first",
+              "operation": {
+                "operationId": "onboarding:completion",
+                "scope": "onboarding",
+                "action": "onboarding-completion",
+                "status": "running",
+                "phase": "finalizing",
+                "message": "Finishing onboarding.",
+                "startedAt": "2026-04-21T00:00:00.000Z",
+                "updatedAt": "2026-04-21T00:00:00.000Z"
+              },
+              "onboarding": {
                 "firstRun": {
                   "introCompleted": true,
-                  "setupCompleted": true
+                  "setupCompleted": false
                 },
-                "appService": {
-                  "mode": "launchagent",
-                  "installed": true,
-                  "running": true,
-                  "managedAtLogin": true,
-                  "summary": "Running",
-                  "detail": "Loaded"
+                "draft": {
+                  "currentStep": "employee"
                 },
-                "engine": {
-                  "engine": "openclaw",
-                  "installed": true,
-                  "running": true,
-                  "version": "2026.3.13",
-                  "summary": "Ready",
-                  "lastCheckedAt": "2026-03-20T00:00:00.000Z"
-                },
-                "installSpec": {
-                  "engine": "openclaw",
-                  "desiredVersion": "latest",
-                  "installSource": "npm-local",
-                  "prerequisites": ["macOS"]
-                },
-                "capabilities": {
-                  "engine": "openclaw",
-                  "supportsInstall": true,
-                  "supportsUpdate": true,
-                  "supportsRecovery": true,
-                  "supportsStreaming": true,
-                  "runtimeModes": ["gateway"],
-                  "supportedChannels": ["telegram"],
-                  "starterSkillCategories": ["communication"],
-                  "futureLocalModelFamilies": ["qwen"]
-                },
-                "installChecks": [],
-                "channelSetup": {
-                  "baseOnboardingCompleted": true,
+                "config": {
+                  "modelProviders": [],
                   "channels": [],
-                  "gatewayStarted": true,
-                  "gatewaySummary": "Running"
+                  "employeePresets": []
                 },
-                "profiles": [],
-                "templates": [],
-                "healthChecks": [],
-                "recoveryActions": [],
-                "recentTasks": []
+                "summary": {}
               }
             }
             """
@@ -932,12 +901,14 @@ struct OnboardingClientTests {
 
         let response = try await client.completeOnboarding(.init(destination: .chat, employee: employee))
 
+        #expect(response.accepted)
+        #expect(response.operation.operationId == "onboarding:completion")
         #expect(response.destination == .chat)
-        #expect(response.warmupTaskId == "onboarding-warmup-task-1")
+        #expect(response.onboarding.draft.currentStep == .employee)
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/complete")
-        #expect(request.timeoutInterval == 1_200)
+        #expect(request.timeoutInterval == 60)
         let body = try #require(readRequestBody(request))
         let payload = try JSONDecoder.chillClaw.decode(CompleteOnboardingRequest.self, from: body)
         #expect(payload.destination == .chat)
@@ -946,80 +917,40 @@ struct OnboardingClientTests {
     }
 
     @Test
-    func runFirstRunSetupUsesExtendedTimeout() async throws {
+    func runFirstRunSetupReturnsAcceptedOperationQuickly() async throws {
         let recorder = RequestRecorder()
         let session = await recorder.session(
             statusCode: 200,
             body: """
             {
-              "status": "completed",
-              "message": "OpenClaw deployment is complete.",
-              "steps": [],
-              "overview": {
-                "appName": "ChillClaw",
-                "appVersion": "0.1.2",
-                "platformTarget": "macOS first",
+              "accepted": true,
+              "operation": {
+                "operationId": "onboarding:install",
+                "scope": "onboarding",
+                "resourceId": "managed-local",
+                "action": "onboarding-runtime-install",
+                "status": "running",
+                "phase": "installing",
+                "percent": 16,
+                "message": "Installing OpenClaw locally.",
+                "startedAt": "2026-04-21T00:00:00.000Z",
+                "updatedAt": "2026-04-21T00:00:00.000Z",
+                "retryable": true
+              },
+              "onboarding": {
                 "firstRun": {
                   "introCompleted": true,
                   "setupCompleted": false
                 },
-                "appService": {
-                  "mode": "launchagent",
-                  "installed": true,
-                  "running": true,
-                  "managedAtLogin": true,
-                  "summary": "Running",
-                  "detail": "Loaded"
+                "draft": {
+                  "currentStep": "install"
                 },
-                "engine": {
-                  "engine": "openclaw",
-                  "installed": true,
-                  "running": true,
-                  "version": "2026.3.13",
-                  "summary": "Ready",
-                  "lastCheckedAt": "2026-03-20T00:00:00.000Z"
-                },
-                "installSpec": {
-                  "engine": "openclaw",
-                  "desiredVersion": "latest",
-                  "installSource": "npm-local",
-                  "prerequisites": ["macOS"]
-                },
-                "capabilities": {
-                  "engine": "openclaw",
-                  "supportsInstall": true,
-                  "supportsUpdate": true,
-                  "supportsRecovery": true,
-                  "supportsStreaming": true,
-                  "runtimeModes": ["gateway"],
-                  "supportedChannels": ["telegram"],
-                  "starterSkillCategories": ["communication"],
-                  "futureLocalModelFamilies": ["qwen"]
-                },
-                "installChecks": [],
-                "channelSetup": {
-                  "baseOnboardingCompleted": true,
+                "config": {
+                  "modelProviders": [],
                   "channels": [],
-                  "gatewayStarted": false,
-                  "gatewaySummary": "Stopped"
+                  "employeePresets": []
                 },
-                "profiles": [],
-                "templates": [],
-                "healthChecks": [],
-                "recoveryActions": [],
-                "recentTasks": []
-              },
-              "install": {
-                "status": "installed",
-                "message": "Installed OpenClaw.",
-                "engineStatus": {
-                  "engine": "openclaw",
-                  "installed": true,
-                  "running": true,
-                  "version": "2026.3.13",
-                  "summary": "Ready",
-                  "lastCheckedAt": "2026-03-20T00:00:00.000Z"
-                }
+                "summary": {}
               }
             }
             """
@@ -1039,27 +970,85 @@ struct OnboardingClientTests {
         let request = try #require(await recorder.lastRequest())
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/runtime/install")
-        #expect(request.timeoutInterval == 86_400)
+        #expect(request.timeoutInterval != 86_400)
     }
 
     @Test
-    func saveOnboardingModelEntryUsesExtendedTimeout() async throws {
+    func updateOnboardingRuntimeReturnsAcceptedOperationQuickly() async throws {
         let recorder = RequestRecorder()
         let session = await recorder.session(
             statusCode: 200,
             body: """
             {
-              "status": "completed",
-              "message": "MiniMax API key was saved for OpenClaw.",
-              "requiresGatewayApply": true,
-              "modelConfig": {
-                "providers": [],
-                "models": [],
-                "defaultModel": null,
-                "configuredModelKeys": [],
-                "savedEntries": [],
-                "defaultEntryId": null,
-                "fallbackEntryIds": []
+              "accepted": true,
+              "operation": {
+                "operationId": "onboarding:install",
+                "scope": "onboarding",
+                "resourceId": "managed-local",
+                "action": "onboarding-runtime-update",
+                "status": "running",
+                "phase": "updating",
+                "percent": 16,
+                "message": "Updating OpenClaw locally.",
+                "startedAt": "2026-04-21T00:00:00.000Z",
+                "updatedAt": "2026-04-21T00:00:00.000Z",
+                "retryable": true
+              },
+              "onboarding": {
+                "firstRun": {
+                  "introCompleted": true,
+                  "setupCompleted": false
+                },
+                "draft": {
+                  "currentStep": "install"
+                },
+                "config": {
+                  "modelProviders": [],
+                  "channels": [],
+                  "employeePresets": []
+                },
+                "summary": {}
+              }
+            }
+            """
+        )
+        let client = ChillClawAPIClient(
+            session: session,
+            configurationProvider: {
+                .init(
+                    daemonURL: URL(string: "http://127.0.0.1:4545")!,
+                    fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
+                )
+            }
+        )
+
+        let response = try await client.updateOnboardingRuntime()
+
+        let request = try #require(await recorder.lastRequest())
+        #expect(response.accepted)
+        #expect(response.operation.action == "onboarding-runtime-update")
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/runtime/update")
+        #expect(request.timeoutInterval != 86_400)
+    }
+
+    @Test
+    func saveOnboardingModelEntryUsesQuickOperationCommand() async throws {
+        let recorder = RequestRecorder()
+        let session = await recorder.session(
+            statusCode: 200,
+            body: """
+            {
+              "accepted": true,
+              "operation": {
+                "operationId": "onboarding:model",
+                "scope": "onboarding",
+                "action": "onboarding-model-save",
+                "status": "running",
+                "phase": "saving-model",
+                "message": "Saving the first model.",
+                "startedAt": "2026-04-21T00:00:00.000Z",
+                "updatedAt": "2026-04-21T00:00:00.000Z"
               },
               "onboarding": {
                 "firstRun": {
@@ -1095,7 +1084,7 @@ struct OnboardingClientTests {
             }
         )
 
-        _ = try await client.saveOnboardingModelEntry(
+        let response = try await client.saveOnboardingModelEntry(
             .init(
                 label: "MiniMax MiniMax-M2.7",
                 providerId: "minimax",
@@ -1108,29 +1097,31 @@ struct OnboardingClientTests {
         )
 
         let request = try #require(await recorder.lastRequest())
+        #expect(response.accepted)
+        #expect(response.operation.operationId == "onboarding:model")
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/model/entries")
-        #expect(request.timeoutInterval == 1_200)
+        #expect(request.timeoutInterval != 1_200)
     }
 
     @Test
-    func saveOnboardingChannelEntryUsesExtendedTimeout() async throws {
+    func saveOnboardingChannelEntryUsesQuickOperationCommand() async throws {
         let recorder = RequestRecorder()
         let session = await recorder.session(
             statusCode: 200,
             body: """
             {
-              "status": "interactive",
-              "message": "Started WeChat login",
-              "channelConfig": {
-                "baseOnboardingCompleted": true,
-                "capabilities": [],
-                "entries": [],
-                "activeSession": null,
-                "gatewaySummary": "Gateway ready"
+              "accepted": true,
+              "operation": {
+                "operationId": "onboarding:channel",
+                "scope": "onboarding",
+                "action": "onboarding-channel-save",
+                "status": "running",
+                "phase": "saving-channel",
+                "message": "Saving the first channel.",
+                "startedAt": "2026-04-21T00:00:00.000Z",
+                "updatedAt": "2026-04-21T00:00:00.000Z"
               },
-              "session": null,
-              "requiresGatewayApply": false,
               "onboarding": {
                 "firstRun": {
                   "introCompleted": true,
@@ -1164,7 +1155,7 @@ struct OnboardingClientTests {
             }
         )
 
-        _ = try await client.saveOnboardingChannelEntry(
+        let response = try await client.saveOnboardingChannelEntry(
             entryId: nil,
             request: .init(
                 channelId: "wechat",
@@ -1175,9 +1166,11 @@ struct OnboardingClientTests {
         )
 
         let request = try #require(await recorder.lastRequest())
+        #expect(response.accepted)
+        #expect(response.operation.operationId == "onboarding:channel")
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/onboarding/channel/entries")
-        #expect(request.timeoutInterval == 1_200)
+        #expect(request.timeoutInterval != 1_200)
     }
 
     @Test

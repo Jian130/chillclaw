@@ -14,6 +14,7 @@ import type {
   LocalModelRuntimePhase,
   ModelConfigOverview,
   MutationSyncMeta,
+  OperationSummary,
   PluginConfigOverview,
   PresetSkillSyncOverview,
   ProductOverview,
@@ -148,6 +149,14 @@ export class EventPublisher {
     }));
   }
 
+  publishOperationUpdated(operation: OperationSummary): MutationSyncMeta {
+    return this.publishOperation("operation.updated", operation);
+  }
+
+  publishOperationCompleted(operation: OperationSummary): MutationSyncMeta {
+    return this.publishOperation("operation.completed", operation);
+  }
+
   publishDownloadProgress(args: {
     jobId: string;
     downloadedBytes: number;
@@ -257,5 +266,14 @@ export class EventPublisher {
     const snapshot = this.revisions.nextSnapshot(resource, data);
     this.bus.publish(buildEvent(snapshot));
     return this.revisions.toMutationMeta(snapshot, true);
+  }
+
+  private publishOperation(type: "operation.updated" | "operation.completed", operation: OperationSummary): MutationSyncMeta {
+    const snapshot = this.revisions.nextSnapshot(`operation:${operation.operationId}`, operation);
+    this.bus.publish({
+      type,
+      operation: snapshot
+    });
+    return this.revisions.toMutationMeta(snapshot, type === "operation.completed");
   }
 }

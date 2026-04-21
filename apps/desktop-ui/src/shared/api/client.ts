@@ -17,7 +17,8 @@ import type {
   ChannelSessionInputRequest,
   ChannelSessionResponse,
   CompleteOnboardingRequest,
-  CompleteOnboardingResponse,
+  OnboardingChannelOperationResponse,
+  OnboardingCompletionOperationResponse,
   CapabilityOverview,
   DeploymentTargetActionResponse,
   DeploymentTargetsResponse,
@@ -39,10 +40,12 @@ import type {
   ModelConfigOverview,
   MemberBindingsResponse,
   OnboardingEmployeeState,
+  OnboardingModelOperationResponse,
   PairingApprovalRequest,
   PluginActionResponse,
   PluginConfigOverview,
   ProductOverview,
+  OnboardingRuntimeOperationResponse,
   OnboardingStateResponse,
   OnboardingStepNavigationRequest,
   RemoveSkillRequest,
@@ -69,7 +72,6 @@ import type {
   SaveTeamRequest,
   SetDefaultModelRequest,
   SetDefaultModelEntryRequest,
-  SetupRunResponse,
   TelegramSetupRequest,
   WechatSetupRequest
 } from "@chillclaw/contracts";
@@ -395,11 +397,10 @@ export function detectOnboardingRuntime(): Promise<OnboardingStateResponse> {
   });
 }
 
-export function installOnboardingRuntime(forceLocal = true): Promise<SetupRunResponse> {
-  return readJson<SetupRunResponse>("/onboarding/runtime/install", {
+export function installOnboardingRuntime(forceLocal = true): Promise<OnboardingRuntimeOperationResponse> {
+  return readJson<OnboardingRuntimeOperationResponse>("/onboarding/runtime/install", {
     method: "POST",
-    body: JSON.stringify({ autoConfigure: true, forceLocal }),
-    timeoutMs: REQUEST_TIMEOUT_MS.runtimeInstall
+    body: JSON.stringify({ autoConfigure: true, forceLocal })
   });
 }
 
@@ -409,10 +410,9 @@ export function reuseOnboardingRuntime(): Promise<OnboardingStateResponse> {
   });
 }
 
-export function updateOnboardingRuntime(): Promise<SetupRunResponse> {
-  return readJson<SetupRunResponse>("/onboarding/runtime/update", {
-    method: "POST",
-    timeoutMs: REQUEST_TIMEOUT_MS.runtimeInstall
+export function updateOnboardingRuntime(): Promise<OnboardingRuntimeOperationResponse> {
+  return readJson<OnboardingRuntimeOperationResponse>("/onboarding/runtime/update", {
+    method: "POST"
   });
 }
 
@@ -422,11 +422,10 @@ export function confirmOnboardingPermissions(): Promise<OnboardingStateResponse>
   });
 }
 
-export function saveOnboardingModelEntry(request: SaveModelEntryRequest): Promise<ModelConfigActionResponse> {
-  return readJson<ModelConfigActionResponse>("/onboarding/model/entries", {
+export function saveOnboardingModelEntry(request: SaveModelEntryRequest): Promise<OnboardingModelOperationResponse> {
+  return readJson<OnboardingModelOperationResponse>("/onboarding/model/entries", {
     method: "POST",
-    body: JSON.stringify(request),
-    timeoutMs: REQUEST_TIMEOUT_MS.longRunning
+    body: JSON.stringify(request)
   });
 }
 
@@ -450,19 +449,17 @@ export function resetOnboardingModelDraft(): Promise<OnboardingStateResponse> {
   });
 }
 
-export function saveOnboardingChannelEntry(request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
-  return readJson<ChannelConfigActionResponse>("/onboarding/channel/entries", {
+export function saveOnboardingChannelEntry(request: SaveChannelEntryRequest): Promise<OnboardingChannelOperationResponse> {
+  return readJson<OnboardingChannelOperationResponse>("/onboarding/channel/entries", {
     method: "POST",
-    body: JSON.stringify(request),
-    timeoutMs: REQUEST_TIMEOUT_MS.longRunning
+    body: JSON.stringify(request)
   });
 }
 
-export function updateOnboardingChannelEntry(entryId: string, request: SaveChannelEntryRequest): Promise<ChannelConfigActionResponse> {
-  return readJson<ChannelConfigActionResponse>(`/onboarding/channel/entries/${entryId}`, {
+export function updateOnboardingChannelEntry(entryId: string, request: SaveChannelEntryRequest): Promise<OnboardingChannelOperationResponse> {
+  return readJson<OnboardingChannelOperationResponse>(`/onboarding/channel/entries/${entryId}`, {
     method: "PATCH",
-    body: JSON.stringify(request),
-    timeoutMs: REQUEST_TIMEOUT_MS.longRunning
+    body: JSON.stringify(request)
   });
 }
 
@@ -493,11 +490,10 @@ export function saveOnboardingEmployeeDraft(request: OnboardingEmployeeState): P
   });
 }
 
-export function completeOnboarding(request: CompleteOnboardingRequest): Promise<CompleteOnboardingResponse> {
-  return readJson<CompleteOnboardingResponse>("/onboarding/complete", {
+export function completeOnboarding(request: CompleteOnboardingRequest): Promise<OnboardingCompletionOperationResponse> {
+  return readJson<OnboardingCompletionOperationResponse>("/onboarding/complete", {
     method: "POST",
-    body: JSON.stringify(request),
-    timeoutMs: REQUEST_TIMEOUT_MS.longRunning
+    body: JSON.stringify(request)
   });
 }
 
@@ -587,7 +583,7 @@ export function repairLocalModelRuntime(): Promise<LocalModelRuntimeActionRespon
   });
 }
 
-export function runFirstRunSetup(forceLocal = true): Promise<SetupRunResponse> {
+export function runFirstRunSetup(forceLocal = true): Promise<OnboardingRuntimeOperationResponse> {
   return installOnboardingRuntime(forceLocal);
 }
 

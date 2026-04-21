@@ -47,6 +47,8 @@ This file defines the operating rules for agents working in this repository.
 - The native macOS app, native Windows app, and local React web interface are peer clients of the same daemon APIs.
 - React is a client surface, not a second backend.
 - Use HTTP for command and query APIs, and the daemon WebSocket event bus for live updates.
+- Long-running commands must return quickly with daemon-owned operation state. Clients should watch the event bus for progress/completion and use fast GET reads to recover after reconnect, app sleep, or missed events.
+- GET routes should return daemon-owned state quickly. Do not make UI requests wait on unbounded OpenClaw CLI, gateway, install, update, recovery, diagnostics, or network checks.
 - Keep the raw OpenClaw gateway socket daemon-internal.
 - Keep daemon routes and contracts stable when possible. Add only the minimum metadata needed for client parity rather than inventing client-specific backend behavior.
 - Keep provider lists, onboarding steps, status surfaces, settings, and recovery actions aligned across all clients through shared contracts and daemon-owned metadata.

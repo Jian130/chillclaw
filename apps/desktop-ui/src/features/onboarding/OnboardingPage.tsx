@@ -29,6 +29,7 @@ import type {
   ModelAuthSessionResponse,
   ModelConfigOverview,
   OnboardingStateResponse,
+  OperationSummary,
   SaveChannelEntryRequest,
   SaveModelEntryRequest
 } from "@chillclaw/contracts";
@@ -318,6 +319,7 @@ export default function OnboardingPage() {
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [employeeBusy, setEmployeeBusy] = useState(false);
   const [completionBusy, setCompletionBusy] = useState<"" | "team" | "dashboard" | "chat">("");
+  const [pendingCompletionDestination, setPendingCompletionDestination] = useState<"" | "team" | "dashboard" | "chat">("");
   const [completedOnboarding, setCompletedOnboarding] = useState<CompleteOnboardingResponse>();
   const [completionWarmupTaskId, setCompletionWarmupTaskId] = useState("");
   const [completionWarmupStatus, setCompletionWarmupStatus] = useState<"" | "pending" | "running" | "completed" | "failed">("");
@@ -581,6 +583,89 @@ export default function OnboardingPage() {
       (error as { code?: string } | undefined)?.code === "REQUEST_TIMEOUT";
   }
 
+  function applyInstallOperationProgress(operation: OperationSummary) {
+    setInstallProgress((current) => mergeOnboardingInstallProgress(current, {
+      phase: operation.phase === "completed" ? "verifying" : operation.phase === "updating" ? "updating" : "installing",
+      percent: operation.percent,
+      message: operation.message
+    }));
+
+    setOnboardingState((current) => current
+      ? {
+          ...current,
+          operations: {
+            ...(current.operations ?? {}),
+            install: operation
+          }
+        }
+      : current);
+  }
+
+  function applyCompletionOperationProgress(operation: OperationSummary) {
+    setOnboardingState((current) => current
+      ? {
+          ...current,
+          operations: {
+            ...(current.operations ?? {}),
+            completion: operation
+          }
+        }
+      : current);
+    setCompletionWarmupMessage(operation.message);
+  }
+
+  function applyModelOperationProgress(operation: OperationSummary) {
+    setOnboardingState((current) => current
+      ? {
+          ...current,
+          operations: {
+            ...(current.operations ?? {}),
+            model: operation
+          }
+        }
+      : current);
+  }
+
+  function applyChannelOperationProgress(operation: OperationSummary) {
+    setOnboardingState((current) => current
+      ? {
+          ...current,
+          operations: {
+            ...(current.operations ?? {}),
+            channel: operation
+          }
+        }
+      : current);
+    setChannelMessage(operation.message);
+  }
+
+  async function finishAcceptedCompletion(destination: "" | "team" | "dashboard" | "chat", operation?: OperationSummary) {
+    const [nextOverview, nextOnboarding] = await Promise.all([
+      readOverviewSnapshot(),
+      refreshOnboardingState().catch(() => onboardingState)
+    ]);
+    const completed: CompleteOnboardingResponse = {
+      status: "completed",
+      destination: destination || undefined,
+      summary: nextOnboarding?.summary ?? onboardingState?.summary ?? {},
+      overview: nextOverview,
+      warmupTaskId: operation?.result?.id,
+      operation
+    };
+    setCompletedOnboarding(completed);
+    setEmployeeBusy(false);
+    setCompletionBusy("");
+    setPendingCompletionDestination("");
+    if (operation?.result?.id) {
+      setCompletionWarmupTaskId(operation.result.id);
+      setCompletionWarmupStatus("running");
+      setCompletionWarmupMessage("Finishing workspace setup in the background.");
+    }
+    if (destination) {
+      navigate(onboardingDestinationPath(destination, completed.summary.employee?.memberId), { replace: true });
+    }
+  }
+
   async function recoverOnboardingTimeout(
     error: unknown,
     operationSlot: keyof NonNullable<OnboardingStateResponse["operations"]>
@@ -802,6 +887,83 @@ export default function OnboardingPage() {
         setLocalRuntimeMessage(event.message);
         setLocalRuntimeSnapshot(event.localRuntime);
         void refreshOnboardingState().catch(() => undefined);
+      } else if (
+        (event.type === "operation.updated" || event.type === "operation.completed") &&
+        event.operation.data.operationId === "onboarding:install"
+      ) {
+        applyInstallOperationProgress(event.operation.data);
+
+        if (event.operation.data.status === "completed") {
+          setInstallBusy(false);
+          setPageError(undefined);
+          void refreshOnboardingState().catch(() => undefined);
+          void readOverviewSnapshot().catch(() => undefined);
+        } else if (event.operation.data.status === "failed" || event.operation.data.status === "timed-out") {
+          setInstallBusy(false);
+          setPageError(event.operation.data.error?.message ?? event.operation.data.message);
+        }
+      } else if (
+        (event.type === "operation.updated" || event.type === "operation.completed") &&
+        event.operation.data.operationId === "onboarding:completion"
+      ) {
+        applyCompletionOperationProgress(event.operation.data);
+
+        if (event.operation.data.status === "completed") {
+          setPageError(undefined);
+          void finishAcceptedCompletion(pendingCompletionDestination, event.operation.data).catch((error: unknown) => {
+            setEmployeeBusy(false);
+            setCompletionBusy("");
+            setPageError(error instanceof Error ? error.message : "ChillClaw could not complete onboarding.");
+          });
+        } else if (event.operation.data.status === "failed" || event.operation.data.status === "timed-out") {
+          setEmployeeBusy(false);
+          setCompletionBusy("");
+          setPendingCompletionDestination("");
+          setPageError(event.operation.data.error?.message ?? event.operation.data.message);
+        }
+      } else if (
+        (event.type === "operation.updated" || event.type === "operation.completed") &&
+        event.operation.data.operationId === "onboarding:model"
+      ) {
+        applyModelOperationProgress(event.operation.data);
+
+        if (event.operation.data.status === "completed") {
+          setModelBusy("");
+          setPageError(undefined);
+          void Promise.all([
+            refreshOnboardingState(),
+            readModelConfigSnapshot()
+          ]).catch(() => undefined);
+        } else if (event.operation.data.status === "failed" || event.operation.data.status === "timed-out") {
+          setModelBusy("");
+          setPageError(event.operation.data.error?.message ?? event.operation.data.message);
+        }
+      } else if (
+        (event.type === "operation.updated" || event.type === "operation.completed") &&
+        event.operation.data.operationId === "onboarding:channel"
+      ) {
+        applyChannelOperationProgress(event.operation.data);
+
+        if (event.operation.data.status === "completed") {
+          setChannelBusy(false);
+          setPageError(undefined);
+          void Promise.all([
+            refreshOnboardingState(),
+            readChannelConfigSnapshot()
+          ]).then(([nextOnboarding, nextChannelConfig]) => {
+            if (nextOnboarding.draft.channelProgress?.requiresGatewayApply !== undefined) {
+              setChannelRequiresApply(Boolean(nextOnboarding.draft.channelProgress.requiresGatewayApply));
+            }
+            void maybeAdvanceCompletedChannelSetupIfNeeded(
+              nextOnboarding.draft.channel?.channelId,
+              nextOnboarding.draft.channel?.entryId,
+              nextChannelConfig
+            ).catch(() => undefined);
+          }).catch(() => undefined);
+        } else if (event.operation.data.status === "failed" || event.operation.data.status === "timed-out") {
+          setChannelBusy(false);
+          setPageError(event.operation.data.error?.message ?? event.operation.data.message);
+        }
       } else if (event.type === "task.progress" && completionWarmupTaskId && event.taskId === completionWarmupTaskId) {
         setCompletionWarmupStatus(event.status);
         setCompletionWarmupMessage(event.message);
@@ -836,7 +998,7 @@ export default function OnboardingPage() {
         }
       })();
     });
-  }, [completionWarmupTaskId, currentStep, refresh]);
+  }, [completionWarmupTaskId, currentStep, onboardingState, pendingCompletionDestination, refresh]);
 
   useEffect(() => {
     const channels = resolveOnboardingChannelPresentations(onboardingState);
@@ -1246,6 +1408,7 @@ export default function OnboardingPage() {
   async function handleInstall() {
     setPageError(undefined);
     setInstallBusy(true);
+    let operationStillRunning = false;
     setInstallProgress({
       phase: "detecting",
       percent: 16,
@@ -1253,17 +1416,18 @@ export default function OnboardingPage() {
     });
     try {
       const result = await installOnboardingRuntime();
-      setOverview(result.overview);
-      if (result.onboarding) {
-        await applyOnboardingState(result.onboarding);
-      }
+      operationStillRunning = result.operation.status === "pending" || result.operation.status === "running";
+      applyInstallOperationProgress(result.operation);
+      await applyOnboardingState(result.onboarding);
     } catch (actionError) {
       if (await recoverOnboardingTimeout(actionError, "install")) {
         return;
       }
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not finish installation.");
     } finally {
-      setInstallBusy(false);
+      if (!operationStillRunning) {
+        setInstallBusy(false);
+      }
     }
   }
 
@@ -1319,14 +1483,13 @@ export default function OnboardingPage() {
         useAsFallback: false
       };
       const result = await saveOnboardingModelEntry(request);
-      setModelConfig(result.modelConfig);
-      setModelSession(result.authSession);
-      if (result.onboarding) {
-        await applyOnboardingState(result.onboarding);
+      await applyOnboardingState(result.onboarding);
+      applyModelOperationProgress(result.operation);
+      if (result.operation.status === "completed") {
+        setModelBusy("");
       }
     } catch (actionError) {
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not save this model.");
-    } finally {
       setModelBusy("");
     }
   }
@@ -1370,21 +1533,17 @@ export default function OnboardingPage() {
         ? await updateOnboardingChannelEntry(selectedChannelEntry.id, request)
         : await saveOnboardingChannelEntry(request);
 
-      setChannelConfig(applyOnboardingChannelSessionToConfig(result.channelConfig, result.session));
-      setChannelMessage(result.message);
-      setChannelRequiresApply(Boolean(result.requiresGatewayApply));
-      if (result.session) {
-        setChannelSessionInput("");
-      }
-      if (result.onboarding) {
-        await applyOnboardingState(result.onboarding);
+      setChannelSessionInput("");
+      await applyOnboardingState(result.onboarding);
+      applyChannelOperationProgress(result.operation);
+      if (result.operation.status === "completed") {
+        setChannelBusy(false);
       }
     } catch (actionError) {
       if (await recoverOnboardingTimeout(actionError, "channel")) {
         return;
       }
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not save this channel.");
-    } finally {
       setChannelBusy(false);
     }
   }
@@ -1474,18 +1633,19 @@ export default function OnboardingPage() {
         memoryEnabled
       };
       const result = await completeOnboarding({ employee: draft });
-      setOverview(result.overview);
-      setCompletedOnboarding(result);
-      setCompletionWarmupTaskId(result.warmupTaskId ?? "");
-      setCompletionWarmupStatus(result.warmupTaskId ? "running" : "");
-      setCompletionWarmupMessage(result.warmupTaskId ? "Finishing workspace setup in the background." : "");
+      setOnboardingState(result.onboarding);
+      applyCompletionOperationProgress(result.operation);
+      setCompletionWarmupStatus("running");
+      setCompletionWarmupMessage(result.operation.message);
+      if (result.operation.status === "completed") {
+        await finishAcceptedCompletion("", result.operation);
+      }
     } catch (actionError) {
+      setEmployeeBusy(false);
       if (await recoverOnboardingTimeout(actionError, "completion")) {
         return;
       }
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not finish onboarding.");
-    } finally {
-      setEmployeeBusy(false);
     }
   }
 
@@ -1496,18 +1656,22 @@ export default function OnboardingPage() {
     }
 
     setCompletionBusy(destination);
+    setPendingCompletionDestination(destination);
     setPageError(undefined);
     try {
       const result = await completeOnboarding({ destination });
-      setOverview(result.overview);
-      navigate(onboardingDestinationPath(destination, result.summary.employee?.memberId), { replace: true });
+      setOnboardingState(result.onboarding);
+      applyCompletionOperationProgress(result.operation);
+      if (result.operation.status === "completed") {
+        await finishAcceptedCompletion(destination, result.operation);
+      }
     } catch (actionError) {
+      setCompletionBusy("");
+      setPendingCompletionDestination("");
       if (await recoverOnboardingTimeout(actionError, "completion")) {
         return;
       }
       setPageError(actionError instanceof Error ? actionError.message : "ChillClaw could not complete onboarding.");
-    } finally {
-      setCompletionBusy("");
     }
   }
 

@@ -38,6 +38,24 @@ struct AppStateEventTests {
     }
 
     @Test
+    func liveDashboardLoaderUsesCachedDaemonSnapshots() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appStateSource = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ChillClawNative/AppState.swift"),
+            encoding: .utf8
+        )
+
+        #expect(appStateSource.contains("client.fetchOverview(fresh: false)"))
+        #expect(appStateSource.contains("client.fetchModelConfig(fresh: false)"))
+        #expect(appStateSource.contains("client.fetchCapabilityOverview(fresh: false)"))
+        #expect(appStateSource.contains("client.fetchToolOverview(fresh: false)"))
+        #expect(appStateSource.contains("client.fetchAITeamOverview(fresh: false)"))
+    }
+
+    @Test
     func sectionRefreshHelperScopesLiveEvents() {
         #expect(
             shouldRefreshNativeSectionForEvent(

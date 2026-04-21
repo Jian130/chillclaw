@@ -305,3 +305,46 @@ test("event publisher emits generic runtime progress, completion, and staged upd
 
   assert.deepEqual(events, ["runtime.progress", "runtime.update-staged", "runtime.completed"]);
 });
+
+test("event publisher emits retained operation update and completion events", () => {
+  const bus = new EventBusService();
+  const publisher = new EventPublisher(bus);
+  const events: string[] = [];
+  let publishedRevision = 0;
+
+  bus.subscribe((event) => {
+    events.push(event.type);
+    if (event.type === "operation.completed") {
+      publishedRevision = event.operation.revision;
+    }
+  });
+
+  publisher.publishOperationUpdated({
+    operationId: "onboarding:install",
+    scope: "onboarding",
+    action: "onboarding-runtime-install",
+    status: "running",
+    phase: "installing",
+    percent: 55,
+    message: "Installing OpenClaw locally.",
+    startedAt: "2026-04-21T00:00:00.000Z",
+    updatedAt: "2026-04-21T00:00:01.000Z"
+  });
+  const sync = publisher.publishOperationCompleted({
+    operationId: "onboarding:install",
+    scope: "onboarding",
+    action: "onboarding-runtime-install",
+    status: "completed",
+    phase: "completed",
+    percent: 100,
+    message: "OpenClaw deployment is complete.",
+    startedAt: "2026-04-21T00:00:00.000Z",
+    updatedAt: "2026-04-21T00:00:02.000Z"
+  });
+
+  const replayed = bus.getRetainedEvents();
+
+  assert.deepEqual(events, ["operation.updated", "operation.completed"]);
+  assert.equal(sync.revision, publishedRevision);
+  assert.equal(replayed.some((event) => event.type === "operation.completed"), true);
+});

@@ -346,6 +346,12 @@ public struct OnboardingEmployeePresetPresentation: Codable, Sendable, Identifia
     }
 }
 
+public struct MutationSyncMeta: Codable, Sendable {
+    public var epoch: String
+    public var revision: Int
+    public var settled: Bool
+}
+
 public struct OnboardingUIConfig: Codable, Sendable {
     public var modelProviders: [OnboardingModelProviderPresentation]
     public var channels: [OnboardingChannelPresentation]
@@ -373,13 +379,106 @@ public struct LongRunningOperationSummary: Codable, Sendable {
     public var deadlineAt: String?
     public var errorCode: String?
     public var retryable: Bool?
+
+    public init(
+        operationId: String,
+        action: String,
+        status: String,
+        phase: String? = nil,
+        message: String,
+        startedAt: String,
+        updatedAt: String,
+        deadlineAt: String? = nil,
+        errorCode: String? = nil,
+        retryable: Bool? = nil
+    ) {
+        self.operationId = operationId
+        self.action = action
+        self.status = status
+        self.phase = phase
+        self.message = message
+        self.startedAt = startedAt
+        self.updatedAt = updatedAt
+        self.deadlineAt = deadlineAt
+        self.errorCode = errorCode
+        self.retryable = retryable
+    }
+}
+
+public struct OperationResultReference: Codable, Sendable {
+    public var kind: String
+    public var resource: String?
+    public var id: String?
+    public var path: String?
+    public var href: String?
+}
+
+public struct OperationErrorSummary: Codable, Sendable {
+    public var code: String?
+    public var message: String
+    public var retryable: Bool?
+}
+
+public struct OperationSummary: Codable, Sendable {
+    public var operationId: String
+    public var action: String
+    public var status: String
+    public var phase: String?
+    public var message: String
+    public var startedAt: String
+    public var updatedAt: String
+    public var deadlineAt: String?
+    public var errorCode: String?
+    public var retryable: Bool?
+    public var scope: String
+    public var resourceId: String?
+    public var percent: Int?
+    public var result: OperationResultReference?
+    public var error: OperationErrorSummary?
+    public var sync: MutationSyncMeta?
+
+    public var longRunningSummary: LongRunningOperationSummary {
+        LongRunningOperationSummary(
+            operationId: operationId,
+            action: action,
+            status: status,
+            phase: phase,
+            message: message,
+            startedAt: startedAt,
+            updatedAt: updatedAt,
+            deadlineAt: deadlineAt,
+            errorCode: errorCode,
+            retryable: retryable
+        )
+    }
+}
+
+public struct OperationCommandResponse: Codable, Sendable {
+    public var operation: OperationSummary
+    public var accepted: Bool
+    public var alreadyRunning: Bool?
 }
 
 public struct OnboardingOperationsState: Codable, Sendable {
     public var install: LongRunningOperationSummary?
     public var localRuntime: LongRunningOperationSummary?
+    public var model: LongRunningOperationSummary?
     public var channel: LongRunningOperationSummary?
     public var completion: LongRunningOperationSummary?
+
+    public init(
+        install: LongRunningOperationSummary? = nil,
+        localRuntime: LongRunningOperationSummary? = nil,
+        model: LongRunningOperationSummary? = nil,
+        channel: LongRunningOperationSummary? = nil,
+        completion: LongRunningOperationSummary? = nil
+    ) {
+        self.install = install
+        self.localRuntime = localRuntime
+        self.model = model
+        self.channel = channel
+        self.completion = completion
+    }
 }
 
 public struct OnboardingEmployeePresetCapabilityState: Codable, Sendable, Identifiable {
@@ -516,6 +615,69 @@ public struct CompleteOnboardingResponse: Codable, Sendable {
         self.overview = overview
         self.warmupTaskId = warmupTaskId
         self.operation = operation
+    }
+}
+
+public struct OnboardingCompletionOperationResponse: Codable, Sendable {
+    public var operation: OperationSummary
+    public var accepted: Bool
+    public var alreadyRunning: Bool?
+    public var onboarding: OnboardingStateResponse
+    public var destination: OnboardingDestination?
+    public var completion: CompleteOnboardingResponse?
+
+    public init(
+        operation: OperationSummary,
+        accepted: Bool,
+        alreadyRunning: Bool? = nil,
+        onboarding: OnboardingStateResponse,
+        destination: OnboardingDestination? = nil,
+        completion: CompleteOnboardingResponse? = nil
+    ) {
+        self.operation = operation
+        self.accepted = accepted
+        self.alreadyRunning = alreadyRunning
+        self.onboarding = onboarding
+        self.destination = destination
+        self.completion = completion
+    }
+}
+
+public struct OnboardingModelOperationResponse: Codable, Sendable {
+    public var operation: OperationSummary
+    public var accepted: Bool
+    public var alreadyRunning: Bool?
+    public var onboarding: OnboardingStateResponse
+
+    public init(
+        operation: OperationSummary,
+        accepted: Bool,
+        alreadyRunning: Bool? = nil,
+        onboarding: OnboardingStateResponse
+    ) {
+        self.operation = operation
+        self.accepted = accepted
+        self.alreadyRunning = alreadyRunning
+        self.onboarding = onboarding
+    }
+}
+
+public struct OnboardingChannelOperationResponse: Codable, Sendable {
+    public var operation: OperationSummary
+    public var accepted: Bool
+    public var alreadyRunning: Bool?
+    public var onboarding: OnboardingStateResponse
+
+    public init(
+        operation: OperationSummary,
+        accepted: Bool,
+        alreadyRunning: Bool? = nil,
+        onboarding: OnboardingStateResponse
+    ) {
+        self.operation = operation
+        self.accepted = accepted
+        self.alreadyRunning = alreadyRunning
+        self.onboarding = onboarding
     }
 }
 
@@ -1202,6 +1364,13 @@ public struct SetupRunResponse: Codable, Sendable {
         self.onboarding = onboarding
         self.operation = operation
     }
+}
+
+public struct OnboardingRuntimeOperationResponse: Codable, Sendable {
+    public var operation: OperationSummary
+    public var accepted: Bool
+    public var alreadyRunning: Bool?
+    public var onboarding: OnboardingStateResponse
 }
 
 public struct DeploymentTargetStatus: Codable, Sendable, Identifiable {

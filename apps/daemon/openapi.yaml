@@ -565,11 +565,11 @@ paths:
               $ref: "#/components/schemas/InstallRequest"
       responses:
         "200":
-          description: SetupRunResponse
+          description: OnboardingRuntimeOperationResponse
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SetupRunResponse"
+                $ref: "#/components/schemas/OnboardingRuntimeOperationResponse"
 
   /onboarding/runtime/reuse:
     post:
@@ -591,11 +591,11 @@ paths:
       summary: ⏳ Update the runtime during onboarding
       responses:
         "200":
-          description: SetupRunResponse
+          description: OnboardingRuntimeOperationResponse
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SetupRunResponse"
+                $ref: "#/components/schemas/OnboardingRuntimeOperationResponse"
 
   /onboarding/permissions/confirm:
     post:
@@ -622,11 +622,11 @@ paths:
               $ref: "#/components/schemas/SaveModelEntryRequest"
       responses:
         "200":
-          description: ModelConfigActionResponse
+          description: OnboardingModelOperationResponse
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ModelConfigActionResponse"
+                $ref: "#/components/schemas/OnboardingModelOperationResponse"
 
   /onboarding/model/auth/session/{sessionId}:
     get:
@@ -688,11 +688,11 @@ paths:
               $ref: "#/components/schemas/SaveChannelEntryRequest"
       responses:
         "200":
-          description: ChannelConfigActionResponse
+          description: OnboardingChannelOperationResponse
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChannelConfigActionResponse"
+                $ref: "#/components/schemas/OnboardingChannelOperationResponse"
 
   /onboarding/channel/entries/{entryId}:
     patch:
@@ -708,11 +708,11 @@ paths:
               $ref: "#/components/schemas/SaveChannelEntryRequest"
       responses:
         "200":
-          description: ChannelConfigActionResponse
+          description: OnboardingChannelOperationResponse
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChannelConfigActionResponse"
+                $ref: "#/components/schemas/OnboardingChannelOperationResponse"
 
   /onboarding/channel/session/{sessionId}:
     get:
@@ -805,11 +805,11 @@ paths:
               $ref: "#/components/schemas/CompleteOnboardingRequest"
       responses:
         "200":
-          description: CompleteOnboardingResponse
+          description: OnboardingCompletionOperationResponse
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CompleteOnboardingResponse"
+                $ref: "#/components/schemas/OnboardingCompletionOperationResponse"
 
   # ── Models ────────────────────────────────────────────────────────────────
 
@@ -1927,6 +1927,65 @@ components:
           $ref: "#/components/schemas/EngineStatus"
         overview:
           $ref: "#/components/schemas/ProductOverview"
+
+    OnboardingRuntimeOperationResponse:
+      type: object
+      properties:
+        accepted: { type: boolean }
+        alreadyRunning: { type: boolean }
+        operation:
+          $ref: "#/components/schemas/OperationSummary"
+        onboarding:
+          $ref: "#/components/schemas/OnboardingStateResponse"
+
+    OnboardingCompletionOperationResponse:
+      type: object
+      properties:
+        accepted: { type: boolean }
+        alreadyRunning: { type: boolean }
+        destination: { type: string }
+        operation:
+          $ref: "#/components/schemas/OperationSummary"
+        onboarding:
+          $ref: "#/components/schemas/OnboardingStateResponse"
+        completion:
+          $ref: "#/components/schemas/CompleteOnboardingResponse"
+
+    OnboardingModelOperationResponse:
+      type: object
+      properties:
+        accepted: { type: boolean }
+        alreadyRunning: { type: boolean }
+        operation:
+          $ref: "#/components/schemas/OperationSummary"
+        onboarding:
+          $ref: "#/components/schemas/OnboardingStateResponse"
+
+    OnboardingChannelOperationResponse:
+      type: object
+      properties:
+        accepted: { type: boolean }
+        alreadyRunning: { type: boolean }
+        operation:
+          $ref: "#/components/schemas/OperationSummary"
+        onboarding:
+          $ref: "#/components/schemas/OnboardingStateResponse"
+
+    OperationSummary:
+      type: object
+      additionalProperties: true
+      properties:
+        operationId: { type: string }
+        scope: { type: string }
+        resourceId: { type: string }
+        action: { type: string }
+        status: { type: string, enum: [pending, running, completed, failed, timed-out] }
+        phase: { type: string }
+        percent: { type: integer }
+        message: { type: string }
+        startedAt: { type: string }
+        updatedAt: { type: string }
+        retryable: { type: boolean }
 
     # ── Onboarding ────────────────────────────────────────────────────────
 

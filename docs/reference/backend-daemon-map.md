@@ -169,6 +169,7 @@ flowchart LR
 
 - `StateStore` is ChillClaw-owned product state for onboarding, AI team data, stored channel entries, chat thread metadata, preset-skill sync state, and recent task history.
 - `EventBusService` plus `EventPublisher` is the daemon-owned push path for retained snapshots, deploy progress, task progress, gateway state, and chat stream events.
+- The target async-operation layer builds on `EventBusService` plus `EventPublisher`: HTTP commands create or resume durable operations, background workers publish progress and final snapshots, and clients recover from missed events by reading daemon-owned state. See `docs/reference/async-daemon-operations.md`.
 - `DownloadManager` is the daemon-owned transfer subsystem for runtime artifacts, file artifacts, Ollama model pulls, persistent queue state, temp/cache storage, retained download snapshots, and live job events. Callers own intent; DownloadManager owns bytes, validation, dedupe, pause/resume, cancel, and recovery.
 - `RuntimeManager` owns generic prerequisite lifecycle for Node/npm, managed OpenClaw, Ollama, and local model catalog metadata. It is manifest-driven and update-aware, but OpenClaw-specific product behavior still stays inside `OpenClawAdapter`.
 - `AppUpdateService` owns packaged app release checks. It feeds overview/settings state but does not manage prerequisite runtimes.
@@ -176,3 +177,34 @@ flowchart LR
 - `CapabilityService` owns capability readiness and managed feature prerequisites such as OpenClaw plugins or external installers. `ChannelSetupService` consumes it instead of preparing feature requirements directly.
 - Product services stay engine-agnostic. They coordinate user-facing behavior and reach OpenClaw only through the `EngineAdapter` seam.
 - OpenClaw-specific behavior is confined to the `OpenClaw*Manager` classes and the platform adapters in `apps/daemon/src/platform`.
+
+## Target async operation additions
+
+The current daemon already has event and snapshot plumbing, but some routes still perform long-running work inside the HTTP request. The target design adds one shared operation runner/store alongside the existing shared daemon objects:
+
+```mermaid
+flowchart TB
+  UI["Native clients<br/>React fallback UI"] -->|quick HTTP command| Server["startServer()<br/>routes"]
+  Server --> Ops["OperationRunner + OperationStore<br/>durable long-running work"]
+  Ops --> Publisher["EventPublisher"]
+  Publisher --> EventBus["EventBusService<br/>/api/events"]
+  EventBus --> UI
+  UI -->|fast resync GET| Server
+
+  Ops --> RuntimeManager["RuntimeManager"]
+  Ops --> Setup["SetupService / OnboardingService"]
+  Ops --> LocalRuntime["LocalModelRuntimeService"]
+  Ops --> Channels["ChannelSetupService"]
+  Ops --> Adapter["EngineAdapter"]
+  Ops --> DownloadManager["DownloadManager"]
+```
+
+The operation layer should own:
+
+- in-flight dedupe by action/resource/idempotency key
+- persisted status, phase, percent, message, error, and result references
+- progress/completion event publication
+- retained resource snapshot publication after state changes
+- reconnect and app-sleep recovery for web and native clients
+
+It should not own product-specific logic. Setup, runtime, local model, channel, recovery, and adapter services still decide what work means; the operation layer decides how that work is scheduled, tracked, and reported.

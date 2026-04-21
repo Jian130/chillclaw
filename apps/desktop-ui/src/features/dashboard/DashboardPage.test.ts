@@ -16,6 +16,8 @@ import DashboardPage, {
   capabilityReadinessDetail,
   connectedModelCount,
   connectedModelDetail,
+  dashboardModelSnapshotForEvent,
+  dashboardSnapshotReadOptions,
   shouldRefreshDashboardCapabilitySnapshotsForEvent,
   toolReadyCount,
   toolReadinessDetail
@@ -320,5 +322,37 @@ describe("DashboardPage model metrics", () => {
       })
     ).toBe(true);
     expect(shouldRefreshDashboardCapabilitySnapshotsForEvent(modelEvent)).toBe(false);
+  });
+
+  it("uses daemon snapshots and model events instead of fresh dashboard probes", () => {
+    expect(dashboardSnapshotReadOptions()).toEqual({ fresh: false });
+
+    const modelConfig: ModelConfigOverview = {
+      providers: [],
+      models: [],
+      configuredModelKeys: ["minimax/MiniMax-M2.5"],
+      savedEntries: [],
+      fallbackEntryIds: []
+    };
+
+    expect(
+      dashboardModelSnapshotForEvent({
+        type: "model-config.updated",
+        snapshot: {
+          epoch: "epoch-1",
+          revision: 5,
+          data: modelConfig
+        }
+      })
+    ).toBe(modelConfig);
+
+    expect(
+      dashboardModelSnapshotForEvent({
+        type: "gateway.status",
+        reachable: true,
+        pendingGatewayApply: false,
+        summary: "Gateway ready."
+      })
+    ).toBeUndefined();
   });
 });

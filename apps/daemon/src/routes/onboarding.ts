@@ -2,7 +2,12 @@ import type {
   ChannelSessionInputRequest,
   CompleteOnboardingRequest,
   InstallRequest,
+  OnboardingChannelOperationResponse,
+  OnboardingCompletionOperationResponse,
+  OnboardingModelOperationResponse,
   ModelAuthSessionInputRequest,
+  OnboardingRuntimeOperationResponse,
+  OnboardingStateResponse,
   OnboardingEmployeeState,
   OnboardingStepNavigationRequest,
   SaveChannelEntryRequest,
@@ -33,6 +38,98 @@ function traceOnboardingRoute<T>(
   action: () => Promise<T>
 ): Promise<T> {
   return traceOnboardingOperation(`route.${route}`, details, action, summarizeOnboardingOperationResult);
+}
+
+function withInstallOperation(
+  onboarding: OnboardingStateResponse,
+  operation: OnboardingRuntimeOperationResponse["operation"]
+): OnboardingStateResponse {
+  return {
+    ...onboarding,
+    operations: {
+      ...(onboarding.operations ?? {}),
+      install: operation
+    }
+  };
+}
+
+function withCompletionOperation(
+  onboarding: OnboardingStateResponse,
+  operation: OnboardingCompletionOperationResponse["operation"]
+): OnboardingStateResponse {
+  return {
+    ...onboarding,
+    operations: {
+      ...(onboarding.operations ?? {}),
+      completion: operation
+    }
+  };
+}
+
+function withModelOperation(
+  onboarding: OnboardingStateResponse,
+  operation: OnboardingModelOperationResponse["operation"]
+): OnboardingStateResponse {
+  return {
+    ...onboarding,
+    operations: {
+      ...(onboarding.operations ?? {}),
+      model: operation
+    }
+  };
+}
+
+function withChannelOperation(
+  onboarding: OnboardingStateResponse,
+  operation: OnboardingChannelOperationResponse["operation"]
+): OnboardingStateResponse {
+  return {
+    ...onboarding,
+    operations: {
+      ...(onboarding.operations ?? {}),
+      channel: operation
+    }
+  };
+}
+
+function onboardingRuntimeOperationResponse(
+  onboarding: OnboardingStateResponse,
+  result: Omit<OnboardingRuntimeOperationResponse, "onboarding">
+): OnboardingRuntimeOperationResponse {
+  return {
+    ...result,
+    onboarding: withInstallOperation(onboarding, result.operation)
+  };
+}
+
+function onboardingCompletionOperationResponse(
+  onboarding: OnboardingStateResponse,
+  result: Omit<OnboardingCompletionOperationResponse, "onboarding">
+): OnboardingCompletionOperationResponse {
+  return {
+    ...result,
+    onboarding: withCompletionOperation(onboarding, result.operation)
+  };
+}
+
+function onboardingModelOperationResponse(
+  onboarding: OnboardingStateResponse,
+  result: Omit<OnboardingModelOperationResponse, "onboarding">
+): OnboardingModelOperationResponse {
+  return {
+    ...result,
+    onboarding: withModelOperation(onboarding, result.operation)
+  };
+}
+
+function onboardingChannelOperationResponse(
+  onboarding: OnboardingStateResponse,
+  result: Omit<OnboardingChannelOperationResponse, "onboarding">
+): OnboardingChannelOperationResponse {
+  return {
+    ...result,
+    onboarding: withChannelOperation(onboarding, result.operation)
+  };
 }
 
 export const onboardingRoutes: RouteDefinition[] = [
@@ -73,11 +170,40 @@ export const onboardingRoutes: RouteDefinition[] = [
     match: createPathMatcher("/api/onboarding/runtime/install"),
     async handle({ context, request }) {
       const body = await readJson<InstallRequest>(request);
-      return jsonResponse(await traceOnboardingRoute(
+      const forceLocal = body.forceLocal ?? true;
+      const result = await traceOnboardingRoute(
         "POST /api/onboarding/runtime/install",
-        { forceLocal: body.forceLocal ?? true },
-        () => context.onboardingService.installRuntime({ forceLocal: body.forceLocal ?? true })
-      ));
+        { forceLocal },
+        () => context.operationRunner.startOrResume(
+          {
+            operationId: "onboarding:install",
+            scope: "onboarding",
+            resourceId: "managed-local",
+            action: "onboarding-runtime-install",
+            phase: "installing",
+            percent: 8,
+            message: "Installing OpenClaw locally."
+          },
+          async ({ update }) => {
+            await update({
+              phase: "installing",
+              percent: 16,
+              message: "Installing OpenClaw locally."
+            });
+            const setup = await context.onboardingService.installRuntime({ forceLocal });
+            return {
+              phase: "completed",
+              percent: 100,
+              message: setup.message,
+              result: {
+                kind: "resource",
+                resource: "onboarding"
+              }
+            };
+          }
+        )
+      );
+      return jsonResponse(onboardingRuntimeOperationResponse(await context.onboardingService.getState(), result));
     }
   },
   {
@@ -91,7 +217,39 @@ export const onboardingRoutes: RouteDefinition[] = [
     method: "POST",
     match: createPathMatcher("/api/onboarding/runtime/update"),
     async handle({ context }) {
-      return jsonResponse(await traceOnboardingRoute("POST /api/onboarding/runtime/update", {}, () => context.onboardingService.updateRuntime()));
+      const result = await traceOnboardingRoute(
+        "POST /api/onboarding/runtime/update",
+        {},
+        () => context.operationRunner.startOrResume(
+          {
+            operationId: "onboarding:install",
+            scope: "onboarding",
+            resourceId: "managed-local",
+            action: "onboarding-runtime-update",
+            phase: "updating",
+            percent: 8,
+            message: "Updating OpenClaw locally."
+          },
+          async ({ update }) => {
+            await update({
+              phase: "updating",
+              percent: 16,
+              message: "Updating OpenClaw locally."
+            });
+            const setup = await context.onboardingService.updateRuntime();
+            return {
+              phase: "completed",
+              percent: 100,
+              message: setup.message,
+              result: {
+                kind: "resource",
+                resource: "onboarding"
+              }
+            };
+          }
+        )
+      );
+      return jsonResponse(onboardingRuntimeOperationResponse(await context.onboardingService.getState(), result));
     }
   },
   {
@@ -106,14 +264,43 @@ export const onboardingRoutes: RouteDefinition[] = [
     match: createPathMatcher("/api/onboarding/model/entries"),
     async handle({ context, request }) {
       const body = await readJson<SaveModelEntryRequest>(request);
-      return jsonResponse(await traceOnboardingRoute("POST /api/onboarding/model/entries", {
+      const result = await traceOnboardingRoute("POST /api/onboarding/model/entries", {
         providerId: body.providerId,
         methodId: body.methodId,
         modelKey: body.modelKey,
         makeDefault: body.makeDefault,
         useAsFallback: body.useAsFallback,
         valueKeys: Object.keys(body.values ?? {})
-      }, () => context.onboardingService.saveModelEntry(body)));
+      }, () => context.operationRunner.startOrResume(
+        {
+          operationId: "onboarding:model",
+          scope: "onboarding",
+          resourceId: `${body.providerId}:${body.modelKey}`,
+          action: "onboarding-model-save",
+          phase: "saving-model",
+          percent: 10,
+          message: "Saving the first model."
+        },
+        async ({ update }) => {
+          await update({
+            phase: "saving-model",
+            percent: 45,
+            message: "Saving the first model."
+          });
+          const saved = await context.onboardingService.saveModelEntry(body);
+          return {
+            phase: saved.status === "interactive" ? "awaiting-auth" : "completed",
+            percent: saved.status === "interactive" ? 80 : 100,
+            message: saved.message,
+            result: {
+              kind: "resource",
+              resource: "onboarding-model",
+              id: saved.authSession?.id ?? saved.modelConfig.defaultEntryId
+            }
+          };
+        }
+      ));
+      return jsonResponse(onboardingModelOperationResponse(await context.onboardingService.getState(), result));
     }
   },
   {
@@ -144,11 +331,40 @@ export const onboardingRoutes: RouteDefinition[] = [
     match: createPathMatcher("/api/onboarding/channel/entries"),
     async handle({ context, request }) {
       const body = await readJson<SaveChannelEntryRequest>(request);
-      return jsonResponse(await traceOnboardingRoute("POST /api/onboarding/channel/entries", {
+      const result = await traceOnboardingRoute("POST /api/onboarding/channel/entries", {
         channelId: body.channelId,
         action: body.action,
         valueKeys: Object.keys(body.values ?? {})
-      }, () => context.onboardingService.saveChannelEntry(undefined, body)));
+      }, () => context.operationRunner.startOrResume(
+        {
+          operationId: "onboarding:channel",
+          scope: "onboarding",
+          resourceId: body.channelId,
+          action: "onboarding-channel-save",
+          phase: "saving-channel",
+          percent: 10,
+          message: "Saving the first channel."
+        },
+        async ({ update }) => {
+          await update({
+            phase: "saving-channel",
+            percent: 45,
+            message: "Saving the first channel."
+          });
+          const saved = await context.onboardingService.saveChannelEntry(undefined, body);
+          return {
+            phase: saved.status === "interactive" ? "awaiting-pairing" : "completed",
+            percent: saved.status === "interactive" ? 80 : 100,
+            message: saved.message,
+            result: {
+              kind: "resource",
+              resource: "onboarding-channel",
+              id: saved.session?.id ?? saved.session?.entryId ?? body.channelId
+            }
+          };
+        }
+      ));
+      return jsonResponse(onboardingChannelOperationResponse(await context.onboardingService.getState(), result));
     }
   },
   {
@@ -156,12 +372,41 @@ export const onboardingRoutes: RouteDefinition[] = [
     match: matchOnboardingChannelEntry,
     async handle({ context, request, params }) {
       const body = await readJson<SaveChannelEntryRequest>(request);
-      return jsonResponse(await traceOnboardingRoute("PATCH /api/onboarding/channel/entries/:entryId", {
+      const result = await traceOnboardingRoute("PATCH /api/onboarding/channel/entries/:entryId", {
         entryId: params.entryId,
         channelId: body.channelId,
         action: body.action,
         valueKeys: Object.keys(body.values ?? {})
-      }, () => context.onboardingService.saveChannelEntry(params.entryId, body)));
+      }, () => context.operationRunner.startOrResume(
+        {
+          operationId: "onboarding:channel",
+          scope: "onboarding",
+          resourceId: body.channelId,
+          action: "onboarding-channel-save",
+          phase: "saving-channel",
+          percent: 10,
+          message: "Saving the first channel."
+        },
+        async ({ update }) => {
+          await update({
+            phase: "saving-channel",
+            percent: 45,
+            message: "Saving the first channel."
+          });
+          const saved = await context.onboardingService.saveChannelEntry(params.entryId, body);
+          return {
+            phase: saved.status === "interactive" ? "awaiting-pairing" : "completed",
+            percent: saved.status === "interactive" ? 80 : 100,
+            message: saved.message,
+            result: {
+              kind: "resource",
+              resource: "onboarding-channel",
+              id: saved.session?.id ?? saved.session?.entryId ?? params.entryId
+            }
+          };
+        }
+      ));
+      return jsonResponse(onboardingChannelOperationResponse(await context.onboardingService.getState(), result));
     }
   },
   {
@@ -223,10 +468,41 @@ export const onboardingRoutes: RouteDefinition[] = [
     match: createPathMatcher("/api/onboarding/complete"),
     async handle({ context, request }) {
       const body = await readJson<CompleteOnboardingRequest>(request);
-      return jsonResponse(await traceOnboardingRoute("POST /api/onboarding/complete", {
+      const result = await traceOnboardingRoute("POST /api/onboarding/complete", {
         destination: body.destination,
         employee: body.employee ? summarizeOnboardingDraft({ currentStep: "employee", employee: body.employee })?.employee : undefined
-      }, () => context.onboardingService.complete(body)));
+      }, () => context.operationRunner.startOrResume(
+        {
+          operationId: "onboarding:completion",
+          scope: "onboarding",
+          action: "onboarding-completion",
+          phase: "finalizing",
+          percent: 8,
+          message: "Finishing onboarding."
+        },
+        async ({ update }) => {
+          await update({
+            phase: "finalizing",
+            percent: 16,
+            message: "Finishing onboarding."
+          });
+          const completion = await context.onboardingService.complete(body);
+          return {
+            phase: "completed",
+            percent: 100,
+            message: completion.operation?.message ?? "Onboarding complete.",
+            result: {
+              kind: "resource",
+              resource: "onboarding",
+              id: completion.warmupTaskId
+            }
+          };
+        }
+      ));
+      return jsonResponse(onboardingCompletionOperationResponse(await context.onboardingService.getState(), {
+        ...result,
+        destination: body.destination
+      }));
     }
   }
 ];

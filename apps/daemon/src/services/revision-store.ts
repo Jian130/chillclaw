@@ -10,7 +10,8 @@ export type RevisionedResource =
   | "plugin-config"
   | "skill-catalog"
   | "preset-skill-sync"
-  | "downloads";
+  | "downloads"
+  | `operation:${string}`;
 
 export class RevisionStore {
   private readonly epoch = randomUUID();

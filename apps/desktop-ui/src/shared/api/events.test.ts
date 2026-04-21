@@ -176,6 +176,79 @@ describe("daemon event client", () => {
     unsubscribe();
   });
 
+  it("tracks operation revisions by operation id", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const events = await loadEventsModule();
+    const unsubscribe = events.subscribeToDaemonEvents(() => undefined);
+
+    FakeWebSocket.instances[0]?.emitMessage(
+      JSON.stringify({
+        type: "operation.updated",
+        operation: {
+          epoch: "epoch-operation",
+          revision: 5,
+          data: {
+            operationId: "onboarding:install",
+            scope: "onboarding",
+            action: "onboarding-runtime-install",
+            status: "running",
+            phase: "installing",
+            percent: 55,
+            message: "Installing OpenClaw locally.",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            updatedAt: "2026-04-21T00:00:01.000Z"
+          }
+        }
+      })
+    );
+
+    expect(events.getDaemonResourceRevision("operation:onboarding:install")).toEqual({
+      epoch: "epoch-operation",
+      revision: 5
+    });
+
+    unsubscribe();
+  });
+
+  it("keeps operation revisions available across reconnects", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const events = await loadEventsModule();
+    const unsubscribe = events.subscribeToDaemonEvents(() => undefined);
+
+    FakeWebSocket.instances[0]?.emitMessage(
+      JSON.stringify({
+        type: "operation.completed",
+        operation: {
+          epoch: "epoch-operation",
+          revision: 8,
+          data: {
+            operationId: "runtime:openclaw-runtime:prepare",
+            scope: "runtime",
+            resourceId: "openclaw-runtime",
+            action: "prepare",
+            status: "completed",
+            phase: "completed",
+            percent: 100,
+            message: "OpenClaw runtime is ready.",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            updatedAt: "2026-04-21T00:00:02.000Z"
+          }
+        }
+      })
+    );
+    FakeWebSocket.instances[0]?.emitClose();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(events.getDaemonEventTransportState().lastSeenByResource["operation:runtime:openclaw-runtime:prepare"]).toEqual({
+      epoch: "epoch-operation",
+      revision: 8
+    });
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    unsubscribe();
+  });
+
   it("reconnects after the socket closes while listeners remain", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("WebSocket", FakeWebSocket);

@@ -579,18 +579,27 @@ struct OnboardingTests {
     func skipToDashboardCompletesOnboardingAndLoadsDashboard() async throws {
         let recorder = NativeRequestRecorder()
         let loadRecorder = NativeLoadRecorder()
+        var eventContinuation: AsyncStream<ChillClawEvent>.Continuation?
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("POST", "/api/onboarding/complete"):
-                let body = try JSONEncoder.chillClaw.encode(
-                    CompleteOnboardingResponse(
-                        status: "completed",
-                        destination: .dashboard,
-                        summary: .init(),
-                        overview: makeOverview(setupCompleted: true, installed: true, running: true, version: "2026.3.13")
-                    )
-                )
+                let operation = onboardingCompletionOperation(status: "running", phase: "finalizing")
+                let body = try JSONEncoder.chillClaw.encode(OnboardingCompletionOperationResponse(
+                    operation: operation,
+                    accepted: true,
+                    onboarding: makeOnboardingStateResponse(step: .employee),
+                    destination: .dashboard
+                ))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: true, installed: true, running: true, version: "2026.3.13"))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/onboarding/state"):
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .employee))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/ai-team/overview"):
+                let body = try JSONEncoder.chillClaw.encode(emptyAITeamOverview())
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -634,15 +643,24 @@ struct OnboardingTests {
             )
         )
 
+        let eventStream = AsyncStream<ChillClawEvent> { continuation in
+            eventContinuation = continuation
+        }
         let viewModel = NativeOnboardingViewModel(
             appState: appState,
-            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+            daemonEventStreamFactory: { eventStream }
         )
 
+        await viewModel.bootstrap()
         await viewModel.skipToDashboard()
-        await waitForRecordedURLCount(recorder, expectedCount: 1)
+        eventContinuation?.yield(.operationCompleted(operation: .init(
+            epoch: "test",
+            revision: 1,
+            data: onboardingCompletionOperation(status: "completed", phase: "completed")
+        )))
+        await waitForRecordedURLCount(recorder, expectedCount: 5)
 
-        let request = try #require(await recorder.recordedRequests().first)
+        let request = try #require(await recorder.recordedRequests().first { $0.url?.path == "/api/onboarding/complete" })
         let body = try #require(bodyData(for: request))
         let payload = try JSONDecoder.chillClaw.decode(CompleteOnboardingRequest.self, from: body)
 
@@ -650,12 +668,14 @@ struct OnboardingTests {
         #expect(appState.selectedSection == .dashboard)
         #expect(appState.overview?.firstRun.setupCompleted == true)
         #expect(await loadRecorder.events().isEmpty)
+        eventContinuation?.finish()
     }
 
     @Test
     func completeToChatOpensThreadForCompletedOnboardingEmployee() async throws {
         let recorder = NativeRequestRecorder()
         let chatTransport = RecordingOnboardingChatTransport()
+        var eventContinuation: AsyncStream<ChillClawEvent>.Continuation?
         let completedEmployee = OnboardingEmployeeState(
             memberId: "member-onboarded",
             name: "AI Ryo",
@@ -666,14 +686,22 @@ struct OnboardingTests {
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("POST", "/api/onboarding/complete"):
-                let body = try JSONEncoder.chillClaw.encode(
-                    CompleteOnboardingResponse(
-                        status: "completed",
-                        destination: .chat,
-                        summary: .init(employee: completedEmployee),
-                        overview: makeOverview(setupCompleted: true, installed: true, running: true, version: "2026.3.13")
-                    )
-                )
+                var state = makeOnboardingStateResponse(step: .employee)
+                state.summary = .init(employee: completedEmployee)
+                let body = try JSONEncoder.chillClaw.encode(OnboardingCompletionOperationResponse(
+                    operation: onboardingCompletionOperation(status: "running", phase: "finalizing"),
+                    accepted: true,
+                    onboarding: state,
+                    destination: .chat
+                ))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: true, installed: true, running: true, version: "2026.3.13"))
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/onboarding/state"):
+                var state = makeOnboardingStateResponse(step: .employee)
+                state.summary = .init(employee: completedEmployee)
+                let body = try JSONEncoder.chillClaw.encode(state)
                 return (jsonResponse(url: url), body)
             case ("GET", "/api/ai-team/overview"):
                 let body = try JSONEncoder.chillClaw.encode(makeAITeamOverview(memberId: "member-onboarded"))
@@ -706,18 +734,28 @@ struct OnboardingTests {
         )
         appState.overview = makeOverview(setupCompleted: false)
 
+        let eventStream = AsyncStream<ChillClawEvent> { continuation in
+            eventContinuation = continuation
+        }
         let viewModel = NativeOnboardingViewModel(
             appState: appState,
-            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+            daemonEventStreamFactory: { eventStream }
         )
 
+        await viewModel.bootstrap()
         await viewModel.complete(destination: .chat)
-        await waitForRecordedURLCount(recorder, expectedCount: 2)
+        eventContinuation?.yield(.operationCompleted(operation: .init(
+            epoch: "test",
+            revision: 1,
+            data: onboardingCompletionOperation(status: "completed", phase: "completed")
+        )))
+        await waitForRecordedURLCount(recorder, expectedCount: 6)
 
         #expect(appState.selectedSection == .chat)
         #expect(appState.selectedMemberForChat == "member-onboarded")
         #expect(chatTransport.createMemberIds == ["member-onboarded"])
         #expect(appState.chatViewModel.selectedThread?.memberId == "member-onboarded")
+        eventContinuation?.finish()
     }
 
     @Test
@@ -2274,16 +2312,6 @@ struct OnboardingTests {
             createdAt: "2026-03-28T00:00:00.000Z",
             updatedAt: "2026-03-28T00:00:00.000Z"
         )
-        let savedConfig = ModelConfigOverview(
-            providers: [],
-            models: [],
-            defaultModel: savedEntry.modelKey,
-            configuredModelKeys: [savedEntry.modelKey],
-            savedEntries: [savedEntry],
-            defaultEntryId: savedEntry.id,
-            fallbackEntryIds: []
-        )
-
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
@@ -2295,16 +2323,7 @@ struct OnboardingTests {
                     methodId: savedEntry.authMethodId,
                     entryId: savedEntry.id
                 )
-                let body = try JSONEncoder.chillClaw.encode(
-                    ModelConfigActionResponse(
-                        status: "completed",
-                        message: "Saved",
-                        modelConfig: savedConfig,
-                        authSession: nil,
-                        requiresGatewayApply: false,
-                        onboarding: nextState
-                    )
-                )
+                let body = try JSONEncoder.chillClaw.encode(makeOnboardingModelOperationResponse(onboarding: nextState))
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -2369,14 +2388,13 @@ struct OnboardingTests {
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("POST", "/api/onboarding/model/entries"):
+                var nextState = makeOnboardingStateResponse(step: .model)
+                nextState.draft.activeModelAuthSessionId = authSession.id
                 let body = try JSONEncoder.chillClaw.encode(
-                    ModelConfigActionResponse(
-                        status: "interactive",
-                        message: "Authentication required.",
-                        modelConfig: emptyModelConfig(),
-                        authSession: authSession,
-                        requiresGatewayApply: false,
-                        onboarding: makeOnboardingStateResponse(step: .model)
+                    makeOnboardingModelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-auth",
+                        message: "Authentication required."
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -2387,14 +2405,14 @@ struct OnboardingTests {
                             id: authSession.id,
                             providerId: authSession.providerId,
                             methodId: authSession.methodId,
-                            status: "completed",
-                            message: "Authentication complete.",
+                            status: "running",
+                            message: "Complete OpenAI authentication in your browser.",
                             logs: [],
                             launchUrl: authSession.launchUrl,
                             inputPrompt: nil
                         ),
                         modelConfig: emptyModelConfig(),
-                        onboarding: makeOnboardingStateResponse(step: .channel)
+                        onboarding: nil
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -2439,6 +2457,7 @@ struct OnboardingTests {
         viewModel.methodId = "openai-codex"
 
         await viewModel.saveModel()
+        await waitForRecordedURLCount(recorder, expectedCount: 2)
         #expect(await openedURLs.urls().isEmpty)
 
         viewModel.openModelAuthWindow()
@@ -2466,14 +2485,13 @@ struct OnboardingTests {
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("POST", "/api/onboarding/model/entries"):
+                var nextState = makeOnboardingStateResponse(step: .model)
+                nextState.draft.activeModelAuthSessionId = authSession.id
                 let body = try JSONEncoder.chillClaw.encode(
-                    ModelConfigActionResponse(
-                        status: "interactive",
-                        message: "Authentication required.",
-                        modelConfig: emptyModelConfig(),
-                        authSession: authSession,
-                        requiresGatewayApply: false,
-                        onboarding: makeOnboardingStateResponse(step: .model)
+                    makeOnboardingModelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-auth",
+                        message: "Authentication required."
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -2612,22 +2630,6 @@ struct OnboardingTests {
             pairingRequired: false,
             lastUpdatedAt: "2026-03-28T00:00:05.000Z"
         )
-        let initialConfig = ChannelConfigOverview(
-            baseOnboardingCompleted: true,
-            capabilities: [],
-            entries: [awaitingEntry],
-            activeSession: .init(
-                id: sessionId,
-                channelId: .wechat,
-                entryId: awaitingEntry.id,
-                status: "running",
-                message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat login."],
-                launchUrl: nil,
-                inputPrompt: nil
-            ),
-            gatewaySummary: "Gateway ready"
-        )
         let completedConfig = ChannelConfigOverview(
             baseOnboardingCompleted: true,
             capabilities: [],
@@ -2645,13 +2647,10 @@ struct OnboardingTests {
                 nextState.draft.activeChannelSessionId = sessionId
                 nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let body = try JSONEncoder.chillClaw.encode(
-                    ChannelConfigActionResponse(
-                        status: "interactive",
-                        message: "Started WeChat login",
-                        channelConfig: initialConfig,
-                        session: initialConfig.activeSession,
-                        requiresGatewayApply: false,
-                        onboarding: nextState
+                    makeOnboardingChannelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-pairing",
+                        message: "Started WeChat login"
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -2906,22 +2905,6 @@ struct OnboardingTests {
             pairingRequired: false,
             lastUpdatedAt: "2026-03-28T00:00:05.000Z"
         )
-        let initialConfig = ChannelConfigOverview(
-            baseOnboardingCompleted: true,
-            capabilities: [],
-            entries: [awaitingEntry],
-            activeSession: .init(
-                id: sessionId,
-                channelId: .wechat,
-                entryId: awaitingEntry.id,
-                status: "running",
-                message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat login."],
-                launchUrl: nil,
-                inputPrompt: nil
-            ),
-            gatewaySummary: "Gateway ready"
-        )
         let completedConfig = ChannelConfigOverview(
             baseOnboardingCompleted: true,
             capabilities: [],
@@ -2939,13 +2922,10 @@ struct OnboardingTests {
                 nextState.draft.activeChannelSessionId = sessionId
                 nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let body = try JSONEncoder.chillClaw.encode(
-                    ChannelConfigActionResponse(
-                        status: "interactive",
-                        message: "Started WeChat login",
-                        channelConfig: initialConfig,
-                        session: initialConfig.activeSession,
-                        requiresGatewayApply: false,
-                        onboarding: nextState
+                    makeOnboardingChannelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-pairing",
+                        message: "Started WeChat login"
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -3053,22 +3033,6 @@ struct OnboardingTests {
             pairingRequired: false,
             lastUpdatedAt: "2026-03-28T00:00:05.000Z"
         )
-        let initialConfig = ChannelConfigOverview(
-            baseOnboardingCompleted: true,
-            capabilities: [],
-            entries: [awaitingEntry],
-            activeSession: .init(
-                id: sessionId,
-                channelId: .wechat,
-                entryId: awaitingEntry.id,
-                status: "running",
-                message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat login."],
-                launchUrl: nil,
-                inputPrompt: nil
-            ),
-            gatewaySummary: "Gateway ready"
-        )
         let awaitingConfig = ChannelConfigOverview(
             baseOnboardingCompleted: true,
             capabilities: [],
@@ -3086,13 +3050,10 @@ struct OnboardingTests {
                 nextState.draft.activeChannelSessionId = sessionId
                 nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let body = try JSONEncoder.chillClaw.encode(
-                    ChannelConfigActionResponse(
-                        status: "interactive",
-                        message: "Started WeChat login",
-                        channelConfig: initialConfig,
-                        session: initialConfig.activeSession,
-                        requiresGatewayApply: false,
-                        onboarding: nextState
+                    makeOnboardingChannelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-pairing",
+                        message: "Started WeChat login"
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -3180,22 +3141,6 @@ struct OnboardingTests {
             pairingRequired: false,
             lastUpdatedAt: "2026-04-07T06:04:48.605Z"
         )
-        let initialConfig = ChannelConfigOverview(
-            baseOnboardingCompleted: true,
-            capabilities: [],
-            entries: [stagedEntry],
-            activeSession: .init(
-                id: sessionId,
-                channelId: .wechat,
-                entryId: stagedEntry.id,
-                status: "running",
-                message: "WeChat login is waiting for QR confirmation.",
-                logs: ["Starting the personal WeChat login."],
-                launchUrl: nil,
-                inputPrompt: nil
-            ),
-            gatewaySummary: "Gateway ready"
-        )
         let stagedConfig = ChannelConfigOverview(
             baseOnboardingCompleted: true,
             capabilities: [],
@@ -3213,13 +3158,10 @@ struct OnboardingTests {
                 nextState.draft.activeChannelSessionId = sessionId
                 nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let body = try JSONEncoder.chillClaw.encode(
-                    ChannelConfigActionResponse(
-                        status: "interactive",
-                        message: "Started WeChat login",
-                        channelConfig: initialConfig,
-                        session: initialConfig.activeSession,
-                        requiresGatewayApply: false,
-                        onboarding: nextState
+                    makeOnboardingChannelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-pairing",
+                        message: "Started WeChat login"
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -3321,37 +3263,10 @@ struct OnboardingTests {
                 nextState.draft.activeChannelSessionId = sessionId
                 nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let responseBody = try JSONEncoder.chillClaw.encode(
-                    ChannelConfigActionResponse(
-                        status: "interactive",
-                        message: "Started WeChat login",
-                        channelConfig: .init(
-                            baseOnboardingCompleted: true,
-                            capabilities: [],
-                            entries: [initialEntry],
-                            activeSession: .init(
-                                id: sessionId,
-                                channelId: .wechat,
-                                entryId: initialEntry.id,
-                                status: "running",
-                                message: "WeChat login is waiting for QR confirmation.",
-                                logs: ["Starting the personal WeChat login."],
-                                launchUrl: nil,
-                                inputPrompt: nil
-                            ),
-                            gatewaySummary: "Gateway ready"
-                        ),
-                        session: .init(
-                            id: sessionId,
-                            channelId: .wechat,
-                            entryId: initialEntry.id,
-                            status: "running",
-                            message: "WeChat login is waiting for QR confirmation.",
-                            logs: ["Starting the personal WeChat login."],
-                            launchUrl: nil,
-                            inputPrompt: nil
-                        ),
-                        requiresGatewayApply: false,
-                        onboarding: nextState
+                    makeOnboardingChannelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-pairing",
+                        message: "Started WeChat login"
                     )
                 )
                 return (jsonResponse(url: url), responseBody)
@@ -3447,13 +3362,6 @@ struct OnboardingTests {
             launchUrl: nil,
             inputPrompt: nil
         )
-        let initialConfig = ChannelConfigOverview(
-            baseOnboardingCompleted: true,
-            capabilities: [],
-            entries: [awaitingEntry],
-            activeSession: initialSession,
-            gatewaySummary: "Gateway ready"
-        )
         let stalePolledConfig = ChannelConfigOverview(
             baseOnboardingCompleted: true,
             capabilities: [],
@@ -3471,13 +3379,10 @@ struct OnboardingTests {
                 nextState.draft.activeChannelSessionId = sessionId
                 nextState.draft.channelProgress = .init(status: .capturing, sessionId: sessionId, message: "Started WeChat login", requiresGatewayApply: false)
                 let body = try JSONEncoder.chillClaw.encode(
-                    ChannelConfigActionResponse(
-                        status: "interactive",
-                        message: "Started WeChat login",
-                        channelConfig: initialConfig,
-                        session: initialSession,
-                        requiresGatewayApply: false,
-                        onboarding: nextState
+                    makeOnboardingChannelOperationResponse(
+                        onboarding: nextState,
+                        phase: "awaiting-pairing",
+                        message: "Started WeChat login"
                     )
                 )
                 return (jsonResponse(url: url), body)
@@ -4039,43 +3944,68 @@ struct OnboardingTests {
             ]
         )
 
+        var eventContinuation: AsyncStream<ChillClawEvent>.Continuation?
+        let updateCompleted = AsyncCounter()
         let session = await recorder.session { request in
             let url = try #require(request.url)
             switch (request.httpMethod ?? "GET", url.path) {
             case ("GET", "/api/onboarding/state"):
-                let body = try JSONEncoder.chillClaw.encode(makeOnboardingStateResponse(step: .install))
+                let completed = await updateCompleted.value() > 0
+                var state = makeOnboardingStateResponse(step: completed ? .model : .install)
+                if completed {
+                    state.draft.install = .init(
+                        installed: true,
+                        version: "2026.3.14",
+                        disposition: "reused-existing",
+                        updateAvailable: false,
+                        latestVersion: "2026.3.14",
+                        updateSummary: nil
+                    )
+                    state.summary.install = state.draft.install
+                }
+                let body = try JSONEncoder.chillClaw.encode(state)
+                return (jsonResponse(url: url), body)
+            case ("GET", "/api/overview"):
+                let completed = await updateCompleted.value() > 0
+                let body = try JSONEncoder.chillClaw.encode(makeOverview(setupCompleted: false, installed: true, running: true, version: completed ? "2026.3.14" : "2026.3.13"))
                 return (jsonResponse(url: url), body)
             case ("GET", "/api/deploy/targets"):
                 let body = try JSONEncoder.chillClaw.encode(refreshedTargets)
                 return (jsonResponse(url: url), body)
             case ("POST", "/api/onboarding/runtime/update"):
-                var nextState = makeOnboardingStateResponse(step: .model)
-                nextState.draft.install = .init(
-                    installed: true,
-                    version: "2026.3.14",
-                    disposition: "reused-existing",
-                    updateAvailable: false,
-                    latestVersion: "2026.3.14",
-                    updateSummary: nil
-                )
-                let body = try JSONEncoder.chillClaw.encode(
-                    SetupRunResponse(
-                        status: "completed",
-                        message: "System OpenClaw updated from 2026.3.13 to 2026.3.14.",
-                        steps: [],
-                        overview: makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14"),
-                        install: .init(
-                            status: "completed",
-                            message: "System OpenClaw updated from 2026.3.13 to 2026.3.14.",
-                            engineStatus: makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.14").engine,
-                            disposition: "reused-existing",
-                            pinnedVersion: "2026.3.14",
-                            existingVersion: "2026.3.13",
-                            actualVersion: "2026.3.14"
-                        ),
-                        onboarding: nextState
-                    )
-                )
+                let body = Data("""
+                {
+                  "accepted": true,
+                  "operation": {
+                    "operationId": "onboarding:install",
+                    "scope": "onboarding",
+                    "resourceId": "managed-local",
+                    "action": "onboarding-runtime-update",
+                    "status": "running",
+                    "phase": "updating",
+                    "percent": 16,
+                    "message": "Updating OpenClaw locally.",
+                    "startedAt": "2026-04-21T00:00:00.000Z",
+                    "updatedAt": "2026-04-21T00:00:00.000Z",
+                    "retryable": true
+                  },
+                  "onboarding": {
+                    "firstRun": {
+                      "introCompleted": true,
+                      "setupCompleted": false
+                    },
+                    "draft": {
+                      "currentStep": "install"
+                    },
+                    "config": {
+                      "modelProviders": [],
+                      "channels": [],
+                      "employeePresets": []
+                    },
+                    "summary": {}
+                  }
+                }
+                """.utf8)
                 return (jsonResponse(url: url), body)
             default:
                 throw URLError(.badServerResponse)
@@ -4109,19 +4039,51 @@ struct OnboardingTests {
         appState.overview = makeOverview(setupCompleted: false, installed: true, running: true, version: "2026.3.13")
         appState.deploymentTargets = initialTargets
 
+        let eventStream = AsyncStream<ChillClawEvent> { continuation in
+            eventContinuation = continuation
+        }
         let viewModel = NativeOnboardingViewModel(
             appState: appState,
-            daemonEventStreamFactory: { AsyncStream { continuation in continuation.finish() } }
+            daemonEventStreamFactory: { eventStream }
         )
+        await viewModel.bootstrap()
+        appState.deploymentTargets = initialTargets
         viewModel.onboardingState = makeOnboardingStateResponse(step: .install)
 
         await viewModel.updateExistingInstall()
-        await waitForRecordedURLCount(recorder, expectedCount: 3)
-        try? await Task.sleep(nanoseconds: 20_000_000)
+        #expect(viewModel.installBusy == true)
+
+        _ = await updateCompleted.increment()
+        let completedEvent = try JSONDecoder.chillClaw.decode(ChillClawEvent.self, from: Data("""
+        {
+          "type": "operation.completed",
+          "operation": {
+            "epoch": "epoch-1",
+            "revision": 2,
+            "data": {
+              "operationId": "onboarding:install",
+              "scope": "onboarding",
+              "resourceId": "managed-local",
+              "action": "onboarding-runtime-update",
+              "status": "completed",
+              "phase": "completed",
+              "percent": 100,
+              "message": "System OpenClaw updated from 2026.3.13 to 2026.3.14.",
+              "startedAt": "2026-04-21T00:00:00.000Z",
+              "updatedAt": "2026-04-21T00:00:10.000Z",
+              "retryable": false
+            }
+          }
+        }
+        """.utf8))
+        eventContinuation?.yield(completedEvent)
+        await waitForRecordedURLCount(recorder, expectedCount: 4)
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
         let urls = await recorder.recordedURLs()
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/runtime/update"))
         #expect(urls.contains("http://127.0.0.1:4545/api/onboarding/state"))
+        #expect(urls.contains("http://127.0.0.1:4545/api/overview"))
         #expect(appState.overview?.engine.version == "2026.3.14")
         #expect(resolveNativeOnboardingInstallTarget(overview: appState.overview, deploymentTargets: appState.deploymentTargets)?.updateAvailable == false)
         #expect(viewModel.currentStep == .model)
@@ -4779,11 +4741,11 @@ struct OnboardingTests {
                 return (jsonResponse(url: url), payload)
             case ("POST", "/api/onboarding/complete"):
                 let payload = try JSONEncoder.chillClaw.encode(
-                    CompleteOnboardingResponse(
-                        status: "completed",
-                        destination: .chat,
-                        summary: .init(),
-                        overview: makeOverview(setupCompleted: true)
+                    OnboardingCompletionOperationResponse(
+                        operation: onboardingCompletionOperation(status: "running", phase: "finalizing"),
+                        accepted: true,
+                        onboarding: makeOnboardingStateResponse(step: .employee),
+                        destination: .chat
                     )
                 )
                 return (jsonResponse(url: url), payload)
@@ -4886,11 +4848,11 @@ struct OnboardingTests {
             case ("POST", "/api/onboarding/complete"):
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 let payload = try JSONEncoder.chillClaw.encode(
-                    CompleteOnboardingResponse(
-                        status: "completed",
-                        destination: .chat,
-                        summary: .init(),
-                        overview: makeOverview(setupCompleted: true)
+                    OnboardingCompletionOperationResponse(
+                        operation: onboardingCompletionOperation(status: "running", phase: "finalizing"),
+                        accepted: true,
+                        onboarding: makeOnboardingStateResponse(step: .employee),
+                        destination: .chat
                     )
                 )
                 return (jsonResponse(url: url), payload)
@@ -4966,11 +4928,11 @@ struct OnboardingTests {
             switch (request.httpMethod ?? "GET", url.path) {
             case ("POST", "/api/onboarding/complete"):
                 let payload = try JSONEncoder.chillClaw.encode(
-                    CompleteOnboardingResponse(
-                        status: "completed",
-                        destination: .chat,
-                        summary: .init(),
-                        overview: makeOverview(setupCompleted: true)
+                    OnboardingCompletionOperationResponse(
+                        operation: onboardingCompletionOperation(status: "running", phase: "finalizing"),
+                        accepted: true,
+                        onboarding: makeOnboardingStateResponse(step: .employee),
+                        destination: .chat
                     )
                 )
                 return (jsonResponse(url: url), payload)
@@ -5325,6 +5287,94 @@ private func makeOnboardingStateResponse(
             repairRecommended: false
         ),
         capabilityReadiness: capabilityReadiness
+    )
+}
+
+private func makeOnboardingOperation(
+    operationId: String,
+    action: String,
+    phase: String,
+    message: String,
+    status: String = "completed",
+    resourceId: String? = nil
+) -> OperationSummary {
+    OperationSummary(
+        operationId: operationId,
+        action: action,
+        status: status,
+        phase: phase,
+        message: message,
+        startedAt: "2026-04-21T00:00:00.000Z",
+        updatedAt: "2026-04-21T00:00:01.000Z",
+        deadlineAt: nil,
+        errorCode: nil,
+        retryable: true,
+        scope: "onboarding",
+        resourceId: resourceId,
+        percent: status == "completed" ? 100 : 45,
+        result: nil,
+        error: nil,
+        sync: nil
+    )
+}
+
+private func makeOnboardingModelOperationResponse(
+    onboarding: OnboardingStateResponse,
+    status: String = "completed",
+    phase: String = "completed",
+    message: String = "Saved"
+) -> OnboardingModelOperationResponse {
+    .init(
+        operation: makeOnboardingOperation(
+            operationId: "onboarding:model",
+            action: "onboarding-model-save",
+            phase: phase,
+            message: message,
+            status: status
+        ),
+        accepted: true,
+        onboarding: onboarding
+    )
+}
+
+private func makeOnboardingChannelOperationResponse(
+    onboarding: OnboardingStateResponse,
+    status: String = "completed",
+    phase: String = "completed",
+    message: String = "Saved"
+) -> OnboardingChannelOperationResponse {
+    .init(
+        operation: makeOnboardingOperation(
+            operationId: "onboarding:channel",
+            action: "onboarding-channel-save",
+            phase: phase,
+            message: message,
+            status: status,
+            resourceId: "wechat"
+        ),
+        accepted: true,
+        onboarding: onboarding
+    )
+}
+
+private func onboardingCompletionOperation(status: String, phase: String?) -> OperationSummary {
+    OperationSummary(
+        operationId: "onboarding:completion",
+        action: "onboarding-completion",
+        status: status,
+        phase: phase,
+        message: status == "completed" ? "Onboarding complete." : "Finishing onboarding.",
+        startedAt: "2026-04-21T00:00:00.000Z",
+        updatedAt: "2026-04-21T00:00:00.000Z",
+        deadlineAt: nil,
+        errorCode: nil,
+        retryable: true,
+        scope: "onboarding",
+        resourceId: nil,
+        percent: status == "completed" ? 100 : 8,
+        result: nil,
+        error: nil,
+        sync: nil
     )
 }
 

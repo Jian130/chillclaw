@@ -10,6 +10,10 @@ import {
   fetchToolOverview,
   redoOnboarding,
   resetClientReadStateForTests,
+  saveOnboardingChannelEntry,
+  saveOnboardingModelEntry,
+  updateOnboardingRuntime,
+  updateOnboardingChannelEntry,
   updatePlugin
 } from "./client.js";
 
@@ -163,25 +167,150 @@ describe("API client GET dedupe", () => {
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
   });
 
-  it("aborts long onboarding mutations when the browser request deadline expires", async () => {
-    vi.useFakeTimers();
-    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<never>>((_input, init) => {
-      const signal = init?.signal as AbortSignal | undefined;
-      return new Promise((_resolve, reject) => {
-        signal?.addEventListener("abort", () => {
-          reject(new DOMException("The operation was aborted.", "AbortError"));
-        });
-      });
-    });
+  it("posts onboarding runtime update as a quick operation command", async () => {
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: true; json: () => Promise<unknown> }>
+    >(async () => ({
+      ok: true,
+      json: async () => ({
+        accepted: true,
+        operation: {
+          operationId: "onboarding:install",
+          scope: "onboarding",
+          action: "onboarding-runtime-update",
+          status: "running",
+          message: "Updating OpenClaw locally.",
+          startedAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z"
+        },
+        onboarding: {
+          firstRun: { introCompleted: true, setupCompleted: false },
+          draft: { currentStep: "install" },
+          config: { modelProviders: [], channels: [], employeePresets: [] },
+          summary: {}
+        }
+      })
+    }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const request = completeOnboarding({ destination: "dashboard" });
-    const assertion = expect(request).rejects.toMatchObject({
-      code: "REQUEST_TIMEOUT"
-    });
-    await vi.advanceTimersByTimeAsync(1_200_000);
+    await updateOnboardingRuntime();
 
-    await assertion;
-    expect((fetchMock.mock.calls[0]?.[1]?.signal as AbortSignal | undefined)?.aborted).toBe(true);
+    expect(String(fetchMock.mock.calls[0]?.[0] ?? "")).toContain("/onboarding/runtime/update");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+  });
+
+  it("posts onboarding completion as a quick operation command", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: true; json: () => Promise<unknown> }>>(
+      async () => ({
+        ok: true,
+        json: async () => ({
+          accepted: true,
+          operation: {
+            operationId: "onboarding:completion",
+            scope: "onboarding",
+            action: "onboarding-completion",
+            status: "running",
+            phase: "finalizing",
+            message: "Finishing onboarding.",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            updatedAt: "2026-04-21T00:00:00.000Z"
+          },
+          onboarding: {
+            firstRun: { introCompleted: true, setupCompleted: false },
+            draft: { currentStep: "employee" },
+            config: { modelProviders: [], channels: [], employeePresets: [] },
+            summary: {}
+          },
+          destination: "dashboard"
+        })
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await completeOnboarding({ destination: "dashboard" });
+
+    expect(String(fetchMock.mock.calls[0]?.[0] ?? "")).toContain("/onboarding/complete");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+  });
+
+  it("posts onboarding model save as a quick operation command", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: true; json: () => Promise<unknown> }>>(
+      async () => ({
+        ok: true,
+        json: async () => ({
+          accepted: true,
+          operation: {
+            operationId: "onboarding:model",
+            scope: "onboarding",
+            action: "onboarding-model-save",
+            status: "running",
+            phase: "saving-model",
+            message: "Saving the first model.",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            updatedAt: "2026-04-21T00:00:00.000Z"
+          },
+          onboarding: {
+            firstRun: { introCompleted: true, setupCompleted: false },
+            draft: { currentStep: "model" },
+            config: { modelProviders: [], channels: [], employeePresets: [] },
+            summary: {}
+          }
+        })
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveOnboardingModelEntry({
+      label: "Claude",
+      providerId: "anthropic",
+      methodId: "api-key",
+      modelKey: "claude",
+      values: {},
+      makeDefault: true
+    });
+
+    expect(String(fetchMock.mock.calls[0]?.[0] ?? "")).toContain("/onboarding/model/entries");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+  });
+
+  it("posts onboarding channel saves as quick operation commands", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: true; json: () => Promise<unknown> }>>(
+      async () => ({
+        ok: true,
+        json: async () => ({
+          accepted: true,
+          operation: {
+            operationId: "onboarding:channel",
+            scope: "onboarding",
+            action: "onboarding-channel-save",
+            status: "running",
+            phase: "saving-channel",
+            message: "Saving the first channel.",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            updatedAt: "2026-04-21T00:00:00.000Z"
+          },
+          onboarding: {
+            firstRun: { introCompleted: true, setupCompleted: false },
+            draft: { currentStep: "channel" },
+            config: { modelProviders: [], channels: [], employeePresets: [] },
+            summary: {}
+          }
+        })
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveOnboardingChannelEntry({ channelId: "wechat", values: {}, action: "save" });
+    await updateOnboardingChannelEntry("entry-1", { channelId: "wechat", values: {}, action: "save" });
+
+    expect(String(fetchMock.mock.calls[0]?.[0] ?? "")).toContain("/onboarding/channel/entries");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+    expect(String(fetchMock.mock.calls[1]?.[0] ?? "")).toContain("/onboarding/channel/entries/entry-1");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("PATCH");
+    expect(fetchMock.mock.calls[1]?.[1]?.signal).toBeUndefined();
   });
 });

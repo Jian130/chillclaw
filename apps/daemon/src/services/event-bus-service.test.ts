@@ -63,3 +63,78 @@ test("event bus retains the latest downloads snapshot for late subscribers", () 
     ["downloads.updated"]
   );
 });
+
+test("event bus retains operation snapshots by operation id for late subscribers", () => {
+  const bus = new EventBusService();
+
+  bus.publish({
+    type: "operation.updated",
+    operation: {
+      epoch: "operations-test",
+      revision: 1,
+      data: {
+        operationId: "onboarding:install",
+        scope: "onboarding",
+        action: "onboarding-runtime-install",
+        status: "running",
+        phase: "installing",
+        percent: 55,
+        message: "Installing OpenClaw locally.",
+        startedAt: "2026-04-21T00:00:00.000Z",
+        updatedAt: "2026-04-21T00:00:01.000Z"
+      }
+    }
+  });
+
+  bus.publish({
+    type: "operation.updated",
+    operation: {
+      epoch: "operations-test",
+      revision: 2,
+      data: {
+        operationId: "runtime:openclaw-runtime:prepare",
+        scope: "runtime",
+        resourceId: "openclaw-runtime",
+        action: "prepare",
+        status: "running",
+        phase: "verifying-artifact",
+        percent: 35,
+        message: "Verifying OpenClaw runtime.",
+        startedAt: "2026-04-21T00:00:00.000Z",
+        updatedAt: "2026-04-21T00:00:02.000Z"
+      }
+    }
+  });
+
+  bus.publish({
+    type: "operation.completed",
+    operation: {
+      epoch: "operations-test",
+      revision: 3,
+      data: {
+        operationId: "onboarding:install",
+        scope: "onboarding",
+        action: "onboarding-runtime-install",
+        status: "completed",
+        phase: "completed",
+        percent: 100,
+        message: "OpenClaw deployment is complete.",
+        startedAt: "2026-04-21T00:00:00.000Z",
+        updatedAt: "2026-04-21T00:00:03.000Z"
+      }
+    }
+  });
+
+  const retained = bus.getRetainedEvents();
+
+  assert.deepEqual(
+    retained.map((event) => event.type),
+    ["operation.completed", "operation.updated"]
+  );
+  const install = retained.find((event) => event.type === "operation.completed");
+  assert.equal(install?.type, "operation.completed");
+  if (install?.type === "operation.completed") {
+    assert.equal(install.operation.revision, 3);
+    assert.equal(install.operation.data.operationId, "onboarding:install");
+  }
+});

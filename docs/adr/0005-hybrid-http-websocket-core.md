@@ -26,6 +26,7 @@ ChillClaw will use a hybrid transport model:
 - UI clients use one daemon WebSocket endpoint at `/api/events` for live push updates.
 - Only the daemon talks to the OpenClaw gateway WebSocket directly.
 - The daemon remains the single product control plane between UI clients and the engine/runtime.
+- Long-running commands return quickly with daemon-owned operation state, then publish progress and completion through `/api/events`.
 
 This preserves the existing boundary:
 
@@ -65,6 +66,23 @@ These adapters stay daemon-internal. UI clients do not use them directly.
 - Some product flows now have two surfaces:
   - authoritative HTTP reads
   - push-oriented event updates
+- Long-running product flows need durable operation state so clients can recover after sleep, reconnect, route changes, or timed-out HTTP calls.
+
+## Async operation extension
+
+The hybrid model should be applied consistently across the product. HTTP commands remain the command surface, but any work that may exceed 1-2 seconds should be accepted as a daemon operation instead of being completed inside the request lifetime.
+
+The canonical flow is:
+
+1. Client sends an HTTP command.
+2. Daemon validates input, creates or resumes an operation, persists the operation summary, and returns quickly.
+3. Daemon continues work in the background.
+4. Daemon publishes progress, completion, and affected resource snapshots through `/api/events`.
+5. Clients render live updates from events and recover missed updates through HTTP reads.
+
+This extension applies first to onboarding runtime install/checking, runtime manager actions, local model setup, gateway restart, recovery, diagnostics export, app update checks, and any OpenClaw CLI or gateway probe that can stall.
+
+The detailed project reference is `docs/reference/async-daemon-operations.md`.
 
 ## Rules
 
@@ -72,3 +90,5 @@ These adapters stay daemon-internal. UI clients do not use them directly.
 - Do not let frontend clients connect to OpenClaw directly.
 - Keep HTTP as the source of truth for refresh and reconcile behavior.
 - Use the daemon WebSocket for push updates, not for replacing the whole API surface.
+- Do not let UI requests wait on unbounded OpenClaw CLI, gateway, download, install, update, recovery, or health-check work.
+- Keep events as live notifications; persist operation state and resource snapshots for reconnect and recovery.

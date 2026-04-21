@@ -585,6 +585,96 @@ final class NativeOnboardingViewModel {
         completionWarmupMessage = result.warmupTaskId == nil ? nil : "Finishing workspace setup in the background."
     }
 
+    private func applyCompletionOperationProgress(_ operation: OperationSummary) {
+        if let currentOnboardingState = onboardingState {
+            onboardingState = OnboardingStateResponse(
+                firstRun: currentOnboardingState.firstRun,
+                draft: currentOnboardingState.draft,
+                config: currentOnboardingState.config,
+                summary: currentOnboardingState.summary,
+                localRuntime: currentOnboardingState.localRuntime,
+                presetSkillSync: currentOnboardingState.presetSkillSync,
+                capabilityReadiness: currentOnboardingState.capabilityReadiness,
+                operations: .init(
+                    install: currentOnboardingState.operations?.install,
+                    localRuntime: currentOnboardingState.operations?.localRuntime,
+                    model: currentOnboardingState.operations?.model,
+                    channel: currentOnboardingState.operations?.channel,
+                    completion: operation.longRunningSummary
+                )
+            )
+        }
+        completionWarmupMessage = operation.message
+    }
+
+    private func applyModelOperationProgress(_ operation: OperationSummary) {
+        guard let currentOnboardingState = onboardingState else { return }
+        onboardingState = OnboardingStateResponse(
+            firstRun: currentOnboardingState.firstRun,
+            draft: currentOnboardingState.draft,
+            config: currentOnboardingState.config,
+            summary: currentOnboardingState.summary,
+            localRuntime: currentOnboardingState.localRuntime,
+            presetSkillSync: currentOnboardingState.presetSkillSync,
+            capabilityReadiness: currentOnboardingState.capabilityReadiness,
+            operations: .init(
+                install: currentOnboardingState.operations?.install,
+                localRuntime: currentOnboardingState.operations?.localRuntime,
+                model: operation.longRunningSummary,
+                channel: currentOnboardingState.operations?.channel,
+                completion: currentOnboardingState.operations?.completion
+            )
+        )
+    }
+
+    private func applyChannelOperationProgress(_ operation: OperationSummary) {
+        guard let currentOnboardingState = onboardingState else { return }
+        onboardingState = OnboardingStateResponse(
+            firstRun: currentOnboardingState.firstRun,
+            draft: currentOnboardingState.draft,
+            config: currentOnboardingState.config,
+            summary: currentOnboardingState.summary,
+            localRuntime: currentOnboardingState.localRuntime,
+            presetSkillSync: currentOnboardingState.presetSkillSync,
+            capabilityReadiness: currentOnboardingState.capabilityReadiness,
+            operations: .init(
+                install: currentOnboardingState.operations?.install,
+                localRuntime: currentOnboardingState.operations?.localRuntime,
+                model: currentOnboardingState.operations?.model,
+                channel: operation.longRunningSummary,
+                completion: currentOnboardingState.operations?.completion
+            )
+        )
+        channelMessage = operation.message
+    }
+
+    private func finishAcceptedCompletion(destination: OnboardingDestination?, operation: OperationSummary?) async {
+        guard let overview = (try? await readOverviewSnapshot()) ?? appState.overview else {
+            employeeBusy = false
+            completionBusy = nil
+            pageError = "ChillClaw could not refresh the latest overview."
+            return
+        }
+        if let state = try? await refreshOnboardingState() {
+            applyOnboardingState(state)
+        }
+        let response = CompleteOnboardingResponse(
+            status: "completed",
+            destination: destination,
+            summary: completionSummary,
+            overview: overview,
+            warmupTaskId: operation?.result?.id,
+            operation: operation?.longRunningSummary
+        )
+        applyCompletedOnboarding(response)
+        employeeBusy = false
+        completionBusy = nil
+
+        if let destination {
+            await enterDestination(destination, refreshAll: false)
+        }
+    }
+
     private func clearCompletionWarmupState() {
         completionWarmupTaskID = nil
         completionWarmupStatus = nil
@@ -765,26 +855,26 @@ final class NativeOnboardingViewModel {
 
         pageError = nil
         beginInstallProgress(.init(phase: .updating, percent: 10, message: nil))
-        defer { endInstallProgress() }
+        var operationStillRunning = false
 
         do {
             let result = try await appState.client.updateOnboardingRuntime()
-            appState.applyOverviewSnapshot(result.overview)
-            if let onboarding = result.onboarding {
-                applyOnboardingState(onboarding)
+            operationStillRunning = result.operation.status == "pending" || result.operation.status == "running"
+            applyInstallOperationProgress(result.operation)
+            applyOnboardingState(result.onboarding)
+            if !operationStillRunning {
+                _ = try await readDeploymentTargetsSnapshot()
+                appState.applyBanner(result.operation.message)
             }
-            _ = try await readDeploymentTargetsSnapshot()
-
-            guard result.status == "completed" else {
-                throw NativeClientError.runtime(result.message)
-            }
-
-            appState.applyBanner(result.message)
         } catch {
             if await recoverOnboardingInstallAfterTimeout(error) {
                 return
             }
             presentErrorUnlessCancelled(error)
+        }
+
+        if !operationStillRunning {
+            endInstallProgress()
         }
     }
 
@@ -879,20 +969,25 @@ final class NativeOnboardingViewModel {
     func runInstall() async {
         pageError = nil
         beginInstallProgress(.init(phase: .detecting, percent: 16, message: copy.installStageDetecting))
-        defer { endInstallProgress() }
+        var operationStillRunning = false
 
         do {
             let result = try await appState.client.installOnboardingRuntime()
-            appState.applyOverviewSnapshot(result.overview)
-            _ = try await readDeploymentTargetsSnapshot()
-            if let onboarding = result.onboarding {
-                applyOnboardingState(onboarding)
+            operationStillRunning = result.operation.status == "pending" || result.operation.status == "running"
+            applyInstallOperationProgress(result.operation)
+            applyOnboardingState(result.onboarding)
+            if !operationStillRunning {
+                _ = try await readDeploymentTargetsSnapshot()
             }
         } catch {
             if await recoverOnboardingInstallAfterTimeout(error) {
                 return
             }
             presentErrorUnlessCancelled(error)
+        }
+
+        if !operationStillRunning {
+            endInstallProgress()
         }
     }
 
@@ -904,7 +999,6 @@ final class NativeOnboardingViewModel {
 
         pageError = nil
         modelBusy = "save"
-        defer { if modelBusy == "save" { modelBusy = "" } }
 
             let request = SaveModelEntryRequest(
                 label: modelLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -920,16 +1014,16 @@ final class NativeOnboardingViewModel {
 
         do {
             let result = try await appState.client.saveOnboardingModelEntry(request)
-            appState.modelConfig = result.modelConfig
-            modelSession = result.authSession
-            if let onboarding = result.onboarding {
-                applyOnboardingState(onboarding)
-            }
-
-            if let authSession = result.authSession {
-                startModelSessionPolling(sessionId: authSession.id)
+            applyOnboardingState(result.onboarding)
+            applyModelOperationProgress(result.operation)
+            if result.operation.status == "completed" {
+                Task { @MainActor [weak self] in
+                    await self?.restoreActiveModelAuthSessionIfNeeded(from: result.onboarding)
+                }
+                modelBusy = ""
             }
         } catch {
+            modelBusy = ""
             presentErrorUnlessCancelled(error)
         }
     }
@@ -969,7 +1063,6 @@ final class NativeOnboardingViewModel {
 
         pageError = nil
         channelBusy = true
-        defer { channelBusy = false }
 
         let request = SaveChannelEntryRequest(
             channelId: selectedChannelPresentation.id.rawValue,
@@ -980,33 +1073,17 @@ final class NativeOnboardingViewModel {
 
         do {
             let result = try await self.appState.client.saveOnboardingChannelEntry(entryId: selectedChannelEntry?.id, request: request)
-            applyChannelConfig(result.channelConfig, activeSession: result.session)
-
-            channelMessage = result.message
-            channelRequiresApply = result.requiresGatewayApply ?? false
-            if result.session != nil {
-                channelSessionInput = ""
-            }
-            if let onboarding = result.onboarding {
-                applyOnboardingState(onboarding)
-            }
-
-            if let session = result.session {
-                startChannelSessionPolling(
-                    sessionId: session.id,
-                    channelId: selectedChannelPresentation.id,
-                    preferredEntryId: currentDraft.channel?.entryId ?? session.entryId
-                )
-                return
-            }
-
-            channelSessionTask?.cancel()
-            channelSessionTask = nil
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                _ = try? await self.readChannelConfigSnapshot()
+            channelSessionInput = ""
+            applyOnboardingState(result.onboarding)
+            applyChannelOperationProgress(result.operation)
+            if result.operation.status == "completed" {
+                Task { @MainActor [weak self] in
+                    await self?.resumeActiveChannelSessionIfNeeded(from: result.onboarding)
+                }
+                channelBusy = false
             }
         } catch {
+            channelBusy = false
             if await recoverOnboardingChannelSaveAfterTimeout(
                 error,
                 channelId: selectedChannelPresentation.id,
@@ -1090,7 +1167,6 @@ final class NativeOnboardingViewModel {
 
         pageError = nil
         employeeBusy = true
-        defer { employeeBusy = false }
 
         let employeeState = OnboardingEmployeeState(
             memberId: currentDraft.employee?.memberId,
@@ -1107,8 +1183,15 @@ final class NativeOnboardingViewModel {
 
         do {
             let result = try await appState.client.completeOnboarding(.init(employee: employeeState))
-            applyCompletedOnboarding(result)
+            applyOnboardingState(result.onboarding)
+            applyCompletionOperationProgress(result.operation)
+            completionWarmupStatus = .running
+            completionWarmupMessage = result.operation.message
+            if result.operation.status == "completed" {
+                await finishAcceptedCompletion(destination: nil, operation: result.operation)
+            }
         } catch {
+            employeeBusy = false
             if await recoverOnboardingCompletionAfterTimeout(error, destination: nil) {
                 return
             }
@@ -1126,21 +1209,22 @@ final class NativeOnboardingViewModel {
 
         completionBusy = destination
         pageError = nil
-        defer { completionBusy = nil }
 
         do {
             if showingCompletion {
+                completionBusy = nil
                 await enterDestination(destination)
                 return
             }
 
             let result = try await appState.client.completeOnboarding(.init(destination: destination))
-            appState.applyOverviewSnapshot(result.overview)
-            if destination == .chat {
-                applyPreferredChatMember(onboardingPreferredChatMemberId(response: result))
+            applyOnboardingState(result.onboarding)
+            applyCompletionOperationProgress(result.operation)
+            if result.operation.status == "completed" {
+                await finishAcceptedCompletion(destination: destination, operation: result.operation)
             }
-            await enterDestination(destination, refreshAll: false)
         } catch {
+            completionBusy = nil
             if await recoverOnboardingCompletionAfterTimeout(error, destination: destination) {
                 return
             }
@@ -1158,9 +1242,14 @@ final class NativeOnboardingViewModel {
             }
 
             let result = try await appState.client.completeOnboarding(.init(destination: .dashboard))
-            appState.applyOverviewSnapshot(result.overview)
-            await enterDestination(.dashboard, refreshAll: false)
+            completionBusy = .dashboard
+            applyOnboardingState(result.onboarding)
+            applyCompletionOperationProgress(result.operation)
+            if result.operation.status == "completed" {
+                await finishAcceptedCompletion(destination: .dashboard, operation: result.operation)
+            }
         } catch {
+            completionBusy = nil
             if await recoverOnboardingCompletionAfterTimeout(error, destination: .dashboard) {
                 return
             }
@@ -1276,6 +1365,34 @@ final class NativeOnboardingViewModel {
         let next = try await appState.client.fetchOnboardingState()
         applyOnboardingState(next)
         return next.draft.currentStep == .employee
+    }
+
+    private func restoreActiveModelAuthSessionIfNeeded(from state: OnboardingStateResponse) async {
+        guard let sessionId = state.draft.activeModelAuthSessionId, !sessionId.isEmpty else { return }
+        do {
+            let next = try await appState.client.fetchOnboardingModelAuthSession(sessionId: sessionId)
+            appState.modelConfig = next.modelConfig
+            modelSession = next.session.status == "completed" || next.session.status == "failed" ? nil : next.session
+            if let onboarding = next.onboarding {
+                applyOnboardingState(onboarding)
+            }
+            if let activeSession = modelSession {
+                startModelSessionPolling(sessionId: activeSession.id)
+            }
+        } catch {
+            if !(await handleMissingOnboardingModelSession(error)) {
+                presentErrorUnlessCancelled(error)
+            }
+        }
+    }
+
+    private func resumeActiveChannelSessionIfNeeded(from state: OnboardingStateResponse) async {
+        guard let sessionId = state.draft.activeChannelSessionId, !sessionId.isEmpty else { return }
+        startChannelSessionPolling(
+            sessionId: sessionId,
+            channelId: state.draft.channel?.channelId ?? .wechat,
+            preferredEntryId: state.draft.channel?.entryId
+        )
     }
 
     private func resumeChannelSession(
@@ -1939,6 +2056,7 @@ final class NativeOnboardingViewModel {
                     pageError = nil
                     _ = try? await readOverviewSnapshot()
                     _ = try? await readDeploymentTargetsSnapshot()
+                    endInstallProgress()
                     return true
                 }
             }
@@ -1949,6 +2067,7 @@ final class NativeOnboardingViewModel {
                 applyOnboardingState(staged)
                 pageError = nil
                 _ = try? await readDeploymentTargetsSnapshot()
+                endInstallProgress()
                 return true
             }
 
@@ -2122,6 +2241,22 @@ final class NativeOnboardingViewModel {
                         message: progress.message
                     )
                 }
+            case let .operationUpdated(snapshot),
+                let .operationCompleted(snapshot):
+                guard snapshot.data.operationId == "onboarding:install" else { break }
+                applyInstallOperationProgress(snapshot.data)
+                if snapshot.data.status == "completed" {
+                    endInstallProgress()
+                    pageError = nil
+                    Task { @MainActor in
+                        _ = try? await refreshOnboardingState()
+                        _ = try? await readOverviewSnapshot()
+                        _ = try? await readDeploymentTargetsSnapshot()
+                    }
+                } else if snapshot.data.status == "failed" || snapshot.data.status == "timed-out" {
+                    endInstallProgress()
+                    pageError = snapshot.data.error?.message ?? snapshot.data.message
+                }
             default:
                 break
             }
@@ -2152,6 +2287,7 @@ final class NativeOnboardingViewModel {
                     summary: currentOnboardingState.summary,
                     localRuntime: currentOnboardingState.localRuntime,
                     presetSkillSync: snapshot.data,
+                    capabilityReadiness: currentOnboardingState.capabilityReadiness,
                     operations: currentOnboardingState.operations
                 )
             }
@@ -2168,6 +2304,64 @@ final class NativeOnboardingViewModel {
             let .runtimeCompleted(_, _, _, _, runtimeManager),
             let .runtimeUpdateStaged(_, _, _, runtimeManager):
             appState.applyRuntimeManagerOverview(runtimeManager)
+        case let .operationUpdated(snapshot),
+            let .operationCompleted(snapshot):
+            if snapshot.data.operationId == "onboarding:install" {
+                applyInstallOperationProgress(snapshot.data)
+            } else if snapshot.data.operationId == "onboarding:completion" {
+                applyCompletionOperationProgress(snapshot.data)
+                if snapshot.data.status == "completed" {
+                    pageError = nil
+                    Task { @MainActor in
+                        await finishAcceptedCompletion(destination: completionBusy, operation: snapshot.data)
+                    }
+                } else if snapshot.data.status == "failed" || snapshot.data.status == "timed-out" {
+                    employeeBusy = false
+                    completionBusy = nil
+                    pageError = snapshot.data.error?.message ?? snapshot.data.message
+                }
+            } else if snapshot.data.operationId == "onboarding:model" {
+                applyModelOperationProgress(snapshot.data)
+                if snapshot.data.status == "completed" {
+                    modelBusy = ""
+                    pageError = nil
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        let nextOnboarding = try? await self.refreshOnboardingState()
+                        _ = try? await self.readModelConfigSnapshot()
+                        if let nextOnboarding {
+                            await self.restoreActiveModelAuthSessionIfNeeded(from: nextOnboarding)
+                        }
+                    }
+                } else if snapshot.data.status == "failed" || snapshot.data.status == "timed-out" {
+                    modelBusy = ""
+                    pageError = snapshot.data.error?.message ?? snapshot.data.message
+                }
+            } else if snapshot.data.operationId == "onboarding:channel" {
+                applyChannelOperationProgress(snapshot.data)
+                if snapshot.data.status == "completed" {
+                    channelBusy = false
+                    pageError = nil
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        let nextOnboarding = try? await self.refreshOnboardingState()
+                        _ = try? await self.readChannelConfigSnapshot()
+                        if let requiresGatewayApply = nextOnboarding?.draft.channelProgress?.requiresGatewayApply {
+                            self.channelRequiresApply = requiresGatewayApply
+                        }
+                        if let nextOnboarding {
+                            await self.resumeActiveChannelSessionIfNeeded(from: nextOnboarding)
+                        }
+                        _ = try? await self.maybeAdvanceCompletedChannelSetupIfNeeded(
+                            channelId: nextOnboarding?.draft.channel?.channelId,
+                            preferredEntryId: nextOnboarding?.draft.channel?.entryId
+                        )
+                    }
+                } else if snapshot.data.status == "failed" || snapshot.data.status == "timed-out" {
+                    channelBusy = false
+                    pageError = snapshot.data.error?.message ?? snapshot.data.message
+                }
+            }
         case .skillCatalogUpdated, .pluginConfigUpdated, .deployProgress, .deployCompleted, .gatewayStatus, .chatStream, .configApplied,
              .downloadsUpdated, .downloadProgress, .downloadStatus, .downloadCompleted, .downloadFailed:
             break
@@ -2242,6 +2436,32 @@ final class NativeOnboardingViewModel {
             message: message
         )
         startInstallProgressAnimationIfNeeded()
+    }
+
+    private func applyInstallOperationProgress(_ operation: OperationSummary) {
+        let phase: ChillClawDeployPhase = switch operation.phase {
+        case "completed":
+            .verifying
+        case "updating":
+            .updating
+        default:
+            .installing
+        }
+        applyInstallProgressUpdate(phase: phase, percent: operation.percent.map(Double.init), message: operation.message)
+
+        guard let current = onboardingState else { return }
+        var operations = current.operations ?? OnboardingOperationsState()
+        operations.install = operation.longRunningSummary
+        onboardingState = OnboardingStateResponse(
+            firstRun: current.firstRun,
+            draft: current.draft,
+            config: current.config,
+            summary: current.summary,
+            localRuntime: current.localRuntime,
+            presetSkillSync: current.presetSkillSync,
+            capabilityReadiness: current.capabilityReadiness,
+            operations: operations
+        )
     }
 
     private func startInstallProgressAnimationIfNeeded() {

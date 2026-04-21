@@ -44,6 +44,9 @@ function retainedEventKey(event: ChillClawEvent): string | undefined {
     case "preset-skill-sync.updated":
     case "downloads.updated":
       return event.type;
+    case "operation.updated":
+    case "operation.completed":
+      return `operation:${event.operation.data.operationId}`;
     default:
       return undefined;
   }

@@ -18,7 +18,13 @@ import {
   type LongRunningOperationSummary,
   type ModelConfigOverview,
   type MutationSyncMeta,
+  type OnboardingChannelOperationResponse,
+  type OnboardingCompletionOperationResponse,
+  type OnboardingModelOperationResponse,
+  type OnboardingRuntimeOperationResponse,
   type OnboardingStateResponse,
+  type OperationCommandResponse,
+  type OperationSummary,
   type PresetSkillSyncOverview,
   type RevisionedSnapshot,
   type SetupRunResponse,
@@ -388,6 +394,269 @@ test("onboarding responses serialize optional long-running operation metadata", 
   assert.equal(parsedState.operations?.install?.operationId, "onboarding:runtime-install");
   assert.equal(parsedState.operations?.install?.status, "running");
   assert.equal(parsedSetup.operation?.action, "onboarding-runtime-install");
+});
+
+test("onboarding runtime operation responses include the immediate onboarding snapshot", () => {
+  const onboarding: OnboardingStateResponse = {
+    firstRun: {
+      introCompleted: true,
+      setupCompleted: false
+    },
+    draft: {
+      currentStep: "install"
+    },
+    config: {
+      modelProviders: [],
+      channels: [],
+      employeePresets: []
+    },
+    summary: {}
+  };
+  const response: OnboardingRuntimeOperationResponse = {
+    accepted: true,
+    operation: {
+      operationId: "onboarding:install",
+      scope: "onboarding",
+      action: "onboarding-runtime-install",
+      status: "running",
+      phase: "installing",
+      message: "Installing OpenClaw locally.",
+      startedAt: "2026-04-21T00:00:00.000Z",
+      updatedAt: "2026-04-21T00:00:01.000Z",
+      retryable: true
+    },
+    onboarding
+  };
+
+  const parsed = JSON.parse(JSON.stringify(response)) as OnboardingRuntimeOperationResponse;
+
+  assert.equal(parsed.accepted, true);
+  assert.equal(parsed.operation.scope, "onboarding");
+  assert.equal(parsed.onboarding.draft.currentStep, "install");
+});
+
+test("onboarding completion operation responses include the immediate onboarding snapshot", () => {
+  const response: OnboardingCompletionOperationResponse = {
+    accepted: true,
+    operation: {
+      operationId: "onboarding:completion",
+      scope: "onboarding",
+      action: "onboarding-completion",
+      status: "running",
+      phase: "finalizing",
+      message: "Finishing onboarding.",
+      startedAt: "2026-04-21T00:00:00.000Z",
+      updatedAt: "2026-04-21T00:00:01.000Z",
+      retryable: true
+    },
+    onboarding: {
+      firstRun: {
+        introCompleted: true,
+        setupCompleted: false
+      },
+      draft: {
+        currentStep: "employee"
+      },
+      config: {
+        modelProviders: [],
+        channels: [],
+        employeePresets: []
+      },
+      summary: {},
+      operations: {
+        completion: {
+          operationId: "onboarding:completion",
+          action: "onboarding-completion",
+          status: "running",
+          phase: "finalizing",
+          message: "Finishing onboarding.",
+          startedAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:01.000Z",
+          retryable: true
+        }
+      }
+    },
+    destination: "chat"
+  };
+
+  const parsed = JSON.parse(JSON.stringify(response)) as OnboardingCompletionOperationResponse;
+
+  assert.equal(parsed.accepted, true);
+  assert.equal(parsed.operation.operationId, "onboarding:completion");
+  assert.equal(parsed.destination, "chat");
+  assert.equal(parsed.onboarding.operations?.completion?.operationId, "onboarding:completion");
+});
+
+test("onboarding model operation responses include the immediate onboarding snapshot", () => {
+  const response: OnboardingModelOperationResponse = {
+    accepted: true,
+    operation: {
+      operationId: "onboarding:model",
+      scope: "onboarding",
+      action: "onboarding-model-save",
+      status: "running",
+      phase: "saving-model",
+      message: "Saving the first model.",
+      startedAt: "2026-04-21T00:00:00.000Z",
+      updatedAt: "2026-04-21T00:00:01.000Z",
+      retryable: true
+    },
+    onboarding: {
+      firstRun: {
+        introCompleted: true,
+        setupCompleted: false
+      },
+      draft: {
+        currentStep: "model"
+      },
+      config: {
+        modelProviders: [],
+        channels: [],
+        employeePresets: []
+      },
+      summary: {},
+      operations: {
+        model: {
+          operationId: "onboarding:model",
+          action: "onboarding-model-save",
+          status: "running",
+          phase: "saving-model",
+          message: "Saving the first model.",
+          startedAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:01.000Z",
+          retryable: true
+        }
+      }
+    }
+  };
+
+  const parsed = JSON.parse(JSON.stringify(response)) as OnboardingModelOperationResponse;
+
+  assert.equal(parsed.accepted, true);
+  assert.equal(parsed.operation.operationId, "onboarding:model");
+  assert.equal(parsed.onboarding.operations?.model?.operationId, "onboarding:model");
+});
+
+test("onboarding channel operation responses include the immediate onboarding snapshot", () => {
+  const response: OnboardingChannelOperationResponse = {
+    accepted: true,
+    operation: {
+      operationId: "onboarding:channel",
+      scope: "onboarding",
+      action: "onboarding-channel-save",
+      status: "running",
+      phase: "saving-channel",
+      message: "Saving the first channel.",
+      startedAt: "2026-04-21T00:00:00.000Z",
+      updatedAt: "2026-04-21T00:00:01.000Z",
+      retryable: true
+    },
+    onboarding: {
+      firstRun: {
+        introCompleted: true,
+        setupCompleted: false
+      },
+      draft: {
+        currentStep: "channel"
+      },
+      config: {
+        modelProviders: [],
+        channels: [],
+        employeePresets: []
+      },
+      summary: {},
+      operations: {
+        channel: {
+          operationId: "onboarding:channel",
+          action: "onboarding-channel-save",
+          status: "running",
+          phase: "saving-channel",
+          message: "Saving the first channel.",
+          startedAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:01.000Z",
+          retryable: true
+        }
+      }
+    }
+  };
+
+  const parsed = JSON.parse(JSON.stringify(response)) as OnboardingChannelOperationResponse;
+
+  assert.equal(parsed.accepted, true);
+  assert.equal(parsed.operation.operationId, "onboarding:channel");
+  assert.equal(parsed.onboarding.operations?.channel?.operationId, "onboarding:channel");
+});
+
+test("operation command responses and events serialize shared async operation state", () => {
+  const operation: OperationSummary = {
+    operationId: "onboarding:install",
+    scope: "onboarding",
+    resourceId: "managed-local",
+    action: "onboarding-runtime-install",
+    status: "running",
+    phase: "installing",
+    percent: 55,
+    message: "Installing OpenClaw locally.",
+    startedAt: "2026-04-21T00:00:00.000Z",
+    updatedAt: "2026-04-21T00:00:01.000Z",
+    retryable: true,
+    result: {
+      kind: "resource",
+      resource: "onboarding"
+    },
+    error: {
+      code: "OPENCLAW_STATUS_TIMEOUT",
+      message: "OpenClaw status did not respond in time.",
+      retryable: true
+    },
+    sync: {
+      epoch: "test",
+      revision: 42,
+      settled: false
+    }
+  };
+
+  const response: OperationCommandResponse = {
+    operation,
+    accepted: true,
+    alreadyRunning: false
+  };
+
+  const snapshot: RevisionedSnapshot<OperationSummary> = {
+    epoch: "test",
+    revision: 42,
+    data: operation
+  };
+  const updated: ChillClawEvent = {
+    type: "operation.updated",
+    operation: snapshot
+  };
+  const completed: ChillClawEvent = {
+    type: "operation.completed",
+    operation: {
+      ...snapshot,
+      data: {
+        ...operation,
+        status: "completed",
+        percent: 100,
+        message: "OpenClaw deployment is complete."
+      }
+    }
+  };
+
+  const parsedResponse = JSON.parse(JSON.stringify(response)) as OperationCommandResponse;
+  const parsedUpdated = JSON.parse(JSON.stringify(updated)) as ChillClawEvent;
+  const parsedCompleted = JSON.parse(JSON.stringify(completed)) as ChillClawEvent;
+
+  assert.equal(parsedResponse.operation.scope, "onboarding");
+  assert.equal(parsedResponse.operation.percent, 55);
+  assert.equal(parsedResponse.operation.result?.kind, "resource");
+  assert.equal(parsedResponse.operation.error?.retryable, true);
+  assert.equal(parsedUpdated.type, "operation.updated");
+  assert.equal(parsedCompleted.type, "operation.completed");
+  if (parsedCompleted.type === "operation.completed") {
+    assert.equal(parsedCompleted.operation.data.status, "completed");
+  }
 });
 
 test("generic channel config shapes serialize with masked summaries and capabilities", () => {

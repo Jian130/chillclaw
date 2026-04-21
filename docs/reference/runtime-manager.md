@@ -147,6 +147,20 @@ Shared contracts:
 
 `ProductOverview.runtimeManager` carries the same overview snapshot for dashboard/settings-style surfaces.
 
+### Async operation target
+
+Runtime Manager actions are long-running by nature and should follow `docs/reference/async-daemon-operations.md`.
+
+The target route behavior is:
+
+- action POST routes validate the request, create or resume a runtime operation, and return quickly
+- Runtime Manager continues the provider work in the background
+- `runtime.progress`, `runtime.completed`, `runtime.update-staged`, `downloads.updated`, and generic operation events drive UI updates
+- `GET /api/runtime/resources` returns the last-known Runtime Manager overview quickly for reconnect and app-sleep recovery
+- provider verification and OpenClaw CLI probes use explicit timeouts so a stuck tool degrades the resource instead of blocking the client
+
+The existing progress events already provide most of the live update surface. The migration should focus on removing long HTTP request lifetimes and adding durable operation state/deduplication around the existing Runtime Manager work.
+
 ## Integration boundaries
 
 ### OpenClaw

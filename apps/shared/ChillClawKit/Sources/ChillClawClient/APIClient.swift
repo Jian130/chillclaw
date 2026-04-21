@@ -73,11 +73,10 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/onboarding/runtime/detect", body: EmptyBody())
     }
 
-    public func installOnboardingRuntime(forceLocal: Bool = true) async throws -> SetupRunResponse {
+    public func installOnboardingRuntime(forceLocal: Bool = true) async throws -> OnboardingRuntimeOperationResponse {
         try await post(
             "/api/onboarding/runtime/install",
-            body: InstallRequest(autoConfigure: true, forceLocal: forceLocal),
-            timeout: RequestTimeout.runtimeInstall
+            body: InstallRequest(autoConfigure: true, forceLocal: forceLocal)
         )
     }
 
@@ -85,8 +84,8 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/onboarding/runtime/reuse", body: EmptyBody())
     }
 
-    public func updateOnboardingRuntime() async throws -> SetupRunResponse {
-        try await post("/api/onboarding/runtime/update", body: EmptyBody(), timeout: RequestTimeout.runtimeInstall)
+    public func updateOnboardingRuntime() async throws -> OnboardingRuntimeOperationResponse {
+        try await post("/api/onboarding/runtime/update", body: EmptyBody())
     }
 
     public func confirmOnboardingPermissions() async throws -> OnboardingStateResponse {
@@ -97,11 +96,11 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/onboarding/reset", body: EmptyBody())
     }
 
-    public func completeOnboarding(_ request: CompleteOnboardingRequest) async throws -> CompleteOnboardingResponse {
-        try await post("/api/onboarding/complete", body: request, timeout: RequestTimeout.longRunning)
+    public func completeOnboarding(_ request: CompleteOnboardingRequest) async throws -> OnboardingCompletionOperationResponse {
+        try await post("/api/onboarding/complete", body: request)
     }
 
-    public func runFirstRunSetup(forceLocal: Bool = true) async throws -> SetupRunResponse {
+    public func runFirstRunSetup(forceLocal: Bool = true) async throws -> OnboardingRuntimeOperationResponse {
         try await installOnboardingRuntime(forceLocal: forceLocal)
     }
 
@@ -163,8 +162,8 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         try await post("/api/models/entries", body: request)
     }
 
-    public func saveOnboardingModelEntry(_ request: SaveModelEntryRequest) async throws -> ModelConfigActionResponse {
-        try await post("/api/onboarding/model/entries", body: request, timeout: RequestTimeout.longRunning)
+    public func saveOnboardingModelEntry(_ request: SaveModelEntryRequest) async throws -> OnboardingModelOperationResponse {
+        try await post("/api/onboarding/model/entries", body: request)
     }
 
     public func resetOnboardingModelDraft() async throws -> OnboardingStateResponse {
@@ -254,16 +253,15 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         return try await post("/api/channels/entries", body: request)
     }
 
-    public func saveOnboardingChannelEntry(entryId: String?, request: SaveChannelEntryRequest) async throws -> ChannelConfigActionResponse {
+    public func saveOnboardingChannelEntry(entryId: String?, request: SaveChannelEntryRequest) async throws -> OnboardingChannelOperationResponse {
         if let entryId {
             return try await self.request(
                 "/api/onboarding/channel/entries/\(entryId)",
                 method: "PATCH",
-                body: request,
-                timeout: RequestTimeout.longRunning
+                body: request
             )
         }
-        return try await post("/api/onboarding/channel/entries", body: request, timeout: RequestTimeout.longRunning)
+        return try await post("/api/onboarding/channel/entries", body: request)
     }
 
     public func resetOnboardingChannelDraft() async throws -> OnboardingStateResponse {

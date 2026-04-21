@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.2.7 - 2026-04-21
+
+### 2026-04-21 21:05 CST
+
+- added a shared daemon operation bus for long-running product work, including retained `operation.updated` and `operation.completed` events, persisted operation summaries, and quick command responses for UI clients
+- converted onboarding runtime install/update, model save/auth, channel save/login, and final completion to accepted operations so setup no longer depends on long HTTP request lifetimes
+- updated React and native macOS onboarding to render operation progress from daemon events, refresh authoritative snapshots after completion, and keep polling only as a degraded recovery path for interactive auth or channel sessions
+- changed dashboard communication to use daemon-owned snapshots and pushed model/config events instead of forcing fresh OpenClaw reads during normal dashboard refreshes
+- documented the async daemon operation pattern across architecture, route, OpenAPI, onboarding, runtime, and workflow references
+- bumped ChillClaw package metadata and internal workspace package versions to 0.2.7 for the async operation bus release tag
+
 ## 0.2.6 - 2026-04-21
 
 ### 2026-04-21 14:58 CST

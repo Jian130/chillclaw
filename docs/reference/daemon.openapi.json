@@ -1522,7 +1522,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SetupRunResponse"
+                  "$ref": "#/components/schemas/OnboardingRuntimeOperationResponse"
                 }
               }
             }
@@ -1578,7 +1578,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SetupRunResponse"
+                  "$ref": "#/components/schemas/OnboardingRuntimeOperationResponse"
                 }
               }
             }
@@ -1624,7 +1624,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ModelConfigActionResponse"
+                  "$ref": "#/components/schemas/OnboardingModelOperationResponse"
                 }
               }
             }
@@ -1735,7 +1735,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChannelConfigActionResponse"
+                  "$ref": "#/components/schemas/OnboardingChannelOperationResponse"
                 }
               }
             }
@@ -1779,7 +1779,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChannelConfigActionResponse"
+                  "$ref": "#/components/schemas/OnboardingChannelOperationResponse"
                 }
               }
             }
@@ -1992,7 +1992,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CompleteOnboardingResponse"
+                  "$ref": "#/components/schemas/OnboardingCompletionOperationResponse"
                 }
               }
             }
@@ -7486,6 +7486,120 @@
         ],
         "type": "object"
       },
+      "OnboardingRuntimeOperationResponse": {
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "alreadyRunning": {
+            "type": "boolean"
+          },
+          "onboarding": {
+            "$ref": "#/components/schemas/OnboardingStateResponse"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/OperationSummary"
+          }
+        },
+        "required": [
+          "accepted",
+          "onboarding",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "OnboardingCompletionOperationResponse": {
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "alreadyRunning": {
+            "type": "boolean"
+          },
+          "completion": {
+            "$ref": "#/components/schemas/CompleteOnboardingResponse"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/OnboardingDestination"
+          },
+          "onboarding": {
+            "$ref": "#/components/schemas/OnboardingStateResponse"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/OperationSummary"
+          }
+        },
+        "required": [
+          "accepted",
+          "onboarding",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "OnboardingModelOperationResponse": {
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "alreadyRunning": {
+            "type": "boolean"
+          },
+          "onboarding": {
+            "$ref": "#/components/schemas/OnboardingStateResponse"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/OperationSummary"
+          }
+        },
+        "required": [
+          "accepted",
+          "onboarding",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "OnboardingChannelOperationResponse": {
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "alreadyRunning": {
+            "type": "boolean"
+          },
+          "onboarding": {
+            "$ref": "#/components/schemas/OnboardingStateResponse"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/OperationSummary"
+          }
+        },
+        "required": [
+          "accepted",
+          "onboarding",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "OnboardingOperationsState": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/OperationSummary"
+          },
+          "completion": {
+            "$ref": "#/components/schemas/OperationSummary"
+          },
+          "install": {
+            "$ref": "#/components/schemas/OperationSummary"
+          },
+          "localRuntime": {
+            "$ref": "#/components/schemas/OperationSummary"
+          },
+          "model": {
+            "$ref": "#/components/schemas/OperationSummary"
+          }
+        },
+        "type": "object"
+      },
       "OnboardingStateResponse": {
         "properties": {
           "config": {
@@ -7503,6 +7617,9 @@
           "presetSkillSync": {
             "$ref": "#/components/schemas/PresetSkillSyncOverview"
           },
+          "operations": {
+            "$ref": "#/components/schemas/OnboardingOperationsState"
+          },
           "summary": {
             "$ref": "#/components/schemas/OnboardingCompletionSummary"
           }
@@ -7513,6 +7630,56 @@
           "firstRun",
           "summary"
         ],
+        "type": "object"
+      },
+      "OperationSummary": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "resourceId": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "timed-out"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "OnboardingStep": {

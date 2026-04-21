@@ -49,6 +49,8 @@ public enum ChillClawEvent: Codable, Sendable {
     case runtimeProgress(resourceId: String, action: String, phase: String, percent: Int?, message: String, runtimeManager: RuntimeManagerOverview)
     case runtimeCompleted(resourceId: String, action: String, status: String, message: String, runtimeManager: RuntimeManagerOverview)
     case runtimeUpdateStaged(resourceId: String, version: String, message: String, runtimeManager: RuntimeManagerOverview)
+    case operationUpdated(operation: RevisionedSnapshot<OperationSummary>)
+    case operationCompleted(operation: RevisionedSnapshot<OperationSummary>)
     case chatStream(threadId: String, sessionKey: String, payload: ChatStreamEvent)
     case channelSessionUpdated(channelId: SupportedChannelId, session: ChannelSession)
     case configApplied(resource: ChillClawConfigResource, summary: String)
@@ -77,6 +79,7 @@ public enum ChillClawEvent: Codable, Sendable {
         case resourceId
         case runtimeManager
         case version
+        case operation
         case snapshot
         case jobId
         case downloadedBytes
@@ -198,6 +201,10 @@ public enum ChillClawEvent: Codable, Sendable {
                 message: try container.decode(String.self, forKey: .message),
                 runtimeManager: try container.decode(RuntimeManagerOverview.self, forKey: .runtimeManager)
             )
+        case "operation.updated":
+            self = .operationUpdated(operation: try container.decode(RevisionedSnapshot<OperationSummary>.self, forKey: .operation))
+        case "operation.completed":
+            self = .operationCompleted(operation: try container.decode(RevisionedSnapshot<OperationSummary>.self, forKey: .operation))
         case "chat.stream":
             self = .chatStream(
                 threadId: try container.decode(String.self, forKey: .threadId),
@@ -330,6 +337,12 @@ public enum ChillClawEvent: Codable, Sendable {
             try container.encode(version, forKey: .version)
             try container.encode(message, forKey: .message)
             try container.encode(runtimeManager, forKey: .runtimeManager)
+        case let .operationUpdated(operation):
+            try container.encode("operation.updated", forKey: .type)
+            try container.encode(operation, forKey: .operation)
+        case let .operationCompleted(operation):
+            try container.encode("operation.completed", forKey: .type)
+            try container.encode(operation, forKey: .operation)
         case let .chatStream(threadId, sessionKey, payload):
             try container.encode("chat.stream", forKey: .type)
             try container.encode(threadId, forKey: .threadId)

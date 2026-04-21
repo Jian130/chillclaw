@@ -11,6 +11,7 @@ import type {
   LocalModelRuntimeStatus,
   OnboardingDraftState,
   OnboardingOperationsState,
+  OperationSummary,
   PresetSkillSyncOverview,
   PresetSkillTargetMode,
   TeamDetail,
@@ -134,6 +135,7 @@ export interface AppState {
   presetSkills?: PresetSkillState;
   chat?: ChatState;
   localModelRuntime?: LocalModelRuntimeState;
+  operations?: Record<string, OperationSummary>;
 }
 
 export function defaultOnboardingDraftState(): OnboardingDraftState {

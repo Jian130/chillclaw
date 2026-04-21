@@ -87,6 +87,13 @@ function updateResourceRevision(event: ChillClawEvent) {
     case "downloads.updated":
       lastSeenByResource.set("downloads", { epoch: event.snapshot.epoch, revision: event.snapshot.revision });
       break;
+    case "operation.updated":
+    case "operation.completed":
+      lastSeenByResource.set(`operation:${event.operation.data.operationId}`, {
+        epoch: event.operation.epoch,
+        revision: event.operation.revision
+      });
+      break;
     default:
       return;
   }

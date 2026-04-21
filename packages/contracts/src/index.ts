@@ -626,6 +626,22 @@ export interface OnboardingUiConfig {
 }
 
 export type LongRunningOperationStatus = "pending" | "running" | "completed" | "failed" | "timed-out";
+export type OperationScope =
+  | "onboarding"
+  | "runtime"
+  | "local-runtime"
+  | "download"
+  | "model"
+  | "channel"
+  | "gateway"
+  | "recovery"
+  | "diagnostics"
+  | "app-update"
+  | "service"
+  | "app-control"
+  | "chat"
+  | "task"
+  | string;
 
 export interface LongRunningOperationSummary {
   operationId: string;
@@ -640,9 +656,39 @@ export interface LongRunningOperationSummary {
   retryable?: boolean;
 }
 
+export interface OperationResultReference {
+  kind: "resource" | "download" | "file" | "route" | "none" | string;
+  resource?: string;
+  id?: string;
+  path?: string;
+  href?: string;
+}
+
+export interface OperationErrorSummary {
+  code?: string;
+  message: string;
+  retryable?: boolean;
+}
+
+export interface OperationSummary extends LongRunningOperationSummary {
+  scope: OperationScope;
+  resourceId?: string;
+  percent?: number;
+  result?: OperationResultReference;
+  error?: OperationErrorSummary;
+  sync?: MutationSyncMeta;
+}
+
+export interface OperationCommandResponse {
+  operation: OperationSummary;
+  accepted: boolean;
+  alreadyRunning?: boolean;
+}
+
 export interface OnboardingOperationsState {
   install?: LongRunningOperationSummary;
   localRuntime?: LongRunningOperationSummary;
+  model?: LongRunningOperationSummary;
   channel?: LongRunningOperationSummary;
   completion?: LongRunningOperationSummary;
 }
@@ -704,6 +750,20 @@ export interface CompleteOnboardingResponse {
   overview: ProductOverview;
   warmupTaskId?: string;
   operation?: LongRunningOperationSummary;
+}
+
+export interface OnboardingCompletionOperationResponse extends OperationCommandResponse {
+  onboarding: OnboardingStateResponse;
+  destination?: OnboardingDestination;
+  completion?: CompleteOnboardingResponse;
+}
+
+export interface OnboardingModelOperationResponse extends OperationCommandResponse {
+  onboarding: OnboardingStateResponse;
+}
+
+export interface OnboardingChannelOperationResponse extends OperationCommandResponse {
+  onboarding: OnboardingStateResponse;
 }
 
 export interface OnboardingStepNavigationRequest {
@@ -1339,6 +1399,14 @@ export type ChillClawEvent =
       snapshot: RevisionedSnapshot<DownloadManagerOverview>;
     }
   | {
+      type: "operation.updated";
+      operation: RevisionedSnapshot<OperationSummary>;
+    }
+  | {
+      type: "operation.completed";
+      operation: RevisionedSnapshot<OperationSummary>;
+    }
+  | {
       type: "download.progress";
       jobId: string;
       downloadedBytes: number;
@@ -1583,6 +1651,10 @@ export interface SetupRunResponse {
   install?: InstallResponse;
   onboarding?: OnboardingStateResponse;
   operation?: LongRunningOperationSummary;
+}
+
+export interface OnboardingRuntimeOperationResponse extends OperationCommandResponse {
+  onboarding: OnboardingStateResponse;
 }
 
 export interface AppServiceActionResponse {

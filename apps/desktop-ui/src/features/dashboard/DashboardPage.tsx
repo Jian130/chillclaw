@@ -69,6 +69,14 @@ export function toolReadinessDetail(toolOverview: ToolOverview | undefined): str
   return toolOverview?.summary ?? "Tool access is loading.";
 }
 
+export function dashboardSnapshotReadOptions(): { fresh: false } {
+  return { fresh: false };
+}
+
+export function dashboardModelSnapshotForEvent(event: ChillClawEvent): ModelConfigOverview | undefined {
+  return event.type === "model-config.updated" ? event.snapshot.data : undefined;
+}
+
 function hasCapabilityAttention(capabilityOverview: CapabilityOverview | undefined): boolean {
   return capabilityOverview?.entries.some((entry) => ATTENTION_STATUSES.includes(entry.status)) ?? false;
 }
@@ -104,10 +112,11 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
     const refreshDashboardSnapshots = async () => {
+      const readOptions = dashboardSnapshotReadOptions();
       const [nextModelConfig, nextCapabilityOverview, nextToolOverview] = await Promise.all([
-        fetchModelConfig(),
-        fetchCapabilityOverview({ fresh: true }),
-        fetchToolOverview({ fresh: true })
+        fetchModelConfig(readOptions),
+        fetchCapabilityOverview(readOptions),
+        fetchToolOverview(readOptions)
       ]);
 
       if (cancelled) {
@@ -130,11 +139,17 @@ export default function DashboardPage() {
       });
 
     const unsubscribe = subscribeToDaemonEvents((event) => {
+      const nextModelConfig = dashboardModelSnapshotForEvent(event);
+      if (nextModelConfig) {
+        setModelConfig(nextModelConfig);
+      }
+
       if (!shouldRefreshDashboardCapabilitySnapshotsForEvent(event)) {
         return;
       }
 
-      void Promise.all([fetchCapabilityOverview({ fresh: true }), fetchToolOverview({ fresh: true })])
+      const readOptions = dashboardSnapshotReadOptions();
+      void Promise.all([fetchCapabilityOverview(readOptions), fetchToolOverview(readOptions)])
         .then(([nextCapabilityOverview, nextToolOverview]) => {
           if (cancelled) {
             return;

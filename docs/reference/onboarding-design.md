@@ -185,6 +185,33 @@ handleAdvanceToInstall()
 
 ### Missing Runtime Install Path
 
+The current implementation waits for `POST /api/onboarding/runtime/install` to return the final install result. The target async-operation architecture changes this to command acceptance plus daemon-owned progress:
+
+```text
+User clicks "Install OpenClaw"
+-> handleInstall()
+-> set local progress to detecting
+-> installOnboardingRuntime()
+-> POST /api/onboarding/runtime/install
+-> daemon validates onboarding is mutable
+-> daemon creates or resumes operation:
+     operationId = onboarding:install
+     action = onboarding-runtime-install
+     status = running
+-> daemon returns quickly with operation + current onboarding state
+-> client renders progress from returned operation
+-> background worker runs SetupService / RuntimeManager install work
+-> EventPublisher publishes operation/deploy/runtime progress
+-> client updates progress from /api/events
+-> background worker completes operation and updates onboarding draft
+-> daemon publishes operation completion + onboarding/overview/deploy snapshots
+-> client advances to model from event-driven refresh or GET /api/onboarding/state
+```
+
+The target path must not require the original HTTP request to survive the full OpenClaw install, Node/npm copy, gateway baseline normalization, or post-install status checks. If the app sleeps, the WebSocket reconnects, or the command request times out, clients recover by reading `GET /api/onboarding/state` and active operation state.
+
+Until that migration is implemented, this is the current blocking call path:
+
 ```text
 User clicks "Install OpenClaw"
 -> handleInstall()
@@ -296,6 +323,8 @@ SetupService publishes deploy.progress / deploy.completed
 ```
 
 For Step 2, `onboardingRefreshResourceForEvent(...)` only asks for an overview refresh on `deploy.completed` and `gateway.status`. Onboarding draft updates for install completion normally come back through the install API response, while live progress comes through daemon events.
+
+The target async-operation migration should change this last part: install completion should be represented by daemon-owned operation state and fast onboarding-state refresh, not by the long install API response. Overview refresh should be bounded and should never block the transition out of Step 2 on a stuck OpenClaw status or gateway probe.
 
 `POST /api/onboarding/runtime/update` and `POST /api/onboarding/permissions/confirm` still exist in the daemon and client API surface. The current React Step 2 UI does not call the update route, and the visible web flow normalizes `permissions` into the model step.
 
@@ -470,7 +499,10 @@ sequenceDiagram
             Native->>API: POST /onboarding/model/entries
         end
         API->>Routes: POST /api/onboarding/model/entries
-        Routes->>Onboarding: saveModelEntry()
+        Routes->>Events: operation.updated onboarding:model saving-model
+        Routes-->>Web: OnboardingModelOperationResponse accepted
+        Routes-->>Native: OnboardingModelOperationResponse accepted
+        Routes->>Onboarding: saveModelEntry() in background operation
         Onboarding->>Config: createSavedModelEntry() or updateSavedModelEntry()
         Config->>OpenClaw: write model auth/config
         Config-->>Onboarding: mutation result or auth session
@@ -479,7 +511,9 @@ sequenceDiagram
         Events-->>Web: refresh model config
         Events-->>Native: refresh model config
         Onboarding->>Store: model draft, activeModelAuthSessionId or currentStep = channel
-        Onboarding-->>API: ModelConfigActionResponse + onboarding
+        Routes->>Events: operation.completed onboarding:model
+        Events-->>Web: refresh onboarding + model config
+        Events-->>Native: refresh onboarding + model config
         opt interactive provider auth
             loop poll or submit provider auth
                 Web->>API: GET/POST /onboarding/model/auth/session/:id
@@ -502,7 +536,10 @@ sequenceDiagram
         Native->>API: POST or PATCH /onboarding/channel/entries
     end
     API->>Routes: channel entry route
-    Routes->>Onboarding: saveChannelEntry(entryId, request)
+    Routes->>Events: operation.updated onboarding:channel saving-channel
+    Routes-->>Web: OnboardingChannelOperationResponse accepted
+    Routes-->>Native: OnboardingChannelOperationResponse accepted
+    Routes->>Onboarding: saveChannelEntry(entryId, request) in background operation
     Onboarding->>Store: start channel operation
     Onboarding->>Onboarding: buildSummary() and require saved model
     Onboarding->>ChannelSetup: save onboarding channel entry
@@ -511,15 +548,15 @@ sequenceDiagram
     alt staged channel entry
         Onboarding->>Store: complete channel operation
         Onboarding->>Store: currentStep = employee, channelProgress = staged
-        Onboarding-->>API: ChannelConfigActionResponse + onboarding
-        API-->>Web: render employee step
-        API-->>Native: render employee step
+        Routes->>Events: operation.completed onboarding:channel
+        Events-->>Web: refresh onboarding + render employee step
+        Events-->>Native: refresh onboarding + render employee step
     else interactive channel session
         Onboarding->>Store: channel operation awaiting-pairing
         Onboarding->>Store: currentStep = channel, activeChannelSessionId
-        Onboarding-->>API: active session + onboarding
-        API-->>Web: show QR/log/input session UI
-        API-->>Native: show QR/log/input session UI
+        Routes->>Events: operation.completed onboarding:channel
+        Events-->>Web: refresh onboarding + show QR/log/input session UI
+        Events-->>Native: refresh onboarding + show QR/log/input session UI
         loop poll or submit channel session input
             Web->>API: GET/POST /onboarding/channel/session/:id
             Native->>API: GET/POST /onboarding/channel/session/:id
@@ -550,8 +587,11 @@ sequenceDiagram
         Native->>API: POST /onboarding/complete { employee }
     end
     API->>Routes: POST /api/onboarding/complete
-    Routes->>Onboarding: complete(request)
-    Onboarding->>Store: start completion operation
+    Routes->>Events: operation.updated onboarding:completion finalizing
+    Routes-->>Web: OnboardingCompletionOperationResponse accepted
+    Routes-->>Native: OnboardingCompletionOperationResponse accepted
+    Routes->>Onboarding: complete(request) in background operation
+    Onboarding->>Store: start service-level completion state
     Onboarding->>Onboarding: buildFinalizeSummary() + assertReadyForFinalize()
     opt selected model is local Ollama and not ready
         Onboarding->>LocalModel: repair()
@@ -570,9 +610,9 @@ sequenceDiagram
     Gateway->>OpenClaw: apply config, install/restart gateway, verify reachability
     Onboarding->>Store: setupCompletedAt, clear onboarding draft, persist warmup task
     Onboarding->>Store: completion operation completed
-    Onboarding-->>API: CompleteOnboardingResponse + warmupTaskId
-    API-->>Web: completion summary screen
-    API-->>Native: completion summary screen
+    Routes->>Events: operation.completed onboarding:completion
+    Events-->>Web: refresh onboarding + overview, show completion or navigate
+    Events-->>Native: refresh onboarding + overview, show completion or navigate
 
     par background warmup job
         Onboarding->>Team: mark warmup progress "Verifying preset skills"
@@ -598,10 +638,12 @@ sequenceDiagram
         Web->>API: POST /onboarding/complete { destination }
         Native->>API: POST /onboarding/complete { destination }
         API->>Routes: POST /api/onboarding/complete
-        Routes->>Onboarding: complete(destination)
+        Routes-->>Web: OnboardingCompletionOperationResponse accepted
+        Routes-->>Native: OnboardingCompletionOperationResponse accepted
+        Routes->>Onboarding: complete(destination) in background operation
         Onboarding->>Onboarding: buildSummary() only
         Onboarding->>Store: setupCompletedAt and clear onboarding draft
-        Onboarding-->>API: completed response
+        Routes->>Events: operation.completed onboarding:completion
     end
 ```
 

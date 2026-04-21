@@ -15,6 +15,8 @@ import { EventBusService } from "../services/event-bus-service.js";
 import { EventPublisher } from "../services/event-publisher.js";
 import { createLocalModelRuntimeService, type LocalModelRuntimeService } from "../services/local-model-runtime-service.js";
 import { OnboardingService } from "../services/onboarding-service.js";
+import { OperationRunner } from "../services/operation-runner.js";
+import { OperationStore } from "../services/operation-store.js";
 import { OverviewService } from "../services/overview-service.js";
 import { PluginService } from "../services/plugin-service.js";
 import { SetupService } from "../services/setup-service.js";
@@ -35,6 +37,8 @@ export interface ServerContext {
   localModelRuntimeService: LocalModelRuntimeService;
   eventBus: EventBusService;
   eventPublisher: EventPublisher;
+  operationStore: OperationStore;
+  operationRunner: OperationRunner;
   channelSetupService: ChannelSetupService;
   pluginService: PluginService;
   toolService: ToolService;
@@ -55,6 +59,8 @@ export function createServerContext(setServerStop: () => void): ServerContext {
   const appUpdateService = new AppUpdateService();
   const eventBus = new EventBusService();
   const eventPublisher = new EventPublisher(eventBus);
+  const operationStore = new OperationStore(store);
+  const operationRunner = new OperationRunner(operationStore, eventPublisher);
   const downloadManager = createDownloadManager(eventBus);
   const runtimeManager = createRuntimeManager(eventPublisher, downloadManager);
   const adapter = createEngineAdapter({ runtimeManager });
@@ -94,6 +100,8 @@ export function createServerContext(setServerStop: () => void): ServerContext {
     localModelRuntimeService,
     eventBus,
     eventPublisher,
+    operationStore,
+    operationRunner,
     channelSetupService,
     pluginService,
     toolService,

@@ -895,6 +895,8 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
             return nil
         case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return nil
+        case .operationUpdated, .operationCompleted:
+            return .installContext
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated, .downloadsUpdated,
              .chatStream, .channelSessionUpdated, .configApplied, .deployProgress, .taskProgress, .downloadProgress, .downloadStatus, .downloadCompleted, .downloadFailed, .daemonHeartbeat:
             return nil
@@ -910,6 +912,7 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
         case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated, .downloadsUpdated,
+             .operationUpdated, .operationCompleted,
              .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .downloadProgress, .downloadStatus, .downloadCompleted, .downloadFailed, .daemonHeartbeat:
             return nil
         }
@@ -922,6 +925,7 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
         case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .presetSkillSyncUpdated, .downloadsUpdated,
+             .operationUpdated, .operationCompleted,
              .chatStream, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .downloadProgress, .downloadStatus, .downloadCompleted, .downloadFailed, .daemonHeartbeat:
             return nil
         }
@@ -934,6 +938,7 @@ func onboardingRefreshResourceForEvent(_ step: OnboardingStep, _ event: ChillCla
         case .runtimeProgress, .runtimeCompleted, .runtimeUpdateStaged:
             return nil
         case .overviewUpdated, .aiTeamUpdated, .modelConfigUpdated, .channelConfigUpdated, .pluginConfigUpdated, .skillCatalogUpdated, .downloadsUpdated,
+             .operationUpdated, .operationCompleted,
              .chatStream, .channelSessionUpdated, .configApplied, .deployCompleted, .deployProgress, .gatewayStatus, .taskProgress, .downloadProgress, .downloadStatus, .downloadCompleted, .downloadFailed, .daemonHeartbeat:
             return nil
         }

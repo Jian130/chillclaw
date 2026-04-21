@@ -216,9 +216,9 @@ Do not treat every release asset download as an app install. Assets such as `run
 - `POST /api/onboarding/runtime/reuse`
 - `POST /api/onboarding/runtime/update`
 - `POST /api/onboarding/permissions/confirm`
-- `POST /api/onboarding/model/entries`
+- `POST /api/onboarding/model/entries` (operation-backed, `onboarding:model`)
 - `GET/POST /api/onboarding/model/auth/session/:sessionId*`
-- `POST/PATCH /api/onboarding/channel/entries*`
+- `POST/PATCH /api/onboarding/channel/entries*` (operation-backed, `onboarding:channel`)
 - `GET/POST /api/onboarding/channel/session/:sessionId*`
 - `POST /api/onboarding/employee`
 - `POST /api/onboarding/model/reset`

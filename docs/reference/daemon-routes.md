@@ -10,7 +10,44 @@ This document lists the current daemon HTTP surface after the route-module refac
   - WebSocket upgrade on `/api/events` streams retained and live daemon events
 - Non-`/api/*` `GET` requests fall through to static asset serving for the packaged React UI.
 - Some read routes support `?fresh=1` to invalidate adapter read caches before loading data.
+- The target architecture for long-running work is documented in `docs/reference/async-daemon-operations.md`: HTTP commands should return quickly with daemon-owned operation state, while `/api/events` streams progress and completion.
+- GET routes should return daemon-owned state quickly. They should not wait on unbounded OpenClaw CLI, gateway, network, install, update, recovery, or diagnostics work.
 - Legacy AI team routes still exist temporarily, but the backend now returns `501` to make the removal explicit.
+
+## Async Operation Migration Inventory
+
+The current route surface mixes fast state changes with routes that can block on OpenClaw, downloads, gateway state, local AI, or packaging work. The migration target is command acceptance over HTTP plus progress and snapshot updates over `/api/events`.
+
+Phase 1 should fix first-run timeout risk:
+
+| Route | Target change |
+| --- | --- |
+| `POST /api/onboarding/runtime/install` | Return an install operation immediately; publish onboarding/deploy/runtime progress; advance onboarding from daemon state. |
+| `POST /api/onboarding/runtime/update` | Same operation path as install, keyed by onboarding runtime update. |
+| `GET /api/overview` | Return last-known overview quickly; use bounded probes or background refresh for OpenClaw status/gateway health. |
+| `GET /api/deploy/targets` | Return last-known target state quickly; avoid unbounded live install probes during onboarding. |
+
+Phase 2 should cover runtime and local AI lifecycle:
+
+| Route family | Target change |
+| --- | --- |
+| `/api/runtime/resources/:resourceId/:action` | Convert prepare, repair, check-update, stage-update, apply-update, and rollback into operation-backed commands. |
+| `POST /api/models/local-runtime/install` | Return local-runtime operation state; continue publishing local-runtime and download progress events. |
+| `POST /api/models/local-runtime/repair` | Same operation-backed local-runtime path as install. |
+
+Phase 3 should cover setup, recovery, diagnostics, and service management:
+
+| Route family | Target change |
+| --- | --- |
+| onboarding model/channel/complete mutation routes | Return operation state when they start provider auth, channel pairing, gateway apply, warmup, or other long-running work. |
+| channel setup mutation/session routes | Use operation ids for interactive setup and pairing handoff while retaining `channel.session.updated`. |
+| `POST /api/deploy/gateway/restart` | Return a gateway operation and publish gateway status snapshots. |
+| `POST /api/recovery/:actionId` | Return a recovery operation and publish affected resource snapshots. |
+| `GET /api/diagnostics` | Become an export operation; clients watch completion and then open/download the produced bundle. |
+| `POST /api/app/update/check` | Become a bounded app-update check operation when it needs network access. |
+| service/app install, restart, uninstall routes | Return operation state for packaged service and app-control work. |
+
+Fast local-only mutations can stay synchronous, but they should still publish retained snapshots when they change daemon-owned state.
 
 ## `routes/system.ts`
 
@@ -102,18 +139,18 @@ This document lists the current daemon HTTP surface after the route-module refac
 | `POST` | `/api/onboarding/runtime/reuse` | `OnboardingService` | Accept a reused runtime and advance onboarding state. |
 | `POST` | `/api/onboarding/runtime/update` | `SetupService` | Update the onboarding runtime path before continuing. |
 | `POST` | `/api/onboarding/permissions/confirm` | `OnboardingService` | Record that onboarding permission guidance was acknowledged. |
-| `POST` | `/api/onboarding/model/entries` | `OnboardingService` | Save a model entry specifically for the onboarding draft flow. |
+| `POST` | `/api/onboarding/model/entries` | `OperationRunner` + `OnboardingService` | Accept an onboarding model save/auth operation and publish progress on the event bus. |
 | `GET` | `/api/onboarding/model/auth/session/:sessionId` | `OnboardingService` | Read an onboarding-scoped model auth session. |
 | `POST` | `/api/onboarding/model/auth/session/:sessionId/input` | `OnboardingService` | Submit input into an onboarding model auth session and update draft state. |
-| `POST` | `/api/onboarding/channel/entries` | `OnboardingService` + `ChannelSetupService` | Save a channel entry within the onboarding flow. |
-| `PATCH` | `/api/onboarding/channel/entries/:entryId` | `OnboardingService` + `ChannelSetupService` | Edit an onboarding channel entry. |
+| `POST` | `/api/onboarding/channel/entries` | `OperationRunner` + `OnboardingService` + `ChannelSetupService` | Accept an onboarding channel save/login operation and publish progress on the event bus. |
+| `PATCH` | `/api/onboarding/channel/entries/:entryId` | `OperationRunner` + `OnboardingService` + `ChannelSetupService` | Accept an onboarding channel edit/login operation and publish progress on the event bus. |
 | `GET` | `/api/onboarding/channel/session/:sessionId` | `OnboardingService` + `ChannelSetupService` | Read an onboarding channel login or pairing session. |
 | `POST` | `/api/onboarding/channel/session/:sessionId/input` | `OnboardingService` + `ChannelSetupService` | Submit input into an onboarding channel session. |
 | `POST` | `/api/onboarding/employee` | `OnboardingService` | Save the onboarding employee draft and preset-derived settings. |
 | `POST` | `/api/onboarding/model/reset` | `OnboardingService` | Reset the onboarding model draft section. |
 | `POST` | `/api/onboarding/channel/reset` | `OnboardingService` | Reset the onboarding channel draft section. |
 | `POST` | `/api/onboarding/reset` | `OnboardingService` | Reset guided onboarding back to the beginning. |
-| `POST` | `/api/onboarding/complete` | `OnboardingService` | Finalize onboarding, create the initial AI employee, and commit the resulting app state. |
+| `POST` | `/api/onboarding/complete` | `OperationRunner` + `OnboardingService` | Accept onboarding finalization quickly, then create the initial AI employee, verify gateway state, and commit setup completion through `operation.*` events. |
 
 ## `routes/channels.ts`
 

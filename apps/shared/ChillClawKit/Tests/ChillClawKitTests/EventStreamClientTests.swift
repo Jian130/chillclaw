@@ -21,6 +21,7 @@ struct EventStreamClientTests {
 
     @Test
     func daemonEventsDecodeGatewayStatusMessages() async {
+        let logs = LockedSyncValue<[(String, [String: String])]>([])
         let client = ChillClawEventStreamClient(
             configurationProvider: {
                 .init(
@@ -38,7 +39,12 @@ struct EventStreamClientTests {
                     continuation.finish()
                 }
             },
-            sleepHandler: { _ in }
+            sleepHandler: { _ in },
+            communicationLogger: { event, details in
+                logs.withLock { value in
+                    value.append((event, details))
+                }
+            }
         )
 
         let stream = client.daemonEvents()
@@ -53,6 +59,12 @@ struct EventStreamClientTests {
         #expect(reachable == true)
         #expect(pendingGatewayApply == false)
         #expect(summary == "Ready")
+        let recordedLogs = logs.withLock { $0 }
+        #expect(recordedLogs.map(\.0).contains("events.stream.connecting"))
+        #expect(recordedLogs.map(\.0).contains("events.stream.message"))
+        #expect(recordedLogs.contains { event, details in
+            event == "events.stream.message" && details["eventType"] == "gateway.status"
+        })
     }
 
     @Test
@@ -125,5 +137,20 @@ private actor LockedValue<Value> {
 
     func withLock<T>(_ update: (inout Value) -> T) -> T {
         update(&value)
+    }
+}
+
+private final class LockedSyncValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<T>(_ update: (inout Value) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return update(&value)
     }
 }

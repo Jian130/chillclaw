@@ -24,6 +24,73 @@ afterEach(() => {
 });
 
 describe("API client GET dedupe", () => {
+  it("logs sanitized browser API request lifecycle records", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: true; status: number; json: () => Promise<{ message: string }> }>
+    >(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ message: "Saved" })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveOnboardingModelEntry({
+      providerId: "openai",
+      methodId: "openai-api-key",
+      modelKey: "openai/gpt-5.1-codex",
+      values: {
+        apiKey: "sk-secret-value"
+      },
+      label: "OpenAI",
+      makeDefault: true
+    });
+
+    expect(debug).toHaveBeenCalledWith("[ChillClaw communication]", "api.request.start", {
+      method: "POST",
+      path: "/onboarding/model/entries",
+      hasBody: true,
+      fresh: false,
+      timeoutMs: undefined
+    });
+    expect(debug).toHaveBeenCalledWith("[ChillClaw communication]", "api.request.done", {
+      method: "POST",
+      path: "/onboarding/model/entries",
+      status: 200,
+      durationMs: expect.any(Number)
+    });
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("sk-secret-value");
+  });
+
+  it("logs sanitized browser API request failures", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: false; status: number; json: () => Promise<{ error: string }> }>
+    >(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "Gateway token was rejected." })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(saveOnboardingChannelEntry({
+      channelId: "wechat",
+      values: {
+        token: "gateway-secret"
+      },
+      action: "save"
+    })).rejects.toThrow("Gateway token was rejected.");
+
+    expect(debug).toHaveBeenCalledWith("[ChillClaw communication]", "api.request.failed", {
+      method: "POST",
+      path: "/onboarding/channel/entries",
+      status: 500,
+      durationMs: expect.any(Number),
+      message: "Gateway token was rejected."
+    });
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("gateway-secret");
+  });
+
   it("reuses one browser request for identical concurrent GETs", async () => {
     const fetchMock = vi.fn<
       (input: RequestInfo | URL, init?: RequestInit) => Promise<{ ok: true; json: () => Promise<{ appName: string }> }>

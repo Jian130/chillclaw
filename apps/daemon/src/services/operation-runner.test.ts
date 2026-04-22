@@ -10,6 +10,7 @@ import { OperationStore } from "./operation-store.js";
 import { StateStore } from "./state-store.js";
 
 function createRunner(name: string) {
+  const communicationLogs: Array<{ message: string; details?: unknown; scope?: string }> = [];
   const stateStore = new StateStore(resolve(process.cwd(), `apps/daemon/.data/${name}-${randomUUID()}.json`));
   const operationStore = new OperationStore(stateStore);
   const eventBus = new EventBusService();
@@ -18,10 +19,14 @@ function createRunner(name: string) {
     now: (() => {
       let tick = 0;
       return () => `2026-04-21T00:00:0${tick++}.000Z`;
-    })()
+    })(),
+    communicationLogger: (message, details, metadata) => {
+      communicationLogs.push({ message, details, scope: metadata?.scope });
+    }
   });
 
   return {
+    communicationLogs,
     eventBus,
     operationStore,
     runner
@@ -170,4 +175,46 @@ test("operation runner marks failed workers as failed operations", async () => {
   assert.equal(operation?.error?.code, "GATEWAY_RESTART_FAILED");
   assert.equal(operation?.error?.message, "Restarting OpenClaw gateway failed.");
   assert.deepEqual(events, ["operation.updated", "operation.completed"]);
+});
+
+test("operation runner logs operation lifecycle without leaking worker errors", async () => {
+  const { communicationLogs, runner } = createRunner("operation-runner-communication-logs");
+
+  await runner.startOrResume({
+    operationId: "gateway:restart",
+    scope: "gateway",
+    action: "restart",
+    phase: "restarting",
+    message: "Restarting OpenClaw gateway."
+  }, async ({ update }) => {
+    await update({
+      phase: "waiting",
+      message: "Waiting for gateway token sk-secret."
+    });
+    throw new Error("token sk-secret failed");
+  });
+
+  await runner.waitForIdle();
+
+  assert.deepEqual(communicationLogs.map((entry) => entry.scope), [
+    "communication.operation.start",
+    "communication.operation.update",
+    "communication.operation.failed"
+  ]);
+  assert.deepEqual(communicationLogs[0]?.details, {
+    operationId: "gateway:restart",
+    scope: "gateway",
+    action: "restart",
+    status: "running",
+    phase: "restarting"
+  });
+  assert.deepEqual(communicationLogs.at(-1)?.details, {
+    operationId: "gateway:restart",
+    scope: "gateway",
+    action: "restart",
+    status: "failed",
+    phase: "waiting",
+    errorName: "Error"
+  });
+  assert.doesNotMatch(JSON.stringify(communicationLogs), /sk-secret/);
 });

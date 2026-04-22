@@ -5,6 +5,10 @@ import ChillClawClient
 import ChillClawProtocol
 import ChillClawChatUI
 
+private func nativeCommunicationLog(event: String, details: [String: String]) {
+    NSLog("[ChillClaw communication] %@ %@", event, details.description)
+}
+
 struct ChillClawAppDataLoader {
     var fetchOverview: @Sendable () async throws -> ProductOverview
     var fetchDeploymentTargets: @Sendable () async throws -> DeploymentTargetsResponse
@@ -259,7 +263,10 @@ final class ChillClawAppState {
         loader: ChillClawAppDataLoader? = nil,
         daemonEventStreamFactory: DaemonEventStreamFactory? = nil
     ) {
-        let resolvedClient = client ?? ChillClawAPIClient(configurationProvider: { configuration })
+        let resolvedClient = client ?? ChillClawAPIClient(
+            configurationProvider: { configuration },
+            communicationLogger: nativeCommunicationLog
+        )
         self.configuration = configuration
         self.client = resolvedClient
         self.loader = loader ?? .live(client: resolvedClient)

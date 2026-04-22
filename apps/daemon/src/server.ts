@@ -1,10 +1,11 @@
 import { createServer, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import type { EngineReadCacheResource } from "./engine/adapter.js";
-import { errorToLogDetails, formatConsoleLine, writeErrorLog, writeInfoLog } from "./services/logger.js";
+import { errorToLogDetails, formatConsoleLine, writeCommunicationLog, writeErrorLog, writeInfoLog } from "./services/logger.js";
 import { getStaticDir } from "./runtime-paths.js";
 import { findRouteDefinition } from "./routes/index.js";
 import { createServerContext } from "./routes/server-context.js";
@@ -30,6 +31,19 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS"
   });
   response.end(JSON.stringify(body));
+}
+
+function summarizeRequestUrl(requestUrl?: string): string | undefined {
+  if (!requestUrl) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(requestUrl, "http://127.0.0.1");
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return requestUrl;
+  }
 }
 
 function contentTypeFor(pathname: string): string {
@@ -123,7 +137,15 @@ export function startServer(port = 4545) {
   const eventSocketServer = new WebSocketServer({ noServer: true });
   const EVENT_SOCKET_HEARTBEAT_INTERVAL_MS = 15_000;
 
-  eventSocketServer.on("connection", (socket: WebSocket) => {
+  eventSocketServer.on("connection", (socket: WebSocket, request) => {
+    const connectionId = randomUUID();
+    writeCommunicationLog("Daemon event socket connected.", {
+      connectionId,
+      url: summarizeRequestUrl(request.url),
+      retainedEventCount: context.eventBus.getRetainedEvents().length
+    }, {
+      scope: "events.socket.connected"
+    });
     const sendEvent = (event: unknown) => {
       if (socket.readyState === socket.OPEN) {
         socket.send(JSON.stringify(event));
@@ -152,17 +174,51 @@ export function startServer(port = 4545) {
       cleanedUp = true;
       clearInterval(heartbeatTimer);
       unsubscribe();
+      writeCommunicationLog("Daemon event socket disconnected.", {
+        connectionId,
+        listenerCount: context.eventBus.listenerCount()
+      }, {
+        scope: "events.socket.disconnected"
+      });
     };
 
     socket.on("close", cleanup);
     socket.on("error", () => {
+      writeCommunicationLog("Daemon event socket errored.", {
+        connectionId
+      }, {
+        scope: "events.socket.error"
+      });
       cleanup();
     });
   });
 
   server = createServer(async (request, response) => {
+    const requestId = randomUUID();
+    const requestStartedAt = nowMs();
+    const requestPath = summarizeRequestUrl(request.url);
+    writeCommunicationLog("Daemon HTTP request started.", {
+      requestId,
+      method: request.method,
+      path: requestPath
+    }, {
+      scope: "http.request.start"
+    });
+    response.on("finish", () => {
+      writeCommunicationLog("Daemon HTTP request finished.", {
+        requestId,
+        method: request.method,
+        path: requestPath,
+        status: response.statusCode,
+        durationMs: nowMs() - requestStartedAt
+      }, {
+        scope: "http.request.finish"
+      });
+    });
+
     request.on("error", (error) => {
       void writeErrorLog("Incoming daemon request stream failed.", {
+        requestId,
         method: request.method,
         url: request.url,
         error: errorToLogDetails(error)
@@ -173,6 +229,7 @@ export function startServer(port = 4545) {
 
     if (!request.url || !request.method) {
       void writeErrorLog("ChillClaw daemon received a malformed request.", {
+        requestId,
         method: request.method,
         url: request.url
       }, {
@@ -219,6 +276,7 @@ export function startServer(port = 4545) {
       }
 
       void writeErrorLog("Daemon API route not found.", {
+        requestId,
         method: request.method,
         url: request.url
       }, {
@@ -228,6 +286,7 @@ export function startServer(port = 4545) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       void writeErrorLog("Daemon request failed.", {
+        requestId,
         method: request.method,
         url: request.url,
         error: errorToLogDetails(error)
@@ -262,6 +321,12 @@ export function startServer(port = 4545) {
         socket.destroy();
         return;
       }
+      writeCommunicationLog("Daemon event socket upgrade accepted.", {
+        method: request.method,
+        path: summarizeRequestUrl(request.url)
+      }, {
+        scope: "events.socket.upgrade"
+      });
 
       eventSocketServer.handleUpgrade(request, socket, head, (webSocket: WebSocket) => {
         eventSocketServer.emit("connection", webSocket, request);

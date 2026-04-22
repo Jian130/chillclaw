@@ -63,6 +63,46 @@ afterEach(async () => {
 });
 
 describe("daemon event client", () => {
+  it("logs browser event stream lifecycle and sanitized event summaries", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const events = await loadEventsModule();
+
+    const unsubscribe = events.subscribeToDaemonEvents(() => undefined);
+    FakeWebSocket.instances[0]?.emitOpen();
+    FakeWebSocket.instances[0]?.emitMessage(
+      JSON.stringify({
+        type: "channel.session.updated",
+        channelId: "wechat",
+        session: {
+          sessionId: "session-1",
+          channelId: "wechat",
+          status: "waiting",
+          message: "Scan QR with token sk-secret.",
+          logs: ["token sk-secret"]
+        }
+      })
+    );
+    FakeWebSocket.instances[0]?.emitClose();
+    unsubscribe();
+
+    expect(debug).toHaveBeenCalledWith("[ChillClaw communication]", "events.socket.connecting", {
+      url: "ws://127.0.0.1:4545/api/events"
+    });
+    expect(debug).toHaveBeenCalledWith("[ChillClaw communication]", "events.socket.open", {
+      url: "ws://127.0.0.1:4545/api/events"
+    });
+    expect(debug).toHaveBeenCalledWith("[ChillClaw communication]", "events.socket.message", {
+      eventType: "channel.session.updated",
+      channelId: "wechat"
+    });
+    expect(debug).toHaveBeenCalledWith("[ChillClaw communication]", "events.socket.close", {
+      shouldReconnect: true,
+      listenerCount: 1
+    });
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("sk-secret");
+  });
+
   it("decodes daemon WebSocket JSON messages", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const events = await loadEventsModule();

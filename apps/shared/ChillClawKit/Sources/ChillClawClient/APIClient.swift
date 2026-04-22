@@ -1,6 +1,8 @@
 import Foundation
 import ChillClawProtocol
 
+public typealias ChillClawCommunicationLogger = @Sendable (_ event: String, _ details: [String: String]) -> Void
+
 public struct ChillClawClientConfiguration: Sendable, Equatable {
     public var daemonURL: URL
     public var fallbackWebURL: URL
@@ -41,18 +43,22 @@ public final class ChillClawAPIClient: @unchecked Sendable {
     private let session: URLSession
     private let configurationProvider: @Sendable () async -> ChillClawClientConfiguration
     private let daemonEventStreamClient: ChillClawEventStreamClient
+    private let communicationLogger: ChillClawCommunicationLogger?
 
     public init(
         session: URLSession = .shared,
         configurationProvider: @escaping @Sendable () async -> ChillClawClientConfiguration,
-        daemonEventStreamFactory: ChillClawEventStreamClient.RawEventStreamFactory? = nil
+        daemonEventStreamFactory: ChillClawEventStreamClient.RawEventStreamFactory? = nil,
+        communicationLogger: ChillClawCommunicationLogger? = nil
     ) {
         self.session = session
         self.configurationProvider = configurationProvider
+        self.communicationLogger = communicationLogger
         self.daemonEventStreamClient = ChillClawEventStreamClient(
             session: session,
             configurationProvider: configurationProvider,
-            rawEventStreamFactory: daemonEventStreamFactory
+            rawEventStreamFactory: daemonEventStreamFactory,
+            communicationLogger: communicationLogger
         )
     }
 
@@ -405,6 +411,7 @@ public final class ChillClawAPIClient: @unchecked Sendable {
         guard let url = URL(string: path, relativeTo: config.daemonURL)?.absoluteURL else {
             throw ChillClawClientError.invalidResponse
         }
+        let startedAt = Date()
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -416,17 +423,60 @@ public final class ChillClawAPIClient: @unchecked Sendable {
             request.httpBody = try JSONEncoder.chillClaw.encode(body)
         }
 
-        let (data, response) = try await session.data(for: request)
+        logCommunication("api.request.start", [
+            "method": method,
+            "path": url.path + (url.query.map { "?\($0)" } ?? ""),
+            "hasBody": body == nil ? "false" : "true",
+            "timeout": timeout.map { String(Int($0)) } ?? ""
+        ])
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            logCommunication("api.request.failed", [
+                "method": method,
+                "path": url.path + (url.query.map { "?\($0)" } ?? ""),
+                "durationMs": String(Int(Date().timeIntervalSince(startedAt) * 1000)),
+                "error": String(describing: type(of: error))
+            ])
+            throw error
+        }
         guard let http = response as? HTTPURLResponse else {
+            logCommunication("api.request.failed", [
+                "method": method,
+                "path": url.path + (url.query.map { "?\($0)" } ?? ""),
+                "durationMs": String(Int(Date().timeIntervalSince(startedAt) * 1000)),
+                "error": "invalid-response"
+            ])
             throw ChillClawClientError.invalidResponse
         }
 
         guard (200 ..< 300).contains(http.statusCode) else {
             let message = (try? JSONDecoder.chillClaw.decode(ErrorPayload.self, from: data).error) ?? "Unknown error"
+            logCommunication("api.request.failed", [
+                "method": method,
+                "path": url.path + (url.query.map { "?\($0)" } ?? ""),
+                "status": String(http.statusCode),
+                "durationMs": String(Int(Date().timeIntervalSince(startedAt) * 1000)),
+                "message": message
+            ])
             throw ChillClawClientError.server(status: http.statusCode, message: message)
         }
 
-        return try JSONDecoder.chillClaw.decode(T.self, from: data)
+        let decoded = try JSONDecoder.chillClaw.decode(T.self, from: data)
+        logCommunication("api.request.done", [
+            "method": method,
+            "path": url.path + (url.query.map { "?\($0)" } ?? ""),
+            "status": String(http.statusCode),
+            "durationMs": String(Int(Date().timeIntervalSince(startedAt) * 1000))
+        ])
+        return decoded
+    }
+
+    private func logCommunication(_ event: String, _ details: [String: String]) {
+        communicationLogger?(event, details)
     }
 }
 

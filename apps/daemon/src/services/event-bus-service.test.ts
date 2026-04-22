@@ -39,6 +39,51 @@ test("event bus delivers typed events to multiple subscribers", async () => {
   assert.equal(bus.listenerCount(), 1);
 });
 
+test("event bus writes compact communication logs for subscribe, publish, and unsubscribe", () => {
+  const entries: Array<{ message: string; details?: unknown; scope?: string }> = [];
+  const bus = new EventBusService((message, details, metadata) => {
+    entries.push({ message, details, scope: metadata?.scope });
+  });
+
+  const unsubscribe = bus.subscribe(() => undefined);
+  bus.publish({
+    type: "operation.updated",
+    operation: {
+      epoch: "operations-test",
+      revision: 7,
+      data: {
+        operationId: "onboarding:model",
+        scope: "onboarding",
+        action: "onboarding-model-save",
+        status: "running",
+        phase: "saving-model",
+        message: "Saving model credentials with token sk-secret.",
+        startedAt: "2026-04-21T00:00:00.000Z",
+        updatedAt: "2026-04-21T00:00:01.000Z"
+      }
+    }
+  });
+  unsubscribe();
+
+  assert.deepEqual(entries.map((entry) => entry.scope), [
+    "communication.eventBus.subscribe",
+    "communication.eventBus.publish",
+    "communication.eventBus.unsubscribe"
+  ]);
+  assert.deepEqual(entries[1]?.details, {
+    eventType: "operation.updated",
+    listenerCount: 1,
+    retained: true,
+    operationId: "onboarding:model",
+    operationScope: "onboarding",
+    operationAction: "onboarding-model-save",
+    operationStatus: "running",
+    operationPhase: "saving-model",
+    revision: 7
+  });
+  assert.doesNotMatch(JSON.stringify(entries), /sk-secret/);
+});
+
 test("event bus retains the latest downloads snapshot for late subscribers", () => {
   const bus = new EventBusService();
 

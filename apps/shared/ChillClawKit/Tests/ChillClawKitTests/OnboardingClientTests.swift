@@ -7,6 +7,7 @@ import Testing
 struct OnboardingClientTests {
     @Test
     func pingUsesShortStartupTimeoutBeforeDaemonLaunch() async throws {
+        let logs = ClientLockedSyncValue<[(String, [String: String])]>([])
         let recorder = RequestRecorder()
         let session = await recorder.session(
             statusCode: 200,
@@ -23,6 +24,11 @@ struct OnboardingClientTests {
                     daemonURL: URL(string: "http://127.0.0.1:4545")!,
                     fallbackWebURL: URL(string: "http://127.0.0.1:4545/")!
                 )
+            },
+            communicationLogger: { event, details in
+                logs.withLock { value in
+                    value.append((event, details))
+                }
             }
         )
 
@@ -31,6 +37,11 @@ struct OnboardingClientTests {
         #expect(request.httpMethod == "GET")
         #expect(request.url?.absoluteString == "http://127.0.0.1:4545/api/ping")
         #expect(request.timeoutInterval == 2)
+        let recordedLogs = logs.withLock { $0 }
+        #expect(recordedLogs.map(\.0) == ["api.request.start", "api.request.done"])
+        #expect(recordedLogs.first?.1["method"] == "GET")
+        #expect(recordedLogs.first?.1["path"] == "/api/ping")
+        #expect(recordedLogs.last?.1["status"] == "200")
     }
 
     @Test
@@ -1305,4 +1316,19 @@ private final class RecordingURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+}
+
+private final class ClientLockedSyncValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<T>(_ update: (inout Value) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return update(&value)
+    }
 }

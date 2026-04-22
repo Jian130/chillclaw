@@ -12,6 +12,9 @@ export type LogMetadata = {
   scope?: string;
 };
 
+const MAX_COMMUNICATION_STRING_LENGTH = 200;
+const SENSITIVE_KEY_PATTERN = /(?:authorization|api[-_]?key|secret|password|token|credential|sessionInput|qr|cookie)/iu;
+
 function timestampPrefix(): string {
   return new Date().toISOString();
 }
@@ -47,6 +50,83 @@ export async function writeInfoLog(message: string, details?: unknown, metadata?
   } catch {
     // Logging must never crash the app.
   }
+}
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY_PATTERN.test(key);
+}
+
+function truncateCommunicationString(value: string): string {
+  if (value.length <= MAX_COMMUNICATION_STRING_LENGTH) {
+    return value;
+  }
+
+  return `${value.slice(0, MAX_COMMUNICATION_STRING_LENGTH)}…`;
+}
+
+function sanitizeUrl(value: string): string {
+  try {
+    const url = new URL(value, "http://127.0.0.1");
+    let changed = false;
+    for (const key of [...url.searchParams.keys()]) {
+      if (isSensitiveKey(key)) {
+        url.searchParams.set(key, "[REDACTED]");
+        changed = true;
+      }
+    }
+
+    const rendered = value.startsWith("http://") || value.startsWith("https://")
+      ? url.toString()
+      : `${url.pathname}${url.search}${url.hash}`;
+    return truncateCommunicationString(changed ? rendered : value);
+  } catch {
+    return truncateCommunicationString(value);
+  }
+}
+
+export function sanitizeCommunicationDetails(details: unknown): unknown {
+  if (details === null || details === undefined) {
+    return details;
+  }
+
+  if (typeof details === "string") {
+    return truncateCommunicationString(details);
+  }
+
+  if (typeof details !== "object") {
+    return details;
+  }
+
+  if (Array.isArray(details)) {
+    return details.map((entry) => sanitizeCommunicationDetails(entry));
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (isSensitiveKey(key)) {
+      sanitized[key] = "[REDACTED]";
+      continue;
+    }
+
+    if ((key === "url" || key === "path") && typeof value === "string") {
+      sanitized[key] = sanitizeUrl(value);
+      continue;
+    }
+
+    sanitized[key] = sanitizeCommunicationDetails(value);
+  }
+
+  return sanitized;
+}
+
+export function writeCommunicationLog(message: string, details?: unknown, metadata?: LogMetadata): void {
+  const scope = metadata?.scope?.startsWith("communication.")
+    ? metadata.scope
+    : metadata?.scope ? `communication.${metadata.scope}` : "communication";
+  void writeInfoLog(message, sanitizeCommunicationDetails(details), {
+    ...metadata,
+    scope
+  });
 }
 
 export function shouldLogDevelopmentCommands(): boolean {

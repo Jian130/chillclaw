@@ -5,10 +5,13 @@ import type {
 } from "@chillclaw/contracts";
 
 import { EventPublisher } from "./event-publisher.js";
+import { type CommunicationLogWriter } from "./event-bus-service.js";
+import { writeCommunicationLog } from "./logger.js";
 import { OperationStore } from "./operation-store.js";
 
 export interface OperationRunnerOptions {
   now?: () => string;
+  communicationLogger?: CommunicationLogWriter;
 }
 
 export interface StartOperationRequest {
@@ -43,6 +46,7 @@ function failureMessage(operation: OperationSummary): string {
 export class OperationRunner {
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly now: () => string;
+  private readonly communicationLogger: CommunicationLogWriter;
 
   constructor(
     private readonly operations: OperationStore,
@@ -50,12 +54,14 @@ export class OperationRunner {
     options?: OperationRunnerOptions
   ) {
     this.now = options?.now ?? defaultNow;
+    this.communicationLogger = options?.communicationLogger ?? writeCommunicationLog;
   }
 
   async startOrResume(request: StartOperationRequest, worker: OperationWorker): Promise<OperationCommandResponse> {
     const existing = await this.operations.read(request.operationId);
 
     if (existing && (ACTIVE_OPERATION_STATUSES.has(existing.status) || this.inFlight.has(request.operationId))) {
+      this.logOperation("resume", existing);
       return {
         operation: existing,
         accepted: true,
@@ -79,6 +85,7 @@ export class OperationRunner {
     };
 
     await this.operations.create(operation);
+    this.logOperation("start", operation);
     this.publisher.publishOperationUpdated(operation);
     this.scheduleWorker(operation, worker);
 
@@ -121,6 +128,7 @@ export class OperationRunner {
         throw new Error(`Operation ${operation.operationId} no longer exists.`);
       }
       latest = updated;
+      this.logOperation("update", updated);
       this.publisher.publishOperationUpdated(updated);
       return updated;
     };
@@ -136,6 +144,7 @@ export class OperationRunner {
         status: "completed"
       });
       if (completed) {
+        this.logOperation("completed", completed);
         this.publisher.publishOperationCompleted(completed);
       }
     } catch (error) {
@@ -146,8 +155,22 @@ export class OperationRunner {
         updatedAt: this.now()
       });
       if (failed) {
+        this.logOperation("failed", failed, error);
         this.publisher.publishOperationCompleted(failed);
       }
     }
+  }
+
+  private logOperation(phase: "start" | "resume" | "update" | "completed" | "failed", operation: OperationSummary, error?: unknown): void {
+    this.communicationLogger(`Daemon operation ${phase}.`, {
+      operationId: operation.operationId,
+      scope: operation.scope,
+      action: operation.action,
+      status: operation.status,
+      phase: operation.phase,
+      ...(error instanceof Error ? { errorName: error.name } : {})
+    }, {
+      scope: `communication.operation.${phase}`
+    });
   }
 }

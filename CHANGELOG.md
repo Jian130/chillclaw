@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.2.8 - 2026-04-22
+
+### 2026-04-22 14:46 CST
+
+- added sanitized communication logs across daemon HTTP handling, daemon WebSocket event streams, event bus publishing, and async operation lifecycle transitions
+- added React client API and daemon event stream debug logs for request, response, failure, connection, message, and reconnect lifecycle debugging
+- added shared Swift client communication logging and wired the native macOS app to emit compact transport diagnostics for API and event stream activity
+- added regression coverage to keep communication logs structured, compact, and redacted for API keys, tokens, credentials, auth headers, query secrets, and oversized payload strings
+- bumped ChillClaw package metadata and internal workspace package versions to 0.2.8 for the communication logging release tag
+
 ## 0.2.7 - 2026-04-21
 
 ### 2026-04-21 21:05 CST

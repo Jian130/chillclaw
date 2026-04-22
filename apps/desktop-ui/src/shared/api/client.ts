@@ -92,6 +92,8 @@ const REQUEST_TIMEOUT_MS = {
   runtimeInstall: 86_400_000
 };
 
+const COMMUNICATION_LOG_PREFIX = "[ChillClaw communication]";
+
 type JsonRequestInit = RequestInit & {
   fresh?: boolean;
   timeoutMs?: number;
@@ -146,6 +148,18 @@ function buildApiPath(path: string, fresh?: boolean): string {
   return `${path}${path.includes("?") ? "&" : "?"}fresh=1`;
 }
 
+function logCommunication(event: string, details: Record<string, unknown>) {
+  if (typeof console === "undefined" || typeof console.debug !== "function") {
+    return;
+  }
+
+  console.debug(COMMUNICATION_LOG_PREFIX, event, details);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function performJsonRequest<T>(path: string, init?: JsonRequestInit): Promise<T> {
   const timeoutMs = init?.timeoutMs;
   const timeoutBudgetMs = timeoutMs && timeoutMs > 0 ? timeoutMs : undefined;
@@ -156,6 +170,17 @@ async function performJsonRequest<T>(path: string, init?: JsonRequestInit): Prom
   const requestInit = { ...init };
   delete requestInit.fresh;
   delete requestInit.timeoutMs;
+  const method = (requestInit.method ?? "GET").toUpperCase();
+  const startedAt = Date.now();
+  const requestLogDetails = {
+    method,
+    path,
+    hasBody: requestInit.body !== undefined,
+    fresh: init?.fresh === true,
+    timeoutMs: timeoutBudgetMs
+  };
+
+  logCommunication("api.request.start", requestLogDetails);
 
   if (controller && timeoutBudgetMs) {
     const activeTimeoutMs = timeoutBudgetMs;
@@ -185,6 +210,13 @@ async function performJsonRequest<T>(path: string, init?: JsonRequestInit): Prom
       signal: controller?.signal ?? requestInit.signal
     });
   } catch (error) {
+    const message = timedOut && timeoutBudgetMs ? new ApiRequestTimeoutError(timeoutBudgetMs).message : errorMessage(error);
+    logCommunication("api.request.failed", {
+      method,
+      path,
+      durationMs: Date.now() - startedAt,
+      message
+    });
     if (timedOut && timeoutBudgetMs) {
       throw new ApiRequestTimeoutError(timeoutBudgetMs);
     }
@@ -210,10 +242,24 @@ async function performJsonRequest<T>(path: string, init?: JsonRequestInit): Prom
       // Keep status message fallback.
     }
 
+    logCommunication("api.request.failed", {
+      method,
+      path,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      message
+    });
     throw new Error(message);
   }
 
-  return (await response.json()) as T;
+  const value = (await response.json()) as T;
+  logCommunication("api.request.done", {
+    method,
+    path,
+    status: response.status,
+    durationMs: Date.now() - startedAt
+  });
+  return value;
 }
 
 async function readJson<T>(path: string, init?: JsonRequestInit): Promise<T> {

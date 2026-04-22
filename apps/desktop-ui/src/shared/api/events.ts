@@ -21,6 +21,7 @@ type StateListener = (state: DaemonEventTransportState) => void;
 
 const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 const EVENT_STREAM_STALE_MS = 45_000;
+const COMMUNICATION_LOG_PREFIX = "[ChillClaw communication]";
 
 const eventListeners = new Set<EventListener>();
 const errorListeners = new Set<ErrorListener>();
@@ -36,6 +37,58 @@ const lastSeenByResource = new Map<string, DaemonResourceRevisionState>();
 
 function buildEventSocketUrl() {
   return resolveApiBase().replace(/^http/i, "ws") + "/events";
+}
+
+function logCommunication(event: string, details: Record<string, unknown>) {
+  if (typeof console === "undefined" || typeof console.debug !== "function") {
+    return;
+  }
+
+  console.debug(COMMUNICATION_LOG_PREFIX, event, details);
+}
+
+function eventCommunicationSummary(event: ChillClawEvent): Record<string, unknown> {
+  switch (event.type) {
+    case "overview.updated":
+    case "ai-team.updated":
+    case "model-config.updated":
+    case "channel-config.updated":
+    case "skill-catalog.updated":
+    case "plugin-config.updated":
+    case "preset-skill-sync.updated":
+    case "downloads.updated":
+      return {
+        eventType: event.type,
+        revision: event.snapshot.revision,
+        epoch: event.snapshot.epoch
+      };
+    case "operation.updated":
+    case "operation.completed":
+      return {
+        eventType: event.type,
+        operationId: event.operation.data.operationId,
+        operationScope: event.operation.data.scope,
+        operationAction: event.operation.data.action,
+        operationStatus: event.operation.data.status,
+        operationPhase: event.operation.data.phase,
+        revision: event.operation.revision
+      };
+    case "channel.session.updated":
+      return {
+        eventType: event.type,
+        channelId: event.channelId
+      };
+    case "chat.stream":
+      return {
+        eventType: event.type,
+        threadId: event.threadId,
+        payloadType: event.payload.type
+      };
+    default:
+      return {
+        eventType: event.type
+      };
+  }
 }
 
 function currentState(): DaemonEventTransportState {
@@ -151,11 +204,14 @@ function ensureSocket() {
   }
 
   setConnectionState(connectionState === "connected" ? "reconnecting" : "connecting");
-  const socket = new WebSocket(buildEventSocketUrl());
+  const url = buildEventSocketUrl();
+  logCommunication("events.socket.connecting", { url });
+  const socket = new WebSocket(url);
   activeSocket = socket;
 
   socket.onopen = () => {
     if (activeSocket === socket) {
+      logCommunication("events.socket.open", { url });
       setConnectionState("connected");
       markStreamActivity(socket);
     }
@@ -168,16 +224,23 @@ function ensureSocket() {
       if (payload.type === "daemon.heartbeat") {
         return;
       }
+      logCommunication("events.socket.message", eventCommunicationSummary(payload));
       updateResourceRevision(payload);
       for (const listener of [...eventListeners]) {
         listener(payload);
       }
-    } catch {
+    } catch (error) {
+      logCommunication("events.socket.malformed-message", {
+        message: error instanceof Error ? error.message : String(error)
+      });
       // Ignore malformed events and keep the stream alive.
     }
   };
 
   socket.onerror = (event) => {
+    logCommunication("events.socket.error", {
+      listenerCount: eventListeners.size
+    });
     setConnectionState("error", "The event stream encountered an error.");
     for (const listener of [...errorListeners]) {
       listener(event);
@@ -185,6 +248,10 @@ function ensureSocket() {
   };
 
   socket.onclose = () => {
+    logCommunication("events.socket.close", {
+      shouldReconnect,
+      listenerCount: eventListeners.size
+    });
     if (activeSocket === socket) {
       activeSocket = null;
     }
